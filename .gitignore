@@ -1,0 +1,6 @@
+.claude/
+checkpoints/
+test_outputs/
+Grounded-SAM-2/
+*.pyc
+__pycache__/

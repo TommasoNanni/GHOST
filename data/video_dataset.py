@@ -57,7 +57,7 @@ class Video:
         # (important for DataLoader with num_workers > 0).
         vr = self._make_reader()
         self.num_frames: int = len(vr)
-        self.shift = None
+        self.shift: int | None = None
         self.fps: float = float(vr.get_avg_fps())
         # Get resolution from container metadata — no frame decoding needed.
         self.original_w, self.original_h = vr[0].shape[1], vr[0].shape[0]
@@ -237,10 +237,12 @@ class EgoExoSceneDataset(Dataset):
         resolution: tuple[int, int] | None = None,
         video_extensions: tuple[str, ...] = (".mp4", ".mkv", ".avi"),
         slice: int | None = None,
+        exclude_ego: bool = True,
     ):
         self.data_root = Path(data_root)
         self.resolution = resolution
         self.video_extensions = video_extensions
+        self.exclude_ego = exclude_ego
 
         # Discover scene directories and build Scene objects up front.
         scene_dirs = sorted(
@@ -260,6 +262,7 @@ class EgoExoSceneDataset(Dataset):
             videos = [
                 Video(p, resolution=self.resolution)
                 for p in self._list_videos(scene_dir)
+                if not (self.exclude_ego and p.stem.startswith("aria")) and not p.stem.startswith("ego_preview")
             ]
             self.scenes.append(Scene(scene_id=scene_dir.name, videos=videos))
 
@@ -292,7 +295,7 @@ class EgoExoSceneDataset(Dataset):
 
 if __name__ =="__main__":
     path = "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
-    video_ds = EgoExoSceneDataset(path, slice=50)
+    video_ds = EgoExoSceneDataset(path, slice=5)
     print(f"Found {len(video_ds)} scenes: {video_ds.get_scene_ids()}")
 
     scene = video_ds[0]
