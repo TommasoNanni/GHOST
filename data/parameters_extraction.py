@@ -1,15 +1,20 @@
 """SAM3D Body estimation for tracked persons in multi-view scenes.
 
-Wraps :class:`PersonSegmenter` (segmentation & tracking) and adds per-frame
-3D body model estimation via SAM3D Body, with optional temporal smoothing.
+Reads pre-existing segmentation output (frames, masks, JSON metadata) and
+runs per-frame 3D body model estimation via SAM3D Body, with optional
+temporal smoothing.
 
-Output layout (additions to existing segmentation output)::
+Expected input layout (produced by :class:`PersonSegmenter`)::
 
     output_dir/<scene_id>/<video_id>/
-        frames/          (existing)
-        mask_data/       (existing)
-        json_data/       (existing)
-        body_data/                          <- NEW
+        frames/          extracted JPEGs
+        mask_data/       .npy uint16 masks
+        json_data/       .json per-frame instance metadata
+
+Output (added to existing directories)::
+
+    output_dir/<scene_id>/<video_id>/
+        body_data/
             person_<id>.npz                 <- per-person body params across frames
             body_params_summary.json        <- metadata
 """
@@ -26,9 +31,11 @@ import cv2
 import numpy as np
 import torch
 from tqdm import tqdm
+import smplx
 
-from data.segmentation import PersonSegmenter
 from data.video_dataset import Scene, Video
+from mhr.mhr import MHR
+from conversion import Conversion
 
 
 # ======================================================================
@@ -92,12 +99,12 @@ class OneEuroFilter:
         return x_hat
 
 
-class ParameterEstimator:
-    """Segment + track people, then estimate 3D body parameters.
+class BodyParameterEstimator:
+    """Estimate 3D body parameters for tracked persons.
 
-    This class wraps :class:`PersonSegmenter` for detection/segmentation
-    and adds per-frame SAM3D Body estimation on each person crop, with
-    optional temporal smoothing via one-euro filtering.
+    Reads pre-existing segmentation output and runs SAM3D Body on each
+    detected person crop, with optional temporal smoothing via one-euro
+    filtering.  Does **not** perform segmentation itself.
 
     Parameters
     ----------
@@ -111,8 +118,6 @@ class ParameterEstimator:
         One-euro filter parameters: ``{min_cutoff, beta, d_cutoff}``.
     bbox_padding : float
         Fractional padding around bounding boxes for person crops.
-    **segmenter_kwargs
-        Forwarded to :class:`PersonSegmenter`.
     """
 
     # Keys from SAM3D output that we store as arrays.
@@ -148,9 +153,9 @@ class ParameterEstimator:
         smooth: bool = False,
         smooth_params: dict | None = None,
         bbox_padding: float = 0.2,
-        **segmenter_kwargs,
+        smplx_model_path: str | None = None,
+        mhr_model_path: str | None = None,
     ):
-        self._segmenter = PersonSegmenter(**segmenter_kwargs)
         self.sam3d_hf_repo = sam3d_hf_repo
         self.sam3d_step = sam3d_step
         self.smooth = smooth
@@ -160,8 +165,11 @@ class ParameterEstimator:
             "d_cutoff": 1.0,
         }
         self.bbox_padding = bbox_padding
+        self.smplx_model_path = smplx_model_path
+        self.mhr_model_path = mhr_model_path
 
         self._estimator = None
+        self._converter = None
 
     def _init_sam3d(self) -> None:
         """Lazy-load the SAM3D Body estimator."""
@@ -177,39 +185,28 @@ class ParameterEstimator:
         self._estimator = setup_sam_3d_body(hf_repo_id=self.sam3d_hf_repo)
         print(f"SAM3D Body loaded from {self.sam3d_hf_repo}")
 
-    def segment_scene_extract_parameters(
+    def estimate_scene(
         self,
         scene: Scene,
-        output_dir: str | Path,
-        vis: bool = False,
-        match_across_videos: bool = True,
-    ) -> dict[str, Path]:
-        """Segment scene and estimate body parameters for each person.
+        video_dirs: dict[str, Path],
+    ) -> None:
+        """Run SAM3D Body estimation on pre-segmented scene data.
 
         Parameters
         ----------
-        scene, output_dir, vis, match_across_videos
-            See :meth:`PersonSegmenter.segment_scene`.
-
-        Returns
-        -------
-        dict mapping ``video_id`` -> ``Path`` to that video's output folder.
+        scene : Scene
+            The scene whose videos to process.
+        video_dirs : dict[str, Path]
+            Mapping of ``video_id`` -> output directory (as returned by
+            :meth:`PersonSegmenter.segment_scene`).  Each directory must
+            contain ``frames/``, ``json_data/``, and ``mask_data/`` subdirs.
         """
-        # 1. Run segmentation + cross-video matching.
-        video_dirs = self._segmenter.segment_scene(
-            scene, output_dir, vis=vis,
-            match_across_videos=match_across_videos,
-        )
-
-        # 2. Run SAM3D Body on each video.
         self._init_sam3d()
         for video in tqdm(scene.videos, desc="SAM3D Body estimation"):
             video_dir = video_dirs[video.video_id]
             self._estimate_bodies(video, video_dir)
             gc.collect()
             torch.cuda.empty_cache()
-
-        return video_dirs
 
     def _estimate_bodies(self, video: Video, video_dir: Path) -> None:
         """Run SAM3D Body on person crops for a single video."""
@@ -248,10 +245,11 @@ class ParameterEstimator:
             # Load the frame image.
             frame_path = frame_dir / f"{frame_idx_str}.jpg"
             if not frame_path.exists():
-                logging.warning(f"Frame image not found for frame {frame_idx} in video {video.video_id}: {frame_path}")
+                logging.warning(f"Frame image not found for frame {frame_idx} in video {video.video_id} at path {frame_path}")
                 continue
             frame_bgr = cv2.imread(str(frame_path))
             if frame_bgr is None:
+                logging.warning(f"Unable to read image {frame_idx} for video {video.video_id}")
                 continue
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             img_h, img_w = frame_rgb.shape[:2]
@@ -263,6 +261,7 @@ class ParameterEstimator:
                 # Skip tiny boxes.
                 bw, bh = x2 - x1, y2 - y1
                 if bw < 10 or bh < 10:
+                    logging.warning(f"Person {str_id} in video {video.video_id} had too small bounding box, skipping")
                     continue
 
                 # Pad and clamp the crop.
@@ -281,7 +280,7 @@ class ParameterEstimator:
                 try:
                     outputs = self._estimator.process_one_image(crop)
                 except Exception as e:
-                    logging.warning(f"    SAM3D failed frame {frame_idx} person {person_id}: {e}")
+                    logging.warning(f"    SAM3D failed on frame {frame_idx} for person {person_id}: {e}")
                     continue
 
                 if not outputs:
@@ -321,7 +320,7 @@ class ParameterEstimator:
         outputs: list[dict],
         target_bbox: tuple[int, int, int, int],
     ) -> dict | None:
-        """Pick the SAM3D detection best matching *target_bbox* (IoU)."""
+        """Pick the SAM3D detection best matching target_bbox (IoU)."""
         if len(outputs) == 1:
             return outputs[0]
 
@@ -475,3 +474,37 @@ class ParameterEstimator:
             f"  {video_id}: saved body data for {len(summary['persons'])} "
             f"persons ({total_frames} total frame estimates) -> {body_dir}"
         )
+
+    def convert_hmr_to_smplx(self, sam3d_outputs):
+        """Convert HMR parameters to SMPLX parameters"""
+        mhr_model = MHR.from_files(
+            model_path = self.mhr_model_path,
+            lod = 1, device = self.device,
+        )
+        smplx_model = smplx.create(
+            model_path = self.smplx_model_path,
+            model_type = 'smplx',
+            gender = 'neutral',
+            use_pca = False,
+            batch_size = 1,
+        ).to(self_device)
+
+        # Launch the converter
+        converter = Conversion(
+            mhr_model = mhr_model,
+            smpl_model = smplx_model,
+            method = "pytorch",
+        )
+
+        results = converter.convert_sam3d_output_to_smpl(
+            sam3d_outputs = sam3d_outputs,
+            return_smpl_meshes=True,
+            return_smpl_parameters=True,
+            return_smpl_vertices=True,
+            return_fitting_errors=True,
+        )
+
+        raise ValueError("Find a way to save these based on what it outputs")
+
+
+

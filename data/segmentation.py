@@ -205,6 +205,9 @@ class PersonSegmenter:
         objects_count: int = 0,
     ) -> dict:
         """Run the full GDINO + SAM2 pipeline on a single video."""
+
+        # Create output folders
+
         output_dir.mkdir(parents=True, exist_ok=True)
         mask_data_dir = output_dir / "mask_data"
         json_data_dir = output_dir / "json_data"
@@ -214,6 +217,11 @@ class PersonSegmenter:
         # SAM2 requires a directory of numbered JPEGs.
         frame_dir = output_dir / "frames"
         frame_names = self._extract_frames(video, frame_dir)
+
+        # Initialize the video predictor
+        # We don't predict again people at every frame, we predict every 
+        # step frames, and propagate to the remaining frames using
+        # SAM2's video predictor
 
         inference_state = self._video_predictor.init_state(
             video_path=str(frame_dir),
@@ -245,6 +253,8 @@ class PersonSegmenter:
             with torch.no_grad():
                 outputs = self._gdino_model(**inputs)
 
+            # Predict the boxes for people in the rooted frames
+
             results = self._gdino_processor.post_process_grounded_object_detection(
                 outputs,
                 inputs.input_ids,
@@ -257,7 +267,7 @@ class PersonSegmenter:
             labels = results[0]["labels"]
 
             if input_boxes.shape[0] != 0:
-                # ---- SAM2 image predictor ----
+                # Now that we detected people, we just extract the masks for them
                 self._image_predictor.set_image(np.array(image.convert("RGB")))
                 masks, scores, logits = self._image_predictor.predict(
                     point_coords=None,

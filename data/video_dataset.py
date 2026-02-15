@@ -30,7 +30,7 @@ from decord import VideoReader, cpu
 
 
 # ======================================================================
-# Video — thin wrapper around a single .mp4 on disk
+# Video — wrapper around a single .mp4 on disk
 # ======================================================================
 
 class Video:
