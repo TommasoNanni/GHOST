@@ -6,12 +6,15 @@ sys.path.append(str(Path(__file__).parent / 'MHR' / 'tools' / 'mhr_smpl_conversi
 
 import argparse
 import logging
+import numpy as np
+import torch
 from tqdm import tqdm
 from collections import defaultdict
 
 from data.video_dataset import Video, Scene, EgoExoSceneDataset
 from data.segmentation import PersonSegmenter
 from data.parameters_extraction import BodyParameterEstimator
+from synchronize_videos.synchronizer import Synchronizer
 
 
 def parse_args():
@@ -82,6 +85,29 @@ def main(args):
             scene = scene,
             video_dirs = video_dir_dict,
         )
+
+
+    # Temporally align the videos
+    synchronizer = Synchronizer(device=args.device)
+    for scene in tqdm(dataset.scenes, desc="Synchronizing scenes"):
+        video_dir_dict = scene_directories[scene.scene_id]
+
+        # Load per-video joints and confidences for a chosen person
+        body_joints_list, confidences_list = load_body_data(
+            scene, video_dir_dict, person_id=0, device=args.device,
+        )
+        if len(body_joints_list) < 2:
+            logging.warning(f"Scene {scene.scene_id}: fewer than 2 videos with body data, skipping")
+            continue
+
+        offset_matrix = synchronizer.estimate_offset_matrix(body_joints_list, confidences_list)
+        initial_times = synchronizer.estimate_initial_times(offset_matrix)
+
+        logging.info(f"Scene {scene.scene_id} offsets (frames): {initial_times.cpu().tolist()}")
+
+        # Apply the estimated offsets to the videos
+        for video, t0 in zip(scene.videos, initial_times.cpu().tolist()):
+            video.estimated_start = int(round(t0))
 
     return
 
