@@ -1,0 +1,42 @@
+[workspace]
+channels = ["conda-forge", "nvidia"]
+platforms = ["linux-64"]
+name = "ghost"
+
+[system-requirements]
+cuda = "12.6"
+
+[dependencies]
+python = "3.12.*"
+# pymomentum from conda-forge; it will pull in a CPU pytorch as its conda dep.
+# The actual CUDA pytorch is installed afterwards via the `setup-cuda` task.
+pymomentum = ">=0.1.90"
+pip = "*"
+numpy = ">=1.24.4"
+tqdm = ">=4.66.1"
+pillow = ">=9.4.0"
+
+[pypi-options]
+# SAM-2 and groundingdino import torch at build time; build them inside the
+# conda env (where conda's torch is already present) rather than in isolation.
+no-build-isolation = ["groundingdino", "SAM-2"]
+
+[pypi-dependencies]
+"SAM-2" = {path = "Grounded-SAM-2", editable = true}
+groundingdino = {path = "Grounded-SAM-2/grounding_dino", editable = true}
+transformers = ">=4.0"
+addict = "*"
+yapf = "*"
+timm = "*"
+opencv-python = "*"
+supervision = ">=0.22.0"
+pycocotools = "*"
+hydra-core = ">=1.3.2"
+iopath = ">=0.1.10"
+
+[tasks]
+# Replaces the conda CPU-only torch with a CUDA 12.6 build from PyTorch's index.
+# Run this once after `pixi install`: pixi run setup-cuda
+# Installs the CUDA 12.6 build of the SAME torch version that pymomentum depends on
+# (currently 2.7.1). Same version = ABI-compatible, so pymomentum keeps working.
+setup-cuda = "python -m pip install --force-reinstall 'torch==2.7.1+cu126' 'torchvision==0.22.1+cu126' --index-url https://download.pytorch.org/whl/cu126"

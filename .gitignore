@@ -6,3 +6,4 @@ Grounded-SAM-2/
 __pycache__/
 MHR/
 body_models/
+.pixi/
