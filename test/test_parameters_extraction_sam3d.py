@@ -14,7 +14,7 @@ from data.parameters_extraction import BodyParameterEstimator
 
 def main():
     data_root = "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
-    output_dir = "/cluster/project/cvg/students/tnanni/Thesis/test_outputs/sam3d_test"
+    output_dir = "/cluster/project/cvg/students/tnanni/ghost/test_outputs/segmentation_test"
 
     # Load dataset (1 scene for testing)
     ds = EgoExoSceneDataset(data_root, slice=1)
@@ -29,7 +29,7 @@ def main():
     video_dirs = segmenter.segment_scene(
         scene=scene,
         output_dir=output_dir,
-        vis=True,
+        vis=False,
         match_across_videos=True,
     )
     print(f"\nSegmentation output dirs:")

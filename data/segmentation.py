@@ -160,7 +160,7 @@ class PersonSegmenter:
 
         Parameters
         ----------
-        scene : Scene
+        scene : Scenep
             Scene containing one or more :class:`Video` objects.
         output_dir : str | Path
             Root directory where results are written.
@@ -189,10 +189,17 @@ class PersonSegmenter:
 
         # Build worker arguments — each video gets a GPU (round-robin)
         # and a large ID offset so person IDs don't collide.
+        video_results: dict[str, dict] = {}
         worker_args = []
         for vi, video in enumerate(scene.videos):
-            gpu_id = vi % num_gpus
             vid_out = scene_dir / video.video_id
+            if PersonSegmenter._is_segmented(vid_out):
+                print(f"  {video.video_id}: already segmented, loading cached data")
+                video_results[video.video_id] = PersonSegmenter._load_cached_result(
+                    vid_out, video.video_id
+                )
+                continue
+            gpu_id = vi % num_gpus
             worker_args.append((
                 gpu_id,
                 str(video.path),
@@ -208,24 +215,24 @@ class PersonSegmenter:
                 self.detection_step,
             ))
 
-        # Free the main-process models before spawning children
-        self._free_models()
+        newly_segmented = bool(worker_args)
+        if newly_segmented:
+            # Free the main-process models before spawning children
+            self._free_models()
 
-        mp.set_start_method("spawn", force=True)
-        with mp.Pool(processes=min(num_gpus, num_videos)) as pool:
-            results = pool.starmap(PersonSegmenter._segment_video_on_gpu, worker_args)
+            mp.set_start_method("spawn", force=True)
+            with mp.Pool(processes=min(num_gpus, len(worker_args))) as pool:
+                results = pool.starmap(PersonSegmenter._segment_video_on_gpu, worker_args)
 
-        # Rebuild video_results from worker outputs, now everything returns sequential
-        video_results: dict[str, dict] = {}
-        for r in results:
-            video_results[r["video_id"]] = r
+            for r in results:
+                video_results[r["video_id"]] = r
 
-        # --- compact per-frame .npy files into a single compressed .npz ---
-        for video in scene.videos:
-            PersonSegmenter._compact_mask_data(scene_dir / video.video_id)
+            # --- compact per-frame .npy files into a single compressed .npz ---
+            for video in scene.videos:
+                PersonSegmenter._compact_mask_data(scene_dir / video.video_id)
 
         # --- cross-video ID matching (reads from .npz) ---
-        if match_across_videos and len(scene.videos) > 1:
+        if newly_segmented and match_across_videos and len(scene.videos) > 1:
             id_mapping = self._match_across_videos(
                 scene, video_results, scene_dir
             )
@@ -261,30 +268,40 @@ class PersonSegmenter:
         objects_count_start: int = 0,
     ) -> dict[str, Path]:
         """Original sequential fallback for single-GPU environments."""
-        if not self._models_ready:
-            self._init_models()
-
         scene_dir = Path(output_dir) / scene.scene_id
         scene_dir.mkdir(parents=True, exist_ok=True)
 
         video_results: dict[str, dict] = {}
         global_objects_count = objects_count_start
+        newly_segmented = False
 
         for video in tqdm(scene.videos, desc=f"Segmenting {scene.scene_id}"):
             vid_out = scene_dir / video.video_id
+            if PersonSegmenter._is_segmented(vid_out):
+                print(f"  {video.video_id}: already segmented, loading cached data")
+                result = PersonSegmenter._load_cached_result(vid_out, video.video_id)
+                video_results[video.video_id] = result
+                global_objects_count = result["objects_count"]
+                continue
+
+            if not self._models_ready:
+                self._init_models()
+
             result = self._segment_video(video, vid_out, global_objects_count)
             video_results[video.video_id] = result
             global_objects_count = result["objects_count"]
+            newly_segmented = True
 
             del result
             gc.collect()
             torch.cuda.empty_cache()
 
-        # --- compact per-frame .npy files into a single compressed .npz ---
-        for video in scene.videos:
-            PersonSegmenter._compact_mask_data(scene_dir / video.video_id)
+        if newly_segmented:
+            # --- compact per-frame .npy files into a single compressed .npz ---
+            for video in scene.videos:
+                PersonSegmenter._compact_mask_data(scene_dir / video.video_id)
 
-        if match_across_videos and len(scene.videos) > 1:
+        if newly_segmented and match_across_videos and len(scene.videos) > 1:
             id_mapping = self._match_across_videos(
                 scene, video_results, scene_dir
             )
@@ -742,6 +759,36 @@ class PersonSegmenter:
                 return None
             with zf.open(key) as f:
                 return np.load(io.BytesIO(f.read()))
+
+    @staticmethod
+    def _is_segmented(vid_out: Path) -> bool:
+        """Return True if this video has already been segmented."""
+        return (vid_out / "mask_data.npz").exists()
+
+    @staticmethod
+    def _load_cached_result(vid_out: Path, video_id: str) -> dict:
+        """Build a result dict from already-present segmentation data.
+
+        Reads ``mask_data.npz`` to determine the maximum person ID so that
+        sequential processing can continue with a non-colliding ID offset.
+        """
+        npz_path = vid_out / "mask_data.npz"
+        objects_count = 0
+        with zipfile.ZipFile(str(npz_path), "r") as zf:
+            for name in zf.namelist():
+                with zf.open(name) as f:
+                    arr = np.load(io.BytesIO(f.read()))
+                max_val = int(arr.max())
+                if max_val > objects_count:
+                    objects_count = max_val
+
+        return {
+            "video_id": video_id,
+            "objects_count": objects_count,
+            "frame_dir": str(vid_out / "frames"),
+            "mask_data_dir": str(vid_out / "mask_data"),
+            "json_data_dir": str(vid_out / "json_data"),
+        }
 
     # ------------------------------------------------------------------
     # Cross-video appearance matching
