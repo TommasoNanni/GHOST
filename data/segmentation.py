@@ -89,11 +89,11 @@ class PersonSegmenter:
         gdino_model_id: str = "IDEA-Research/grounding-dino-tiny",
         device: str = "cuda",
         text_prompt: str = "person.",
-        box_threshold: float = 0.45,
-        text_threshold: float = 0.45,
+        box_threshold: float = 0.3,
+        text_threshold: float = 0.3,
         detection_step: int = 15,
         min_mask_area: int = 500,
-        max_no_detection_windows: int = 2,
+        max_no_detection_windows: int = 4,
     ):
         self.sam2_checkpoint = sam2_checkpoint
         self.model_cfg = model_cfg
@@ -492,6 +492,11 @@ class PersonSegmenter:
 
             # Save masks + metadata
             for frame_idx, fmasks in video_segments.items():
+                # Drop objects whose mask is empty (prevents bbox 0,0,0,0)
+                for obj_id in list(fmasks.labels):
+                    if fmasks.labels[obj_id].mask.sum() == 0:
+                        del fmasks.labels[obj_id]
+
                 mask_img = torch.zeros(fmasks.mask_height, fmasks.mask_width)
                 for obj_id, obj_info in fmasks.labels.items():
                     mask_img[obj_info.mask == True] = obj_id
@@ -727,6 +732,11 @@ class PersonSegmenter:
 
             # Save masks + metadata
             for frame_idx, fmasks in video_segments.items():
+                # Drop objects whose mask is empty (prevents bbox 0,0,0,0)
+                for obj_id in list(fmasks.labels):
+                    if fmasks.labels[obj_id].mask.sum() == 0:
+                        del fmasks.labels[obj_id]
+
                 mask_img = torch.zeros(fmasks.mask_height, fmasks.mask_width)
                 for obj_id, obj_info in fmasks.labels.items():
                     mask_img[obj_info.mask == True] = obj_id
