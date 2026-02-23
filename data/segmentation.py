@@ -71,6 +71,15 @@ class PersonSegmenter:
     detection_step : int
         Run Grounding DINO every *detection_step* frames; SAM2 propagates
         masks for the frames in between.
+    min_mask_area : int
+        Minimum number of foreground pixels a tracked mask must have to be
+        carried forward between Grounding DINO windows.  Masks smaller than
+        this are treated as SAM2 drift artefacts and discarded.
+    max_no_detection_windows : int
+        Maximum number of consecutive Grounding DINO windows for which a
+        track can be carried forward without a GDINO confirmation.  After
+        this limit the track is dropped, preventing SAM2 from latching onto
+        background textures after a person leaves the scene.
     """
 
     def __init__(
@@ -83,6 +92,8 @@ class PersonSegmenter:
         box_threshold: float = 0.45,
         text_threshold: float = 0.45,
         detection_step: int = 15,
+        min_mask_area: int = 500,
+        max_no_detection_windows: int = 2,
     ):
         self.sam2_checkpoint = sam2_checkpoint
         self.model_cfg = model_cfg
@@ -92,6 +103,8 @@ class PersonSegmenter:
         self.box_threshold = box_threshold
         self.text_threshold = text_threshold
         self.detection_step = detection_step
+        self.min_mask_area = min_mask_area
+        self.max_no_detection_windows = max_no_detection_windows
 
         # Populated by _init_models()
         self._video_predictor = None
@@ -210,6 +223,8 @@ class PersonSegmenter:
                 self.box_threshold,
                 self.text_threshold,
                 self.detection_step,
+                self.min_mask_area,
+                self.max_no_detection_windows,
             ))
 
         newly_segmented = bool(worker_args)
@@ -326,6 +341,9 @@ class PersonSegmenter:
 
         sam2_masks = MaskDictionaryModel()
         step = self.detection_step
+        # Tracks how many consecutive GDINO windows each object has been
+        # carried forward without a direct GDINO detection.
+        no_detection_count: dict[int, int] = {}
 
         print(f"  {video.video_id}: {len(frame_names)} frames, step={step}")
 
@@ -389,10 +407,44 @@ class PersonSegmenter:
                     iou_threshold=0.8,
                     objects_count=objects_count,
                 )
-            else:
-                mask_dict = sam2_masks
 
-            # Nothing detected in this window — save empties. 
+                # Reset the no-detection counter for every object that GDINO
+                # confirmed this window.
+                for obj_id in mask_dict.labels:
+                    no_detection_count[obj_id] = 0
+
+                # Carry forward SAM2-tracked objects that GDINO missed, but
+                # only if the mask is large enough (not a drift artefact) and
+                # the track hasn't been unconfirmed for too many windows in a
+                # row (prevents latching onto a hanging t-shirt after a person
+                # has left).
+                for obj_id, obj_info in sam2_masks.labels.items():
+                    if obj_id in mask_dict.labels:
+                        continue
+                    if obj_info.mask.sum() < self.min_mask_area:
+                        continue
+                    count = no_detection_count.get(obj_id, 0) + 1
+                    if count > self.max_no_detection_windows:
+                        continue
+                    no_detection_count[obj_id] = count
+                    mask_dict.labels[obj_id] = obj_info
+            else:
+                # No GDINO detections this window: carry forward tracked
+                # objects subject to the same area and consecutive-miss limits.
+                mask_dict = MaskDictionaryModel(
+                    mask_height=sam2_masks.mask_height,
+                    mask_width=sam2_masks.mask_width,
+                )
+                for obj_id, obj_info in sam2_masks.labels.items():
+                    if obj_info.mask.sum() < self.min_mask_area:
+                        continue
+                    count = no_detection_count.get(obj_id, 0) + 1
+                    if count > self.max_no_detection_windows:
+                        continue
+                    no_detection_count[obj_id] = count
+                    mask_dict.labels[obj_id] = obj_info
+
+            # Nothing detected in this window — save empties.
             # FIXME: This saves empty for all the frames, might need a better fallback
             if len(mask_dict.labels) == 0:
                 mask_dict.save_empty_mask_and_json(
@@ -485,6 +537,8 @@ class PersonSegmenter:
         box_threshold: float,
         text_threshold: float,
         detection_step: int,
+        min_mask_area: int,
+        max_no_detection_windows: int,
     ) -> dict:
         """Segment one video on a specific GPU (runs in a child process).
 
@@ -536,6 +590,7 @@ class PersonSegmenter:
         sam2_masks = MaskDictionaryModel()
         objects_count = objects_count_start
         step = detection_step
+        no_detection_count: dict[int, int] = {}
 
         print(f"  [GPU {gpu_id}] {video_id}: {len(frame_names)} frames, step={step}")
 
@@ -596,8 +651,36 @@ class PersonSegmenter:
                     iou_threshold=0.8,
                     objects_count=objects_count,
                 )
+
+                # Reset the no-detection counter for GDINO-confirmed objects.
+                for obj_id in mask_dict.labels:
+                    no_detection_count[obj_id] = 0
+
+                # Carry forward with area and consecutive-miss limits.
+                for obj_id, obj_info in sam2_masks.labels.items():
+                    if obj_id in mask_dict.labels:
+                        continue
+                    if obj_info.mask.sum() < min_mask_area:
+                        continue
+                    count = no_detection_count.get(obj_id, 0) + 1
+                    if count > max_no_detection_windows:
+                        continue
+                    no_detection_count[obj_id] = count
+                    mask_dict.labels[obj_id] = obj_info
             else:
-                mask_dict = sam2_masks
+                # No GDINO detections: carry forward with limits.
+                mask_dict = MaskDictionaryModel(
+                    mask_height=sam2_masks.mask_height,
+                    mask_width=sam2_masks.mask_width,
+                )
+                for obj_id, obj_info in sam2_masks.labels.items():
+                    if obj_info.mask.sum() < min_mask_area:
+                        continue
+                    count = no_detection_count.get(obj_id, 0) + 1
+                    if count > max_no_detection_windows:
+                        continue
+                    no_detection_count[obj_id] = count
+                    mask_dict.labels[obj_id] = obj_info
 
             if len(mask_dict.labels) == 0:
                 mask_dict.save_empty_mask_and_json(

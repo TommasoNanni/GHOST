@@ -38,6 +38,8 @@ def main():
         box_threshold=CONFIG.segmentation.box_threshold,
         text_threshold=CONFIG.segmentation.text_threshold,
         detection_step=CONFIG.segmentation.detection_step,
+        min_mask_area=CONFIG.segmentation.min_mask_area,
+        max_no_detection_windows=CONFIG.segmentation.max_no_detection_windows,
     )
     print(f"\n--- Running segmentation on scene '{scene.scene_id}' ---")
     video_dirs = segmenter.segment_scene(

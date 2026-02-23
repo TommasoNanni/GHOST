@@ -9,6 +9,8 @@
 #SBATCH --job-name=test_sam3d
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
+#SBATCH --mail-type=ALL          
+#SBATCH --mail-user=tnanni@ethz.ch
 
 # ── User config ────────────────────────────────────────────────────────────────
 DATA_ROOT="/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"   # adjust

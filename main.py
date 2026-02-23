@@ -31,6 +31,10 @@ def parse_args():
     parser.add_argument("--gdino_model_id", type=str, default="IDEA-Research/grounding-dino-tiny")
     parser.add_argument("--detection_step", type=int, default=50)
     parser.add_argument("--box_threshold", type=float, default=0.25)
+    parser.add_argument("--min_mask_area", type=int, default=500,
+                        help="Min foreground pixels for a tracked mask to be carried forward")
+    parser.add_argument("--max_no_detection_windows", type=int, default=2,
+                        help="Max consecutive GDINO windows without detection before dropping a track")
 
     # Body estimation
     parser.add_argument("--sam3d_hf_repo", type=str, default="facebook/sam-3d-body-dinov3")
@@ -59,6 +63,8 @@ def main(args):
         device=args.device,
         box_threshold=args.box_threshold,
         detection_step=args.detection_step,
+        min_mask_area=args.min_mask_area,
+        max_no_detection_windows=args.max_no_detection_windows,
     )
 
     # Detect people in the dataset
