@@ -68,10 +68,21 @@ class SSTNetwork(nn.Module):
         self.ff_norms = nn.ModuleList([
             nn.LayerNorm(3*embedding_dim) for _ in range(self.num_layers)
         ])
-        self.output_pose = nn.Linear(embedding_dim, 6)
-        self.output_shape = nn.Linear(embedding_dim, 10)
-        self.output_camera = nn.Linear(embedding_dim, 7)
-
+        self.output_pose = nn.Sequential(
+            nn.Linear(3*embedding_dim, embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, 6),
+        )
+        self.output_shape = nn.Sequential(
+            nn.Linear(3*embedding_dim, embedding_dim),
+            nn.Tanh(),
+            nn.Linear(embedding_dim, 10),
+        )
+        self.output_camera = nn.Sequential(
+            nn.Linear(3*embedding_dim, embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, 7),
+        )
     def encode_inputs(self, pose, shape, camera):
         """
         Encode the input parameters into a common embedding space
@@ -133,7 +144,6 @@ class SSTNetwork(nn.Module):
                 spatial_1_inputs,
                 attn_mask = soft_spatial_1_mask,
             )
-            spatial_1_outputs = spatial_1_outputs + spatial_1_inputs
             spatial_1_outputs = spatial_1_outputs.reshape(B*T*K*P*J, 3*D)
             spatial_1_outputs = self.spatial_1_norms[layer](spatial_1_outputs)
             spatial_1_outputs = spatial_1_outputs.reshape(B,T,K,P,J,3*D)
@@ -146,7 +156,6 @@ class SSTNetwork(nn.Module):
                 spatial_2_inputs,
                 attn_mask = soft_spatial_2_mask,
             )
-            spatial_2_outputs = spatial_2_outputs + spatial_2_inputs
             spatial_2_outputs = spatial_2_outputs.reshape(B*T*K*P*J, 3*D)
             spatial_2_outputs = self.spatial_2_norms[layer](spatial_2_outputs)
             spatial_2_outputs = spatial_2_outputs.reshape(B,T,P,J,K,3*D)
@@ -160,80 +169,73 @@ class SSTNetwork(nn.Module):
                 temporal_inputs,
                 attn_mask = soft_temporal_mask
             )
-            temporal_outputs = temporal_outputs + temporal_inputs
             temporal_outputs = temporal_outputs.reshape(B*T*K*P*J, 3*D)
             temporal_outputs = self.temporal_norms[layer](temporal_outputs)
             temporal_outputs = temporal_outputs.reshape(B, K, P, J, T, 3*D)
             temporal_outputs = temporal_outputs.permute(0, 4, 1, 2, 3, 5).contiguous()
 
-            # Sum and feed forward
-
-            attn_output = spatial_1_outputs + spatial_2_outputs + temporal_outputs
+            # Single residual at the merge, then feed forward
+            attn_output = inputs + spatial_1_outputs + spatial_2_outputs + temporal_outputs
             attn_output = attn_output.reshape(B*T*K*P*J, 3*D)
             ff_output = self.ff_layers[layer](attn_output)
             ff_output = ff_output + attn_output
             ff_output = self.ff_norms[layer](ff_output)
             inputs = ff_output.reshape(B, T, K, P, J, 3*D)
 
-        # Pose: per joint prediction
-        pose_feats = inputs[..., :D].reshape(B*T*K*P*J, D)           # [B*T*K*P*J, D]
-        delta_pose = self.output_pose(pose_feats).reshape(B, T, K, P, J, 6)
+        # Pose: per joint prediction from full 3*D token
+        delta_pose = self.output_pose(inputs.reshape(B*T*K*P*J, 3*D)).reshape(B, T, K, P, J, 6)
 
-        # Shape: aggregate over joints (J), then decode per person
-        shape_feats = inputs[..., D:2*D].mean(dim=4)                  # mean over J -> [B, T, K, P, D]
-        delta_shape = self.output_shape(shape_feats.reshape(B*T*K*P, D)).reshape(B, T, K, P, 10)
+        # Shape: aggregate over joints, decode from full 3*D token
+        delta_shape = self.output_shape(inputs.mean(dim=4).reshape(B*T*K*P, 3*D)).reshape(B, T, K, P, 10)
 
-        # Camera: aggregate over people (P) and joints (J), then decode per camera
-        camera_feats = inputs[..., 2*D:].mean(dim=[3, 4])             # mean over P, J -> [B, T, K, D]
-        delta_camera = self.output_camera(camera_feats.reshape(B*T*K, D)).reshape(B, T, K, 7)
+        # Camera: aggregate over people and joints, decode from full 3*D token
+        delta_camera = self.output_camera(inputs.mean(dim=[3, 4]).reshape(B*T*K, 3*D)).reshape(B, T, K, 7)
 
         return delta_pose, delta_shape, delta_camera
 
+    def count_parameters(self) -> dict:
+        """
+        Count total, trainable, and frozen parameters.
 
-def count_parameters(model: nn.Module) -> dict:
-    """
-    Count total, trainable, and frozen parameters in a model.
+        Returns a dict with:
+            total       - all parameters
+            trainable   - parameters with requires_grad=True
+            frozen      - parameters with requires_grad=False
+        """
+        total     = sum(p.numel() for p in self.parameters())
+        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        return {
+            "total":     total,
+            "trainable": trainable,
+            "frozen":    total - trainable,
+        }
 
-    Returns a dict with:
-        total       - all parameters
-        trainable   - parameters with requires_grad=True
-        frozen      - parameters with requires_grad=False
-    """
-    total     = sum(p.numel() for p in model.parameters())
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    return {
-        "total":     total,
-        "trainable": trainable,
-        "frozen":    total - trainable,
-    }
+    def summary(self, indent: int = 2) -> str:
+        """
+        Return a human-readable summary of the model's sub-modules and their
+        parameter counts. Useful for quick sanity-checks at the start of a run.
 
-
-def model_summary(model: nn.Module, indent: int = 2) -> str:
-    """
-    Return a human-readable summary of a model's sub-modules and their
-    parameter counts. Useful for quick sanity-checks at the start of a run.
-
-    Example output:
-        SSTNetwork
-          pose_encoder         :    66,048 params
-          shape_encoder        :    66,560 params
-          ...
-        ------------------------------------------
-        Total      :  12,582,912 params
-        Trainable  :  12,582,912 params
-        Frozen     :           0 params
-    """
-    lines = [type(model).__name__]
-    name_width = max((len(n) for n, _ in model.named_children()), default=0)
-    for name, module in model.named_children():
-        n = sum(p.numel() for p in module.parameters())
-        lines.append(f"{' ' * indent}{name:<{name_width}} : {n:>12,} params")
-    counts = count_parameters(model)
-    sep = "-" * (indent + name_width + 22)
-    lines += [
-        sep,
-        f"Total      : {counts['total']:>12,} params",
-        f"Trainable  : {counts['trainable']:>12,} params",
-        f"Frozen     : {counts['frozen']:>12,} params",
-    ]
-    return "\n".join(lines)
+        Example output:
+            SSTNetwork
+              pose_encoder         :    66,048 params
+              shape_encoder        :    66,560 params
+              ...
+            ------------------------------------------
+            Total      :  12,582,912 params
+            Trainable  :  12,582,912 params
+            Frozen     :           0 params
+        """
+        lines = [type(self).__name__]
+        name_width = max((len(n) for n, _ in self.named_children()), default=0)
+        for name, module in self.named_children():
+            n = sum(p.numel() for p in module.parameters())
+            lines.append(f"{' ' * indent}{name:<{name_width}} : {n:>12,} params")
+        counts = self.count_parameters()
+        sep = "-" * (indent + name_width + 22)
+        lines += [
+            sep,
+            f"Total      : {counts['total']:>12,} params",
+            f"Trainable  : {counts['trainable']:>12,} params",
+            f"Frozen     : {counts['frozen']:>12,} params",
+        ]
+        return "\n".join(lines)
