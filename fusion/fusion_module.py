@@ -10,6 +10,23 @@ betas = number of betas
 import torch
 import torch.nn as nn
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, max_len, model_dim):
+        super(PositionalEncoding, self).__init__()
+        self.max_len = max_len
+        self.model_dim = model_dim
+        pe = torch.zeros(max_len, model_dim)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, model_dim, 2) * -(torch.log(torch.tensor(10000.0)) / model_dim))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        return x + self.pe[:x.size(1), :]
+
+
+
 class SSTNetwork(nn.Module):
     """
     Spatio-Spatio-Temporal attention module that fuses parameters across views and time
@@ -20,11 +37,13 @@ class SSTNetwork(nn.Module):
         embedding_dim: int = 128,
         num_heads: int = 8,
         num_layers: int = 8,
+        max_temporal_len: int = 4096,
     ):
         super(SSTNetwork, self).__init__()
         self.embedding_dim = embedding_dim
         self.num_heads = num_heads
         self.num_layers = num_layers
+        self.temporal_pe = PositionalEncoding(max_temporal_len, embedding_dim)
         self.pose_encoder = nn.Sequential(
             nn.Linear(6, 2*embedding_dim),
             nn.ReLU(),
@@ -40,46 +59,104 @@ class SSTNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(2*embedding_dim, embedding_dim),
         )
-        self.spatial_1_attentions = nn.ModuleList([
-            nn.MultiheadAttention(3*embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
+        # Pose stream: joint attn + cross-view attn + temporal attn 
+        self.pose_joint_attentions = nn.ModuleList([
+            nn.MultiheadAttention(embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
         ])
-        self.spatial_1_norms = nn.ModuleList([
-            nn.LayerNorm(3*embedding_dim) for _ in range(self.num_layers)
+        self.pose_joint_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
         ])
-        self.spatial_2_attentions = nn.ModuleList([
-            nn.MultiheadAttention(3*embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
+        self.pose_view_attentions = nn.ModuleList([
+            nn.MultiheadAttention(embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
         ])
-        self.spatial_2_norms = nn.ModuleList([
-            nn.LayerNorm(3*embedding_dim) for _ in range(self.num_layers)
+        self.pose_view_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
         ])
-        self.temporal_attentions = nn.ModuleList([
-            nn.MultiheadAttention(3*embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
+        self.pose_temporal_attentions = nn.ModuleList([
+            nn.MultiheadAttention(embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
         ])
-        self.temporal_norms = nn.ModuleList([
-            nn.LayerNorm(3*embedding_dim) for _ in range(self.num_layers)
+        self.pose_temporal_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
         ])
-        self.ff_layers = nn.ModuleList([
+        self.pose_ff = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(3*embedding_dim, 6*embedding_dim),
+                nn.Linear(embedding_dim, 2*embedding_dim),
                 nn.ReLU(),
-                nn.Linear(6*embedding_dim, 3*embedding_dim),
+                nn.Linear(2*embedding_dim, embedding_dim),
             ) for _ in range(self.num_layers)
         ])
-        self.ff_norms = nn.ModuleList([
-            nn.LayerNorm(3*embedding_dim) for _ in range(self.num_layers)
+        self.pose_ff_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
+        ])
+
+        # Shape stream: cross-view attn + temporal attn
+        self.shape_view_attentions = nn.ModuleList([
+            nn.MultiheadAttention(embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
+        ])
+        self.shape_view_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
+        ])
+        self.shape_temporal_attentions = nn.ModuleList([
+            nn.MultiheadAttention(embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
+        ])
+        self.shape_temporal_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
+        ])
+        self.shape_ff = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(embedding_dim, 2*embedding_dim),
+                nn.ReLU(),
+                nn.Linear(2*embedding_dim, embedding_dim),
+            ) for _ in range(self.num_layers)
+        ])
+        self.shape_ff_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
+        ])
+
+        # Pose - Camera cross-attention (every 2 layers)
+        self.num_cross_layers = num_layers // 2
+        self.pose_to_camera_cross_attn = nn.ModuleList([
+            nn.MultiheadAttention(embedding_dim, num_heads, batch_first=True) for _ in range(self.num_cross_layers)
+        ])
+        self.pose_to_camera_cross_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_cross_layers)
+        ])
+        self.camera_to_pose_cross_attn = nn.ModuleList([
+            nn.MultiheadAttention(embedding_dim, num_heads, batch_first=True) for _ in range(self.num_cross_layers)
+        ])
+        self.camera_to_pose_cross_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_cross_layers)
+        ])
+
+        # Camera stream: temporal attn only
+        self.camera_temporal_attentions = nn.ModuleList([
+            nn.MultiheadAttention(embedding_dim, num_heads, batch_first=True) for _ in range(self.num_layers)
+        ])
+        self.camera_temporal_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
+        ])
+        self.camera_ff = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(embedding_dim, 2*embedding_dim),
+                nn.ReLU(),
+                nn.Linear(2*embedding_dim, embedding_dim),
+            ) for _ in range(self.num_layers)
+        ])
+        self.camera_ff_norms = nn.ModuleList([
+            nn.LayerNorm(embedding_dim) for _ in range(self.num_layers)
         ])
         self.output_pose = nn.Sequential(
-            nn.Linear(3*embedding_dim, embedding_dim),
+            nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
             nn.Linear(embedding_dim, 6),
         )
         self.output_shape = nn.Sequential(
-            nn.Linear(3*embedding_dim, embedding_dim),
+            nn.Linear(embedding_dim, embedding_dim),
             nn.Tanh(),
             nn.Linear(embedding_dim, 10),
         )
         self.output_camera = nn.Sequential(
-            nn.Linear(3*embedding_dim, embedding_dim),
+            nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
             nn.Linear(embedding_dim, 7),
         )
@@ -118,80 +195,121 @@ class SSTNetwork(nn.Module):
 
         B, T, K, P, J, D = pose_emb.shape
 
-        shape_expanded = shape_emb.unsqueeze(-2).expand(B, T, K, P, J, D)
-        camera_expanded = camera_emb.unsqueeze(-2).unsqueeze(-2).expand(B, T, K, P, J, D)
+        # soft attention masks for pose 
+        # Pose joint mask: joint-to-joint within same person/camera/frame
+        joint_mask_flat = joint_mask.reshape(B*T*K*P, J)
+        pose_joint_mask = torch.log(torch.einsum("bi, bj -> bij", joint_mask_flat, joint_mask_flat) + 1e-6)
 
+        # Pose view mask: same joint across cameras
+        view_mask_flat = joint_mask.permute(0,1,3,4,2).reshape(B*T*P*J, K)
+        pose_view_mask = torch.log(torch.einsum("bi, bj -> bij", view_mask_flat, view_mask_flat) + 1e-6)
 
-        inputs = torch.cat([
-            pose_emb,
-            shape_expanded,
-            camera_expanded,
-        ], dim = -1)          # B, T, K, P, J, 3*D
+        # Pose temporal mask: same joint across time
+        temp_mask_flat = joint_mask.permute(0,2,3,4,1).reshape(B*K*P*J, T)
+        pose_temporal_mask = torch.log(torch.einsum("bi, bj -> bij", temp_mask_flat, temp_mask_flat) + 1e-6)
 
-        spatial_1_mask = torch.einsum("btkpm, btkpn -> btkpmn", joint_mask, joint_mask).reshape((B*T*K*P, J, J))
-        soft_spatial_1_mask = torch.log(spatial_1_mask + 1e-6)
-        spatial_2_mask = torch.einsum("btmpj, btnpj -> btpjmn", joint_mask, joint_mask).reshape((B*T*P*J, K, K))
-        soft_spatial_2_mask = torch.log(spatial_2_mask + 1e-6)
-        temporal_mask  = torch.einsum("bmkpj, bnkpj -> bkpjmn", joint_mask, joint_mask).reshape((B*K*P*J, T, T))
-        soft_temporal_mask = torch.log(temporal_mask + 1e-6)
+        # Attention loop: three independent streams
+        pose_stream = pose_emb      # B, T, K, P, J, D
+        shape_stream = shape_emb    # B, T, K, P, D
+        camera_stream = camera_emb  # B, T, K, D
 
         for layer in range(self.num_layers):
-            # first attention module, every joint with other joints in the same camera at the same time
-            spatial_1_inputs = inputs.reshape(B*T*K*P, J, 3*D)
-            spatial_1_outputs, _ = self.spatial_1_attentions[layer](
-                spatial_1_inputs,
-                spatial_1_inputs,
-                spatial_1_inputs,
-                attn_mask = soft_spatial_1_mask,
-            )
-            spatial_1_outputs = spatial_1_outputs.reshape(B*T*K*P*J, 3*D)
-            spatial_1_outputs = self.spatial_1_norms[layer](spatial_1_outputs)
-            spatial_1_outputs = spatial_1_outputs.reshape(B,T,K,P,J,3*D)
+            # POSE STREAM: joint attn -> cross-view attn -> temporal attn -> FFN
 
-            # Second attention module, every joint with the same joint across cameras at the same time
-            spatial_2_inputs = inputs.permute(0,1,3,4,2,5).contiguous().reshape(B*T*P*J, K, 3*D)
-            spatial_2_outputs, _ = self.spatial_2_attentions[layer](
-                spatial_2_inputs,
-                spatial_2_inputs,
-                spatial_2_inputs,
-                attn_mask = soft_spatial_2_mask,
-            )
-            spatial_2_outputs = spatial_2_outputs.reshape(B*T*K*P*J, 3*D)
-            spatial_2_outputs = self.spatial_2_norms[layer](spatial_2_outputs)
-            spatial_2_outputs = spatial_2_outputs.reshape(B,T,P,J,K,3*D)
-            spatial_2_outputs = spatial_2_outputs.permute(0, 1, 4, 2, 3, 5).contiguous()
+            # Joint attention
+            x = self.pose_joint_norms[layer](pose_stream)
+            x = x.reshape(B*T*K*P, J, D)
+            x, _ = self.pose_joint_attentions[layer](x, x, x, attn_mask=pose_joint_mask)
+            pose_stream = pose_stream + x.reshape(B, T, K, P, J, D)
 
-            # Third attention module, every joint with the same joint across frames in the same camera
-            temporal_inputs = inputs.permute(0,2,3,4,1,5).contiguous().reshape(B*K*P*J, T, 3*D)
-            temporal_outputs, _ = self.temporal_attentions[layer](
-                temporal_inputs,
-                temporal_inputs,
-                temporal_inputs,
-                attn_mask = soft_temporal_mask
-            )
-            temporal_outputs = temporal_outputs.reshape(B*T*K*P*J, 3*D)
-            temporal_outputs = self.temporal_norms[layer](temporal_outputs)
-            temporal_outputs = temporal_outputs.reshape(B, K, P, J, T, 3*D)
-            temporal_outputs = temporal_outputs.permute(0, 4, 1, 2, 3, 5).contiguous()
+            # Cross-view attention
+            x = self.pose_view_norms[layer](pose_stream)
+            x = x.permute(0,1,3,4,2,5).contiguous().reshape(B*T*P*J, K, D)
+            x, _ = self.pose_view_attentions[layer](x, x, x, attn_mask=pose_view_mask)
+            x = x.reshape(B, T, P, J, K, D).permute(0, 1, 4, 2, 3, 5).contiguous()
+            pose_stream = pose_stream + x
 
-            # Single residual at the merge, then feed forward
-            attn_output = inputs + spatial_1_outputs + spatial_2_outputs + temporal_outputs
-            attn_output = attn_output.reshape(B*T*K*P*J, 3*D)
-            ff_output = self.ff_layers[layer](attn_output)
-            ff_output = ff_output + attn_output
-            ff_output = self.ff_norms[layer](ff_output)
-            inputs = ff_output.reshape(B, T, K, P, J, 3*D)
+            # Temporal attention
+            x = self.pose_temporal_norms[layer](pose_stream)
+            x = x.permute(0,2,3,4,1,5).contiguous().reshape(B*K*P*J, T, D)
+            x = self.temporal_pe(x)
+            x, _ = self.pose_temporal_attentions[layer](x, x, x, attn_mask=pose_temporal_mask)
+            x = x.reshape(B, K, P, J, T, D).permute(0, 4, 1, 2, 3, 5).contiguous()
+            pose_stream = pose_stream + x
 
-        # Pose: per joint prediction from full 3*D token
-        delta_pose = self.output_pose(inputs.reshape(B*T*K*P*J, 3*D)).reshape(B, T, K, P, J, 6)
+            # FFN
+            x = self.pose_ff_norms[layer](pose_stream)
+            x = x.reshape(B*T*K*P*J, D)
+            pose_stream = pose_stream + self.pose_ff[layer](x).reshape(B, T, K, P, J, D)
 
-        # Shape: aggregate over joints, decode from full 3*D token
-        delta_shape = self.output_shape(inputs.mean(dim=4).reshape(B*T*K*P, 3*D)).reshape(B, T, K, P, 10)
+            # SHAPE STREAM: cross-view attn -> temporal attn -> FFN
 
-        # Camera: aggregate over people and joints, decode from full 3*D token
-        delta_camera = self.output_camera(inputs.mean(dim=[3, 4]).reshape(B*T*K, 3*D)).reshape(B, T, K, 7)
+            # Cross-view attention
+            x = self.shape_view_norms[layer](shape_stream)
+            x = x.permute(0,1,3,2,4).contiguous().reshape(B*T*P, K, D)
+            x, _ = self.shape_view_attentions[layer](x, x, x)
+            x = x.reshape(B, T, P, K, D).permute(0, 1, 3, 2, 4).contiguous()
+            shape_stream = shape_stream + x
 
-        return delta_pose, delta_shape, delta_camera
+            # Temporal attention
+            x = self.shape_temporal_norms[layer](shape_stream)
+            x = x.permute(0,2,3,1,4).contiguous().reshape(B*K*P, T, D)
+            x = self.temporal_pe(x)
+            x, _ = self.shape_temporal_attentions[layer](x, x, x)
+            x = x.reshape(B, K, P, T, D).permute(0, 3, 1, 2, 4).contiguous()
+            shape_stream = shape_stream + x
+
+            # FFN
+            x = self.shape_ff_norms[layer](shape_stream)
+            x = x.reshape(B*T*K*P, D)
+            shape_stream = shape_stream + self.shape_ff[layer](x).reshape(B, T, K, P, D)
+
+            # CAMERA STREAM: temporal attn -> FFN
+
+            # Temporal attention (same camera across time)
+            x = self.camera_temporal_norms[layer](camera_stream)
+            x = x.permute(0,2,1,3).contiguous().reshape(B*K, T, D)
+            x = self.temporal_pe(x)
+            x, _ = self.camera_temporal_attentions[layer](x, x, x)
+            x = x.reshape(B, K, T, D).permute(0, 2, 1, 3).contiguous()
+            camera_stream = camera_stream + x
+
+            # FFN
+            x = self.camera_ff_norms[layer](camera_stream)
+            x = x.reshape(B*T*K, D)
+            camera_stream = camera_stream + self.camera_ff[layer](x).reshape(B, T, K, D)
+
+            # Pose - Camera cross-attention 
+            if (layer + 1) % 2 == 0:
+                cross_idx = (layer + 1) // 2 - 1
+
+                # Each joint token queries all K camera tokens to learn viewpoint-dependent weighting
+                x = self.pose_to_camera_cross_norms[cross_idx](pose_stream)
+                x = x.permute(0,1,3,4,2,5).contiguous().reshape(B*T*P*J, K, D)
+                cam_kv = camera_stream.unsqueeze(2).unsqueeze(2).expand(B, T, P, J, K, D)
+                cam_kv = cam_kv.reshape(B*T*P*J, K, D)
+                x, _ = self.pose_to_camera_cross_attn[cross_idx](x, cam_kv, cam_kv)
+                x = x.reshape(B, T, P, J, K, D).permute(0, 1, 4, 2, 3, 5).contiguous()
+                pose_stream = pose_stream + x
+
+                # Each camera token queries all P*J pose tokens from that view
+                x = self.camera_to_pose_cross_norms[cross_idx](camera_stream)
+                x = x.reshape(B*T*K, 1, D)
+                pose_kv = pose_stream.reshape(B*T*K, P*J, D)
+                x, _ = self.camera_to_pose_cross_attn[cross_idx](x, pose_kv, pose_kv)
+                x = x.reshape(B, T, K, D)
+                camera_stream = camera_stream + x
+
+        # Pose: aggregate over cameras, decode per joint
+        pose = self.output_pose(pose_stream.mean(dim=2).reshape(B*T*P*J, D)).reshape(B, T, P, J, 6)
+
+        # Shape: aggregate over cameras, decode per person
+        shape = self.output_shape(shape_stream.mean(dim=2).reshape(B*T*P, D)).reshape(B, T, P, 10)
+
+        # Camera: decode per camera
+        camera = self.output_camera(camera_stream.reshape(B*T*K, D)).reshape(B, T, K, 7)
+
+        return pose, shape, camera
 
     def count_parameters(self) -> dict:
         """

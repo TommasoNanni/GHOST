@@ -45,7 +45,7 @@ def main():
     video_dirs = segmenter.segment_scene(
         scene=scene,
         output_dir=output_dir,
-        vis=False,
+        vis=True,
     )
     print(f"\nSegmentation output dirs:")
     for video_id, vdir in video_dirs.items():

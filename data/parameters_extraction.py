@@ -70,7 +70,7 @@ class BodyParameterEstimator:
 
     # Re-identification: minimum cosine similarity to merge a new SAM2 track
     # into an existing person, and EMA weight for updating gallery features.
-    _REID_THRESHOLD: float = 0.75
+    _REID_THRESHOLD: float = 0.65
     _GALLERY_EMA_ALPHA: float = 0.9
 
     def __init__(
@@ -267,6 +267,22 @@ class BodyParameterEstimator:
 
         tracks: dict[int, dict[int, dict]] = {}
 
+        # Phase 0 — pre-scan every JSON frame to find which SAM2 track IDs are
+        # ever SIMULTANEOUSLY visible.  Two IDs that share a frame must belong to
+        # two different people and can never be merged by re-ID, regardless of how
+        # similar their visual features appear.  This prevents the common failure
+        # where P2 enters the scene in the single frame where P1 is momentarily
+        # missed by SAM3D, causing re-ID to incorrectly fold P2 into P1.
+        covisible_ids: set[frozenset] = set()
+        for jp in json_files:
+            with open(jp) as _f:
+                _meta = json.load(_f)
+            _ids = {int(s) for s in _meta.get("labels", {}).keys()}
+            for _a in _ids:
+                for _b in _ids:
+                    if _a != _b:
+                        covisible_ids.add(frozenset({_a, _b}))
+
         # Gallery for visual re-identification across SAM2 track interruptions.
         # person_gallery: canonical_id → L2-normalised appearance descriptor (EMA).
         # id_remap: raw SAM2 id → canonical_id for ids that were re-identified.
@@ -403,13 +419,30 @@ class BodyParameterEstimator:
                         # Brand-new SAM2 track — check whether this person was seen
                         # before under a different ID (e.g. after occlusion).
                         if person_gallery:
+                            # Canonical IDs already present in THIS frame — we must
+                            # never merge into one of them (they are a different
+                            # person who is simultaneously visible).
+                            frame_canonical_ids = {
+                                id_remap.get(p[0], p[0]) for p in valid_persons
+                            }
+
                             sims = {
                                 pid: float(np.dot(feat_i, gfeat))
                                 for pid, gfeat in person_gallery.items()
+                                if pid not in frame_canonical_ids
                             }
-                            best_id = max(sims, key=lambda pid: sims[pid])
-                            # If the person is above a certain similarity with another person, then match
-                            if sims[best_id] >= BodyParameterEstimator._REID_THRESHOLD:
+                            if sims:
+                                best_id = max(sims, key=lambda pid: sims[pid])
+                            else:
+                                best_id = None
+                            # Match only if similarity is high enough AND the two SAM2
+                            # track IDs were never seen in the same frame (co-visible
+                            # IDs must belong to different people).
+                            if (
+                                best_id is not None
+                                and sims[best_id] >= BodyParameterEstimator._REID_THRESHOLD
+                                and frozenset({person_id, best_id}) not in covisible_ids
+                            ):
                                 id_remap[person_id] = best_id
                                 canonical_id = best_id
                                 logging.info(
@@ -587,17 +620,38 @@ class BodyParameterEstimator:
                     zf_out.writestr(name, buf.getvalue())
             tmp_path.replace(npz_path)
 
-        # Remap instance IDs in the per-frame JSON metadata 
+        # Remap instance IDs in the per-frame JSON metadata.
+        # Guard against collisions: if two different old IDs remap to the same
+        # new ID in the same frame (which would mean the remap is wrong for that
+        # frame), keep the original ID for the later entry rather than silently
+        # overwriting the earlier one and losing a person's bounding box.
         for json_path in sorted(json_dir.glob("*.json")):
             with open(json_path) as f:
                 data = json.load(f)
             if "labels" in data:
                 new_labels = {}
-                for str_id, info in data["labels"].items():
+                # Process non-remapped entries first so they always claim their
+                # canonical slots before any remapped entry can collide with them.
+                sorted_items = sorted(
+                    data["labels"].items(),
+                    key=lambda kv: 0 if id_remap.get(int(kv[0]), int(kv[0])) == int(kv[0]) else 1,
+                )
+                for str_id, info in sorted_items:
                     old_id = int(str_id)
                     new_id = id_remap.get(old_id, old_id)
                     info["instance_id"] = new_id
-                    new_labels[str(new_id)] = info
+                    if str(new_id) in new_labels:
+                        # Collision: two persons would share the same ID in this
+                        # frame — this indicates an incorrect merge.  Preserve
+                        # both entries by keeping the original ID for this one.
+                        logging.warning(
+                            f"{gpu_label}Re-ID collision for id {new_id} in "
+                            f"{json_path.name}: keeping original id {old_id}"
+                        )
+                        info["instance_id"] = old_id
+                        new_labels[str(old_id)] = info
+                    else:
+                        new_labels[str(new_id)] = info
                 data["labels"] = new_labels
             with open(json_path, "w") as f:
                 json.dump(data, f)
