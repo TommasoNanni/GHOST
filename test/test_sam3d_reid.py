@@ -32,14 +32,9 @@ def main():
 
     # Step 1: Segment people in the scene
     segmenter = PersonSegmenter(
-        sam2_checkpoint=CONFIG.segmentation.sam2_checkpoint,
-        model_cfg=CONFIG.segmentation.sam2_cfg,
-        gdino_model_id=CONFIG.segmentation.gdino_id,
-        box_threshold=CONFIG.segmentation.box_threshold,
-        text_threshold=CONFIG.segmentation.text_threshold,
-        detection_step=CONFIG.segmentation.detection_step,
-        min_mask_area=CONFIG.segmentation.min_mask_area,
-        max_no_detection_windows=CONFIG.segmentation.max_no_detection_windows,
+        checkpoint_path=CONFIG.segmentation.checkpoint_path,
+        text_prompt=CONFIG.segmentation.text_prompt,
+        redetect_interval=CONFIG.segmentation.redetect_interval,
     )
     print(f"\n--- Running segmentation on scene '{scene.scene_id}' ---")
     video_dirs = segmenter.segment_scene(
@@ -73,24 +68,24 @@ def main():
             print(f"  WARNING: {body_dir} does not exist")
             continue
 
-        # Count unique SAM2 person IDs seen across all JSON frames.
+        # Count unique SAM3 person IDs seen across all JSON frames.
         json_dir = Path(video_dir) / "json_data"
-        sam2_ids: set[int] = set()
+        sam3_ids: set[int] = set()
         for jp in sorted(json_dir.glob("*.json")):
             with open(jp) as f:
                 meta = json.load(f)
             for sid in meta.get("labels", {}):
-                sam2_ids.add(int(sid))
+                sam3_ids.add(int(sid))
 
         npz_files = sorted(body_dir.glob("person_*.npz"))
         print(f"\n--- {video_id}: {len(npz_files)} person file(s) ---")
 
-        # Re-ID summary: if fewer tracks than SAM2 IDs, merges happened.
-        if sam2_ids:
-            n_merged = len(sam2_ids) - len(npz_files)
-            merge_str = f"  ({n_merged} SAM2 ID(s) merged by re-ID)" if n_merged > 0 else "  (no merges)"
+        # Re-ID summary: if fewer tracks than SAM3 IDs, merges happened.
+        if sam3_ids:
+            n_merged = len(sam3_ids) - len(npz_files)
+            merge_str = f"  ({n_merged} SAM3 ID(s) merged by re-ID)" if n_merged > 0 else "  (no merges)"
             print(
-                f"  SAM2 unique IDs across all frames: {sorted(sam2_ids)}\n"
+                f"  SAM3 unique IDs across all frames: {sorted(sam3_ids)}\n"
                 f"  Body tracks after re-ID:           {len(npz_files)}"
                 + merge_str
             )

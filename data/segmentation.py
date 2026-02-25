@@ -1,8 +1,9 @@
 """Person segmentation and tracking for multi-view scenes.
 
-Uses Grounding DINO for zero-shot person detection and SAM2 for
-mask prediction and temporal tracking.  Provides consistent person IDs
-within each video (SAM2 video propagation) and across videos
+Uses SAM3 for zero-shot text-prompted person detection, mask prediction,
+and temporal tracking.  SAM3 combines detection and tracking in one model,
+replacing the previous Grounding DINO + SAM2 pipeline.  Provides
+consistent person IDs within each video and across videos
 (appearance-based matching).
 
 Output layout for each scene::
@@ -20,7 +21,6 @@ Output layout for each scene::
 
 from __future__ import annotations
 
-import copy
 import gc
 import io
 import json
@@ -35,12 +35,8 @@ import torch.multiprocessing as mp
 from PIL import Image
 from tqdm import tqdm
 
-from sam2.build_sam import build_sam2, build_sam2_video_predictor                   # type: ignore
-from sam2.sam2_image_predictor import SAM2ImagePredictor                            # type: ignore
-from sam2.gdsam2_utils.mask_dictionary_model import MaskDictionaryModel, ObjectInfo # type: ignore
-from sam2.gdsam2_utils.common_utils import CommonUtils                              # type: ignore
-from sam2.gdsam2_utils.video_utils import create_video_from_images                  # type: ignore
-from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+from sam3.model.sam3_video_predictor import Sam3VideoPredictor  # type: ignore
+from sam3.visualization_utils import render_masklet_frame       # type: ignore
 
 from decord import VideoReader, cpu
 
@@ -50,67 +46,36 @@ from data.video_dataset import Scene, Video
 class PersonSegmenter:
     """Segment and track people across all videos in a :class:`Scene`.
 
+    Uses SAM3 which jointly handles text-prompted detection, mask
+    prediction, and temporal tracking in a single model.
+
     Models are loaded lazily on the first call to :meth:`segment_scene`.
 
     Parameters
     ----------
-    sam2_checkpoint : str
-        Path to a SAM2 model checkpoint file.
-    model_cfg : str
-        Path to the SAM2 YAML config (relative to the SAM2 package).
-    gdino_model_id : str
-        HuggingFace model id for Grounding DINO.
+    checkpoint_path : str | None
+        Path to a SAM3 checkpoint file.  When ``None``, the checkpoint
+        is automatically downloaded from HuggingFace.
     device : str
         ``"cuda"`` or ``"cpu"``.
     text_prompt : str
-        Detection query for Grounding DINO (lowercase, ends with ``'.'``).
-    box_threshold : float
-        Minimum confidence for detected bounding boxes.
-    text_threshold : float
-        Minimum confidence for text-grounded detections.
-    detection_step : int
-        Run Grounding DINO every *detection_step* frames; SAM2 propagates
-        masks for the frames in between.
-    min_mask_area : int
-        Minimum number of foreground pixels a tracked mask must have to be
-        carried forward between Grounding DINO windows.  Masks smaller than
-        this are treated as SAM2 drift artefacts and discarded.
-    max_no_detection_windows : int
-        Maximum number of consecutive Grounding DINO windows for which a
-        track can be carried forward without a GDINO confirmation.  After
-        this limit the track is dropped, preventing SAM2 from latching onto
-        background textures after a person leaves the scene.
+        Text query for SAM3 detection (e.g. ``"person"``).
     """
 
     def __init__(
         self,
-        sam2_checkpoint: str = "checkpoints/sam2.1_hiera_large.pt",
-        model_cfg: str = "configs/sam2.1/sam2.1_hiera_l.yaml",
-        gdino_model_id: str = "IDEA-Research/grounding-dino-tiny",
+        checkpoint_path: str | None = None,
         device: str = "cuda",
-        text_prompt: str = "person.",
-        box_threshold: float = 0.3,
-        text_threshold: float = 0.3,
-        detection_step: int = 15,
-        min_mask_area: int = 500,
-        max_no_detection_windows: int = 4,
+        text_prompt: str = "person",
+        redetect_interval: int = 15,
     ):
-        self.sam2_checkpoint = sam2_checkpoint
-        self.model_cfg = model_cfg
-        self.gdino_model_id = gdino_model_id
+        self.checkpoint_path = checkpoint_path
         self.device = device
         self.text_prompt = text_prompt
-        self.box_threshold = box_threshold
-        self.text_threshold = text_threshold
-        self.detection_step = detection_step
-        self.min_mask_area = min_mask_area
-        self.max_no_detection_windows = max_no_detection_windows
+        self.redetect_interval = redetect_interval
 
         # Populated by _init_models()
-        self._video_predictor = None
-        self._image_predictor = None
-        self._gdino_processor = None
-        self._gdino_model = None
+        self._predictor: Sam3VideoPredictor | None = None
         self._models_ready = False
 
     # ------------------------------------------------------------------
@@ -118,41 +83,22 @@ class PersonSegmenter:
     # ------------------------------------------------------------------
 
     def _init_models(self) -> None:
-        """Load SAM2 and Grounding DINO into GPU memory (once)."""
+        """Load SAM3 into GPU memory (once)."""
         if self._models_ready:
             return
 
-        if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_properties(0).major >= 8
-        ):
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-
-        self._video_predictor = build_sam2_video_predictor(
-            self.model_cfg, self.sam2_checkpoint
-        )
-        sam2_model = build_sam2(
-            self.model_cfg, self.sam2_checkpoint, device=self.device
-        )
-        self._image_predictor = SAM2ImagePredictor(sam2_model)
-
-        self._gdino_processor = AutoProcessor.from_pretrained(self.gdino_model_id)
-        self._gdino_model = (
-            AutoModelForZeroShotObjectDetection
-            .from_pretrained(self.gdino_model_id)
-            .to(self.device)
+        self._predictor = Sam3VideoPredictor(
+            checkpoint_path=self.checkpoint_path,
         )
 
         self._models_ready = True
-        print(f"PersonSegmenter: models loaded on {self.device}")
+        print(f"PersonSegmenter: SAM3 model loaded on {self.device}")
 
     def _free_models(self) -> None:
         """Release GPU models so child processes can use the VRAM."""
-        self._video_predictor = None
-        self._image_predictor = None
-        self._gdino_processor = None
-        self._gdino_model = None
+        if self._predictor is not None:
+            self._predictor.shutdown()
+        self._predictor = None
         self._models_ready = False
         gc.collect()
         torch.cuda.empty_cache()
@@ -215,16 +161,9 @@ class PersonSegmenter:
                 str(video.path),
                 video.video_id,
                 str(vid_out),
-                _objects_count_start + vi * 10000,
-                self.sam2_checkpoint,
-                self.model_cfg,
-                self.gdino_model_id,
+                self.checkpoint_path,
                 self.text_prompt,
-                self.box_threshold,
-                self.text_threshold,
-                self.detection_step,
-                self.min_mask_area,
-                self.max_no_detection_windows,
+                self.redetect_interval,
             ))
 
         newly_segmented = bool(worker_args)
@@ -268,7 +207,6 @@ class PersonSegmenter:
         scene_dir.mkdir(parents=True, exist_ok=True)
 
         video_results: dict[str, dict] = {}
-        global_objects_count = objects_count_start
         newly_segmented = False
 
         # Segment each video individually
@@ -279,15 +217,13 @@ class PersonSegmenter:
                 print(f"  {video.video_id}: already segmented, loading cached data")
                 result = PersonSegmenter._load_cached_result(vid_out, video.video_id)
                 video_results[video.video_id] = result
-                global_objects_count = result["objects_count"]
                 continue
 
             if not self._models_ready:
                 self._init_models()
 
-            result = self._segment_video(video, vid_out, global_objects_count)
+            result = self._segment_video(video, vid_out)
             video_results[video.video_id] = result
-            global_objects_count = result["objects_count"]
             newly_segmented = True
 
             del result
@@ -311,208 +247,124 @@ class PersonSegmenter:
         self,
         video: Video,
         output_dir: Path,
-        objects_count: int = 0,
     ) -> dict:
-        """Run the full GDINO + SAM2 pipeline on a single video."""
+        """Run the SAM3 detection + tracking pipeline on a single video."""
 
         # Create output folders
-
         output_dir.mkdir(parents=True, exist_ok=True)
         mask_data_dir = output_dir / "mask_data"
         json_data_dir = output_dir / "json_data"
         mask_data_dir.mkdir(exist_ok=True)
         json_data_dir.mkdir(exist_ok=True)
 
-        # SAM2 requires a directory of numbered JPEGs.
+        # SAM3 accepts a directory of numbered JPEGs or an MP4 file.
         frame_dir = output_dir / "frames"
         frame_names = self._extract_frames(video, frame_dir)
 
-        # Initialize the video predictor
-        # We don't predict again people at every frame, we predict every
-        # step frames, and propagate to the remaining frames using
-        # SAM2's video predictor
+        print(f"  {video.video_id}: {len(frame_names)} frames")
 
-        inference_state = self._video_predictor.init_state(
-            video_path=str(frame_dir),
-            offload_video_to_cpu=True,
-            offload_state_to_cpu=True,
-            async_loading_frames=False,
+        # Start a SAM3 session on the video frames
+        response = self._predictor.handle_request(
+            request=dict(type="start_session", resource_path=str(frame_dir))
         )
+        session_id = response["session_id"]
 
-        sam2_masks = MaskDictionaryModel()
-        step = self.detection_step
-        # Tracks how many consecutive GDINO windows each object has been
-        # carried forward without a direct GDINO detection.
-        no_detection_count: dict[int, int] = {}
-
-        print(f"  {video.video_id}: {len(frame_names)} frames, step={step}")
-
-        for start_idx in range(0, len(frame_names), step):
-            img_path = frame_dir / frame_names[start_idx]
-            image = Image.open(img_path)
-            base_name = frame_names[start_idx].split(".")[0]
-
-            mask_dict = MaskDictionaryModel(
-                promote_type="mask",
-                mask_name=f"mask_{base_name}.npy",
-            )
-
-            # ---- Grounding DINO detection for the rooted frame----
-            inputs = self._gdino_processor(
-                images=image, text=self.text_prompt, return_tensors="pt"
-            ).to(self.device)
-
-            with torch.no_grad():
-                outputs = self._gdino_model(**inputs)
-
-            # Predict the boxes for people in the rooted frames
-
-            results = self._gdino_processor.post_process_grounded_object_detection(
-                outputs,
-                inputs.input_ids,
-                threshold=self.box_threshold,
-                text_threshold=self.text_threshold,
-                target_sizes=[image.size[::-1]],
-            )
-
-            input_boxes = results[0]["boxes"]
-            labels = results[0]["labels"]
-
-            if input_boxes.shape[0] != 0:
-                # Now that we detected people, we just extract the masks for them
-                self._image_predictor.set_image(np.array(image.convert("RGB")))
-                masks, scores, logits = self._image_predictor.predict(
-                    point_coords=None,
-                    point_labels=None,
-                    box=input_boxes,
-                    multimask_output=False,
+        try:
+            # Add text prompt at regular intervals so people entering after
+            # frame 0 are also detected and tracked.
+            keyframes = range(0, len(frame_names), self.redetect_interval)
+            for kf in keyframes:
+                self._predictor.handle_request(
+                    request=dict(
+                        type="add_prompt",
+                        session_id=session_id,
+                        frame_index=kf,
+                        text=self.text_prompt,
+                    )
                 )
 
-                if masks.ndim == 2:
-                    masks = masks[None]
-                    scores = scores[None]
-                    logits = logits[None]
-                elif masks.ndim == 4:
-                    masks = masks.squeeze(1)
-
-                mask_dict.add_new_frame_annotation(
-                    mask_list=torch.tensor(masks).to(self.device),
-                    box_list=torch.tensor(input_boxes),
-                    label_list=labels,
-                    scores_list=torch.tensor(scores).to(self.device),
-                )
-
-                objects_count = mask_dict.update_masks(
-                    tracking_annotation_dict=sam2_masks,
-                    iou_threshold=0.8,
-                    objects_count=objects_count,
-                )
-
-                # Reset the no-detection counter for every object that GDINO
-                # confirmed this window.
-                for obj_id in mask_dict.labels:
-                    no_detection_count[obj_id] = 0
-
-                # Carry forward SAM2-tracked objects that GDINO missed, but
-                # only if the mask is large enough (not a drift artefact) and
-                # the track hasn't been unconfirmed for too many windows in a
-                # row (prevents latching onto a hanging t-shirt after a person
-                # has left).
-                for obj_id, obj_info in sam2_masks.labels.items():
-                    if obj_id in mask_dict.labels:
-                        continue
-                    if obj_info.mask.sum() < self.min_mask_area:
-                        continue
-                    count = no_detection_count.get(obj_id, 0) + 1
-                    if count > self.max_no_detection_windows:
-                        continue
-                    no_detection_count[obj_id] = count
-                    mask_dict.labels[obj_id] = obj_info
-            else:
-                # No GDINO detections this window: carry forward tracked
-                # objects subject to the same area and consecutive-miss limits.
-                mask_dict = MaskDictionaryModel(
-                    mask_height=sam2_masks.mask_height,
-                    mask_width=sam2_masks.mask_width,
-                )
-                for obj_id, obj_info in sam2_masks.labels.items():
-                    if obj_info.mask.sum() < self.min_mask_area:
-                        continue
-                    count = no_detection_count.get(obj_id, 0) + 1
-                    if count > self.max_no_detection_windows:
-                        continue
-                    no_detection_count[obj_id] = count
-                    mask_dict.labels[obj_id] = obj_info
-
-            # Nothing detected in this window — save empties.
-            # FIXME: This saves empty for all the frames, might need a better fallback
-            if len(mask_dict.labels) == 0:
-                mask_dict.save_empty_mask_and_json(
-                    str(mask_data_dir),
-                    str(json_data_dir),
-                    image_name_list=frame_names[start_idx : start_idx + step],
-                )
-                continue
-
-            # SAM2 video propagation for the other frames until we reach the next rooted
-            self._video_predictor.reset_state(inference_state)
-
-            for obj_id, obj_info in mask_dict.labels.items():
-                self._video_predictor.add_new_mask(
-                    inference_state, start_idx, obj_id, obj_info.mask,
-                )
-
-            video_segments: dict[int, MaskDictionaryModel] = {}
-            for out_frame_idx, out_obj_ids, out_mask_logits in (
-                self._video_predictor.propagate_in_video(
-                    inference_state,
-                    max_frame_num_to_track=step,
-                    start_frame_idx=start_idx,
+            # Propagate through the entire video
+            objects_count = 0
+            for response in self._predictor.handle_stream_request(
+                request=dict(
+                    type="propagate_in_video",
+                    session_id=session_id,
                 )
             ):
-                frame_masks = MaskDictionaryModel()
-                for i, out_obj_id in enumerate(out_obj_ids):
-                    # Build segmentation masks for the bounding boxes we extracted with DINO
-                    out_mask = out_mask_logits[i] > 0.0
-                    obj_info = ObjectInfo(
-                        instance_id=out_obj_id,
-                        mask=out_mask[0],
-                        class_name=mask_dict.get_target_class_name(out_obj_id),
-                    )
-                    obj_info.update_box()
-                    frame_masks.labels[out_obj_id] = obj_info
-                    frame_masks.mask_name = (
-                        f"mask_{frame_names[out_frame_idx].split('.')[0]}.npy"
-                    )
-                    frame_masks.mask_height = out_mask.shape[-2]
-                    frame_masks.mask_width = out_mask.shape[-1]
+                frame_idx = response["frame_index"]
+                outputs = response["outputs"]
 
-                video_segments[out_frame_idx] = frame_masks
-                sam2_masks = copy.deepcopy(frame_masks)
+                obj_ids = outputs["out_obj_ids"]       # (N,)
+                masks = outputs["out_binary_masks"]    # (N, H, W) bool
+                boxes_xywh = outputs["out_boxes_xywh"] # (N, 4) normalised
+                scores = outputs["out_probs"]           # (N,)
 
-            # Save masks + metadata
-            for frame_idx, fmasks in video_segments.items():
-                # Drop objects whose mask is empty (prevents bbox 0,0,0,0)
-                for obj_id in list(fmasks.labels):
-                    if fmasks.labels[obj_id].mask.sum() == 0:
-                        del fmasks.labels[obj_id]
+                frame_name = frame_names[frame_idx]
+                base_name = frame_name.split(".")[0]
+                mask_name = f"mask_{base_name}.npy"
 
-                mask_img = torch.zeros(fmasks.mask_height, fmasks.mask_width)
-                for obj_id, obj_info in fmasks.labels.items():
-                    mask_img[obj_info.mask == True] = obj_id
+                if len(obj_ids) == 0:
+                    # No detections — save empty mask and metadata
+                    h, w = Image.open(frame_dir / frame_name).size[::-1]
+                    empty_mask = np.zeros((h, w), dtype=np.uint16)
+                    np.save(str(mask_data_dir / mask_name), empty_mask)
+                    meta = {
+                        "mask_name": mask_name,
+                        "mask_height": h,
+                        "mask_width": w,
+                        "labels": {},
+                    }
+                    json_path = json_data_dir / mask_name.replace(".npy", ".json")
+                    with open(json_path, "w") as f:
+                        json.dump(meta, f)
+                    continue
 
-                np.save(
-                    str(mask_data_dir / fmasks.mask_name),
-                    mask_img.numpy().astype(np.uint16),
-                )
-                json_path = json_data_dir / fmasks.mask_name.replace(
-                    ".npy", ".json"
-                )
+                H, W = masks.shape[1], masks.shape[2]
+
+                # Build combined uint16 mask (pixel value = person ID)
+                mask_img = np.zeros((H, W), dtype=np.uint16)
+                labels_meta: dict[str, dict] = {}
+
+                for i, obj_id in enumerate(obj_ids):
+                    oid = int(obj_id)
+                    binary = masks[i]  # (H, W) bool
+                    mask_img[binary] = oid
+
+                    # Compute bounding box from binary mask
+                    ys, xs = np.where(binary)
+                    if len(ys) > 0:
+                        x1, y1, x2, y2 = int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+                    else:
+                        x1 = y1 = x2 = y2 = 0
+
+                    labels_meta[str(oid)] = {
+                        "instance_id": oid,
+                        "class_name": self.text_prompt,
+                        "x1": x1, "y1": y1,
+                        "x2": x2, "y2": y2,
+                        "score": float(scores[i]),
+                    }
+
+                    if oid > objects_count:
+                        objects_count = oid
+
+                np.save(str(mask_data_dir / mask_name), mask_img)
+
+                meta = {
+                    "mask_name": mask_name,
+                    "mask_height": H,
+                    "mask_width": W,
+                    "labels": labels_meta,
+                }
+                json_path = json_data_dir / mask_name.replace(".npy", ".json")
                 with open(json_path, "w") as f:
-                    json.dump(fmasks.to_dict(), f)
+                    json.dump(meta, f)
+        finally:
+            # Always close the session to free GPU memory
+            self._predictor.handle_request(
+                request=dict(type="close_session", session_id=session_id)
+            )
 
-        del inference_state, video_segments
-        self._image_predictor.reset_predictor()
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -534,41 +386,20 @@ class PersonSegmenter:
         video_path: str,
         video_id: str,
         output_dir: str,
-        objects_count_start: int,
-        sam2_checkpoint: str,
-        model_cfg: str,
-        gdino_model_id: str,
+        checkpoint_path: str | None,
         text_prompt: str,
-        box_threshold: float,
-        text_threshold: float,
-        detection_step: int,
-        min_mask_area: int,
-        max_no_detection_windows: int,
+        redetect_interval: int = 30,
     ) -> dict:
         """Segment one video on a specific GPU (runs in a child process).
 
-        Loads its own models and uses decord directly for frame extraction
-        (no Video object re-creation needed).
+        Loads its own SAM3 model and processes the video end-to-end.
         """
         device = f"cuda:{gpu_id}"
         torch.cuda.set_device(gpu_id)
 
-        if torch.cuda.get_device_properties(gpu_id).major >= 8:
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-
-        # Load models on this GPU
-        video_predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint)
-        sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
-        image_predictor = SAM2ImagePredictor(sam2_model)
-        gdino_processor = AutoProcessor.from_pretrained(gdino_model_id)
-        gdino_model = (
-            AutoModelForZeroShotObjectDetection
-            .from_pretrained(gdino_model_id)
-            .to(device)
-        )
-
-        print(f"  [GPU {gpu_id}] Models loaded for {video_id}")
+        # Load SAM3 model on this GPU
+        predictor = Sam3VideoPredictor(checkpoint_path=checkpoint_path)
+        print(f"  [GPU {gpu_id}] SAM3 model loaded for {video_id}")
 
         # Set up output directories
         vid_out = Path(output_dir)
@@ -578,178 +409,111 @@ class PersonSegmenter:
         mask_data_dir.mkdir(exist_ok=True)
         json_data_dir.mkdir(exist_ok=True)
 
-        # Extract frames directly with decord (no Video object needed)
+        # Extract frames directly with decord
         frame_dir = vid_out / "frames"
         frame_names = PersonSegmenter._extract_frames_from_path(
             video_path, video_id, frame_dir
         )
 
-        # Init SAM2 video predictor
-        inference_state = video_predictor.init_state(
-            video_path=str(frame_dir),
-            offload_video_to_cpu=True,
-            offload_state_to_cpu=True,
-            async_loading_frames=False,
+        print(f"  [GPU {gpu_id}] {video_id}: {len(frame_names)} frames")
+
+        # Start a SAM3 session on the video frames
+        response = predictor.handle_request(
+            request=dict(type="start_session", resource_path=str(frame_dir))
         )
+        session_id = response["session_id"]
 
-        sam2_masks = MaskDictionaryModel()
-        objects_count = objects_count_start
-        step = detection_step
-        no_detection_count: dict[int, int] = {}
-
-        print(f"  [GPU {gpu_id}] {video_id}: {len(frame_names)} frames, step={step}")
-
-        for start_idx in range(0, len(frame_names), step):
-            img_path = frame_dir / frame_names[start_idx]
-            image = Image.open(img_path)
-            base_name = frame_names[start_idx].split(".")[0]
-
-            mask_dict = MaskDictionaryModel(
-                promote_type="mask",
-                mask_name=f"mask_{base_name}.npy",
-            )
-
-            # Grounding DINO detection
-            inputs = gdino_processor(
-                images=image, text=text_prompt, return_tensors="pt"
-            ).to(device)
-
-            with torch.no_grad():
-                outputs = gdino_model(**inputs)
-
-            results = gdino_processor.post_process_grounded_object_detection(
-                outputs,
-                inputs.input_ids,
-                threshold=box_threshold,
-                text_threshold=text_threshold,
-                target_sizes=[image.size[::-1]],
-            )
-
-            input_boxes = results[0]["boxes"]
-            labels = results[0]["labels"]
-
-            if input_boxes.shape[0] != 0:
-                image_predictor.set_image(np.array(image.convert("RGB")))
-                masks, scores, logits = image_predictor.predict(
-                    point_coords=None,
-                    point_labels=None,
-                    box=input_boxes,
-                    multimask_output=False,
+        objects_count = 0
+        try:
+            # Add text prompt at regular intervals so people entering after
+            # frame 0 are also detected and tracked.
+            keyframes = range(0, len(frame_names), redetect_interval)
+            for kf in keyframes:
+                predictor.handle_request(
+                    request=dict(
+                        type="add_prompt",
+                        session_id=session_id,
+                        frame_index=kf,
+                        text=text_prompt,
+                    )
                 )
 
-                if masks.ndim == 2:
-                    masks = masks[None]
-                    scores = scores[None]
-                    logits = logits[None]
-                elif masks.ndim == 4:
-                    masks = masks.squeeze(1)
-
-                mask_dict.add_new_frame_annotation(
-                    mask_list=torch.tensor(masks).to(device),
-                    box_list=torch.tensor(input_boxes),
-                    label_list=labels,
-                    scores_list=torch.tensor(scores).to(device),
-                )
-
-                objects_count = mask_dict.update_masks(
-                    tracking_annotation_dict=sam2_masks,
-                    iou_threshold=0.8,
-                    objects_count=objects_count,
-                )
-
-                # Reset the no-detection counter for GDINO-confirmed objects.
-                for obj_id in mask_dict.labels:
-                    no_detection_count[obj_id] = 0
-
-                # Carry forward with area and consecutive-miss limits.
-                for obj_id, obj_info in sam2_masks.labels.items():
-                    if obj_id in mask_dict.labels:
-                        continue
-                    if obj_info.mask.sum() < min_mask_area:
-                        continue
-                    count = no_detection_count.get(obj_id, 0) + 1
-                    if count > max_no_detection_windows:
-                        continue
-                    no_detection_count[obj_id] = count
-                    mask_dict.labels[obj_id] = obj_info
-            else:
-                # No GDINO detections: carry forward with limits.
-                mask_dict = MaskDictionaryModel(
-                    mask_height=sam2_masks.mask_height,
-                    mask_width=sam2_masks.mask_width,
-                )
-                for obj_id, obj_info in sam2_masks.labels.items():
-                    if obj_info.mask.sum() < min_mask_area:
-                        continue
-                    count = no_detection_count.get(obj_id, 0) + 1
-                    if count > max_no_detection_windows:
-                        continue
-                    no_detection_count[obj_id] = count
-                    mask_dict.labels[obj_id] = obj_info
-
-            if len(mask_dict.labels) == 0:
-                mask_dict.save_empty_mask_and_json(
-                    str(mask_data_dir),
-                    str(json_data_dir),
-                    image_name_list=frame_names[start_idx : start_idx + step],
-                )
-                continue
-
-            # SAM2 video propagation
-            video_predictor.reset_state(inference_state)
-
-            for obj_id, obj_info in mask_dict.labels.items():
-                video_predictor.add_new_mask(
-                    inference_state, start_idx, obj_id, obj_info.mask,
-                )
-
-            video_segments: dict[int, MaskDictionaryModel] = {}
-            for out_frame_idx, out_obj_ids, out_mask_logits in (
-                video_predictor.propagate_in_video(
-                    inference_state,
-                    max_frame_num_to_track=step,
-                    start_frame_idx=start_idx,
+            # Propagate through entire video
+            for resp in predictor.handle_stream_request(
+                request=dict(
+                    type="propagate_in_video",
+                    session_id=session_id,
                 )
             ):
-                frame_masks = MaskDictionaryModel()
-                for i, out_obj_id in enumerate(out_obj_ids):
-                    out_mask = out_mask_logits[i] > 0.0
-                    obj_info = ObjectInfo(
-                        instance_id=out_obj_id,
-                        mask=out_mask[0],
-                        class_name=mask_dict.get_target_class_name(out_obj_id),
-                    )
-                    obj_info.update_box()
-                    frame_masks.labels[out_obj_id] = obj_info
-                    frame_masks.mask_name = (
-                        f"mask_{frame_names[out_frame_idx].split('.')[0]}.npy"
-                    )
-                    frame_masks.mask_height = out_mask.shape[-2]
-                    frame_masks.mask_width = out_mask.shape[-1]
+                frame_idx = resp["frame_index"]
+                outputs = resp["outputs"]
 
-                video_segments[out_frame_idx] = frame_masks
-                sam2_masks = copy.deepcopy(frame_masks)
+                obj_ids = outputs["out_obj_ids"]
+                masks = outputs["out_binary_masks"]
+                scores = outputs["out_probs"]
 
-            # Save masks + metadata
-            for frame_idx, fmasks in video_segments.items():
-                # Drop objects whose mask is empty (prevents bbox 0,0,0,0)
-                for obj_id in list(fmasks.labels):
-                    if fmasks.labels[obj_id].mask.sum() == 0:
-                        del fmasks.labels[obj_id]
+                frame_name = frame_names[frame_idx]
+                base_name = frame_name.split(".")[0]
+                mask_name = f"mask_{base_name}.npy"
 
-                mask_img = torch.zeros(fmasks.mask_height, fmasks.mask_width)
-                for obj_id, obj_info in fmasks.labels.items():
-                    mask_img[obj_info.mask == True] = obj_id
+                if len(obj_ids) == 0:
+                    h, w = Image.open(frame_dir / frame_name).size[::-1]
+                    empty_mask = np.zeros((h, w), dtype=np.uint16)
+                    np.save(str(mask_data_dir / mask_name), empty_mask)
+                    meta = {
+                        "mask_name": mask_name,
+                        "mask_height": h,
+                        "mask_width": w,
+                        "labels": {},
+                    }
+                    json_path = json_data_dir / mask_name.replace(".npy", ".json")
+                    with open(json_path, "w") as f:
+                        json.dump(meta, f)
+                    continue
 
-                np.save(
-                    str(mask_data_dir / fmasks.mask_name),
-                    mask_img.numpy().astype(np.uint16),
-                )
-                json_path = json_data_dir / fmasks.mask_name.replace(".npy", ".json")
+                H, W = masks.shape[1], masks.shape[2]
+                mask_img = np.zeros((H, W), dtype=np.uint16)
+                labels_meta: dict[str, dict] = {}
+
+                for i, obj_id in enumerate(obj_ids):
+                    oid = int(obj_id)
+                    binary = masks[i]
+                    mask_img[binary] = oid
+
+                    ys, xs = np.where(binary)
+                    if len(ys) > 0:
+                        x1, y1, x2, y2 = int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+                    else:
+                        x1 = y1 = x2 = y2 = 0
+
+                    labels_meta[str(oid)] = {
+                        "instance_id": oid,
+                        "class_name": text_prompt,
+                        "x1": x1, "y1": y1,
+                        "x2": x2, "y2": y2,
+                        "score": float(scores[i]),
+                    }
+
+                    if oid > objects_count:
+                        objects_count = oid
+
+                np.save(str(mask_data_dir / mask_name), mask_img)
+
+                meta = {
+                    "mask_name": mask_name,
+                    "mask_height": H,
+                    "mask_width": W,
+                    "labels": labels_meta,
+                }
+                json_path = json_data_dir / mask_name.replace(".npy", ".json")
                 with open(json_path, "w") as f:
-                    json.dump(fmasks.to_dict(), f)
+                    json.dump(meta, f)
+        finally:
+            predictor.handle_request(
+                request=dict(type="close_session", session_id=session_id)
+            )
 
-        del inference_state, video_predictor, image_predictor, gdino_model, gdino_processor
+        del predictor
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -915,9 +679,8 @@ class PersonSegmenter:
     def _visualize(self, video: Video, video_dir: Path) -> None:
         """Render annotated frames and encode an mp4.
 
-        Temporarily unpacks ``mask_data.npz`` into a ``mask_data/`` directory
-        so the visualisation utility can read individual frame files, then
-        removes it once rendering is complete.
+        Unpacks ``mask_data.npz`` to reconstruct per-frame SAM3 output
+        format, renders overlays, and writes an mp4 video.
         """
         frame_dir = video_dir / "frames"
         npz_path = video_dir / "mask_data.npz"
@@ -925,24 +688,81 @@ class PersonSegmenter:
         result_dir = video_dir / "result"
         result_dir.mkdir(exist_ok=True)
 
-        # Unpack .npz → mask_data/ for the visualisation utility.
-        mask_dir = video_dir / "mask_data"
-        mask_dir.mkdir(exist_ok=True)
-        with zipfile.ZipFile(str(npz_path), "r") as zf:
-            for name in zf.namelist():
-                with zf.open(name) as f:
-                    arr = np.load(io.BytesIO(f.read()))
-                np.save(str(mask_dir / name), arr)
-
-        try:
-            CommonUtils.draw_masks_and_box_with_supervision(
-                str(frame_dir), str(mask_dir), str(json_dir), str(result_dir),
-            )
-        finally:
-            shutil.rmtree(str(mask_dir))
-
-        out_video = video_dir / "segmentation.mp4"
-        create_video_from_images(
-            str(result_dir), str(out_video), frame_rate=int(video.fps),
+        frame_names = sorted(
+            p.name for p in frame_dir.iterdir()
+            if p.suffix.lower() in (".jpg", ".jpeg")
         )
+        if not frame_names:
+            return
+
+        # Read first frame to get video dimensions
+        first_frame = cv2.imread(str(frame_dir / frame_names[0]))
+        height, width = first_frame.shape[:2]
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out_video = video_dir / "segmentation.mp4"
+        writer = cv2.VideoWriter(
+            str(out_video), fourcc, int(video.fps), (width, height)
+        )
+
+        for frame_name in tqdm(frame_names, desc="Rendering visualisation", leave=False):
+            base_name = frame_name.split(".")[0]
+            mask_key = f"mask_{base_name}"
+
+            # Load the frame image
+            img = cv2.imread(str(frame_dir / frame_name))
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+            # Load mask from npz
+            mask_arr = PersonSegmenter._load_mask_from_npz(npz_path, mask_key)
+
+            # Load JSON metadata for bounding boxes
+            json_path = json_dir / f"mask_{base_name}.json"
+            labels_meta = {}
+            if json_path.exists():
+                with open(json_path) as f:
+                    meta = json.load(f)
+                labels_meta = meta.get("labels", {})
+
+            if mask_arr is None or int(mask_arr.max()) == 0:
+                # No detections — write raw frame
+                overlay = img_rgb.copy()
+            else:
+                # Reconstruct SAM3-style output dict for render_masklet_frame
+                unique_ids = sorted(set(mask_arr.flatten()) - {0})
+                obj_ids = np.array(unique_ids, dtype=np.int64)
+                binary_masks = np.stack(
+                    [(mask_arr == oid) for oid in unique_ids], axis=0
+                )
+                # Get scores and normalised boxes from JSON metadata
+                probs = []
+                boxes_xywh = []
+                for oid in unique_ids:
+                    info = labels_meta.get(str(oid), {})
+                    probs.append(info.get("score", 1.0))
+                    x1 = info.get("x1", 0)
+                    y1 = info.get("y1", 0)
+                    x2 = info.get("x2", 0)
+                    y2 = info.get("y2", 0)
+                    boxes_xywh.append([
+                        x1 / width, y1 / height,
+                        (x2 - x1) / width, (y2 - y1) / height,
+                    ])
+
+                sam3_outputs = {
+                    "out_obj_ids": obj_ids,
+                    "out_binary_masks": binary_masks,
+                    "out_probs": np.array(probs),
+                    "out_boxes_xywh": np.array(boxes_xywh) if boxes_xywh else np.zeros((0, 4)),
+                }
+                overlay = render_masklet_frame(img_rgb, sam3_outputs)
+
+            # Save annotated frame
+            cv2.imwrite(
+                str(result_dir / frame_name),
+                cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR),
+            )
+            writer.write(cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+
+        writer.release()
         print(f"Visualisation saved: {out_video}")

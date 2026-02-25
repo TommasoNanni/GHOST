@@ -7,14 +7,9 @@ data:
   mhr_model_path: null
 
 segmentation:
-  sam2_checkpoint: "checkpoints/sam2.1_hiera_large.pt"
-  sam2_cfg: "configs/sam2.1/sam2.1_hiera_l.yaml"
-  gdino_id: "IDEA-Research/grounding-dino-tiny"
-  box_threshold: 0.45         # minimum confidence for Grounding Dino to detect a bounding box
-  text_threshold: 0.45
-  detection_step: 15          # Number of steps to propagate the prediction for
-  min_mask_area: 500          # Minimum mask area in pixels; smaller masks are treated as drift artefacts
-  max_no_detection_windows: 2 # Max consecutive GDINO windows without detection before a track is dropped
+  checkpoint_path: null         # Path to SAM3 checkpoint; null = auto-download from HuggingFace
+  text_prompt: "person"         # Text query for SAM3 detection
+  redetect_interval: 15         # Add text prompt every N frames so late arrivals are detected
 
 parameters_extraction:
   reid_threshold: 0.75
