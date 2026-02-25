@@ -122,3 +122,6 @@ Download model weights and place them in `checkpoints/`:
 | SAM3D Body | `facebook/sam-3d-body-dinov3` (auto-downloaded via HuggingFace) |
 
 SMPL body model files should be placed in `body_models/`.
+
+
+Removed the dependency <2 in sam3, also added a pyproject.toml to sam3d

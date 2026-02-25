@@ -1,18 +1,5 @@
 """
 Modular Trainer for PyTorch models.
-
-Features
---------
-- Pluggable named loss functions with per-loss weights
-- Per-loss statistics: mean, median, std, min, max, configurable percentiles
-- Multiple logging backends: console (tqdm + Python logging), CSV, JSON Lines, W&B
-- Step-level and epoch-level W&B logging
-- Gradient accumulation and gradient clipping
-- Mixed-precision (AMP) training via torch.cuda.amp
-- LR scheduling in "epoch" or "step" mode (ReduceLROnPlateau-aware)
-- Checkpointing: best, last, every-N epochs, with full resume support
-- Early stopping with configurable patience, metric, mode, and min-delta
-- Callback hooks: on_train_start/end, on_epoch_start/end, on_step_end, on_val_end
 """
 
 from __future__ import annotations

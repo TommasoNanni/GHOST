@@ -9,3 +9,4 @@ body_models/
 .pixi/
 sam-3d-body/
 logs/
+bash_jobs/download_rich_train.sh
