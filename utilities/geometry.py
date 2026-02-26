@@ -28,7 +28,7 @@ def project_to_2d(vertices, K):
     """
     B,T,P,V = vertices.shape[:4]
     K_expanded = K.reshape(B,T,1,1,3,3).expand(B,T,P,V,3,3)
-    vertices_flat = vertices.reshape(B*T*P*V, 3)
+    vertices_flat = vertices.reshape(B*T*P*V, 3, 1)
     K_flat = K_expanded.reshape(B*T*P*V, 3, 3)
 
     projected = torch.bmm(K_flat, vertices_flat).reshape(B,T,P,V,3)

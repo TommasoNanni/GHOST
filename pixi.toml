@@ -71,5 +71,5 @@ hatchling = ">=1.28.0, <2"
 # Run this once after `pixi install`: pixi run setup-cuda
 # Installs the CUDA 12.6 build of the SAME torch version that pymomentum depends on
 # (currently 2.7.1). Same version = ABI-compatible, so pymomentum keeps working.
-setup-cuda = "python -m pip install --force-reinstall 'torch==2.7.1+cu128' 'torchvision==0.22.1+cu128' --index-url https://download.pytorch.org/whl/cu128"
+setup-cuda = "python -m pip install --force-reinstall 'torch==2.7.1+cu128' 'torchvision==0.22.1+cu128' --index-url https://download.pytorch.org/whl/cu128 && python -m pip install --no-build-isolation 'git+https://github.com/facebookresearch/pytorch3d.git'"
 download-model = "python -c \"from huggingface_hub import snapshot_download; snapshot_download(repo_id='facebook/sam3', local_dir='checkpoints', local_dir_use_symlinks=False)\""

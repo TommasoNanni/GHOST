@@ -1,15 +1,18 @@
 """Loss base class for fusion training."""
 
 from __future__ import annotations
+import logging
 
 from abc import ABC, abstractmethod
 from typing import Any
 
 import torch
+import torch.nn as nn
 
 from utilities.smplx_utilities import get_smplx_vertices
 from utilities.camera_utilities import extract_cameras
 from utilities.geometry import project_to_2d, skew_symmetric
+from configuration import CONFIG
 
 class Loss(ABC):
     """Base class for all fusion training losses.
@@ -29,7 +32,7 @@ class Loss(ABC):
         self.weight = weight
 
     @abstractmethod
-    def forward(self, *args) -> torch.Tensor:
+    def forward(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         """Compute the loss.
 
         Parameters
@@ -43,8 +46,8 @@ class Loss(ABC):
         the returned tensor must support .backward() during training).
         """
 
-    def __call__(self, **kwargs) -> torch.Tensor:
-        return self.forward(**kwargs)
+    def __call__(self, *args: Any, **kwargs: Any) -> torch.Tensor:
+        return self.forward(*args, **kwargs)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name!r}, weight={self.weight})"
@@ -62,7 +65,7 @@ class EpipolarLoss(Loss):
             pose_stream: torch.Tensor, 
             shape_stream: torch.Tensor, 
             camera_stream: torch.Tensor,
-            img_size: int = 224
+            img_size: tuple[int, int] = (224, 224),
         ) -> torch.Tensor:
         """
         computes the epipolar loss starting from body poses and shapes in 
@@ -76,6 +79,7 @@ class EpipolarLoss(Loss):
         """
         B, T, K, P, J, _ = pose_stream.shape
         num_pairs = 0
+        total_loss = pose_stream.new_zeros([])
 
         for i in range(K):
             for j in range(i+1,K):
@@ -88,8 +92,8 @@ class EpipolarLoss(Loss):
                 vertices_i = get_smplx_vertices(pose_i, shape_i) # (B, T, P, V, 3) in camera i
                 vertices_j = get_smplx_vertices(pose_j, shape_j) # (B, T, P, V, 3) in camera j
 
-                R_i, t_i, K_i = extract_camera(cameras[:, :, i], img_size)
-                R_j, t_j, K_j = extract_camera(cameras[:, :, j], img_size)
+                R_i, t_i, K_i = extract_cameras(camera_stream[:, :, i], img_size)
+                R_j, t_j, K_j = extract_cameras(camera_stream[:, :, j], img_size)
 
                 F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
 
@@ -101,7 +105,7 @@ class EpipolarLoss(Loss):
                 visible = (vertices_i[..., 2] > 0) & (vertices_j[..., 2] > 0)
 
                 loss_ij = (epipolar_errors**2)*visible.float()
-                total_loss = loss_ij.sum() / (visible.sum() + 1e-8)
+                total_loss += loss_ij.sum() / (visible.sum() + 1e-8)
                 num_pairs += 1
         
         return total_loss / num_pairs
@@ -175,3 +179,115 @@ class EpipolarLoss(Loss):
         ).reshape(B,T,P,V)
 
         return error
+
+class MSELoss(Loss):
+    def __init__(
+        self, name: str = "MSE Loss", weight: float = 1.0
+    ) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, pred, true):
+        loss_fn = nn.MSELoss()
+        return loss_fn(pred, true)
+
+class TemporalSmoothnessLoss(Loss):
+    def __init__(
+        self, name: str = "Temporal smoothness loss", weight: float = 1.0
+    )-> None:
+        super().__init__(name, weight)
+
+    def forward(
+        self,
+        current: torch.Tensor, 
+        previous1: torch.Tensor | None = None, 
+        previous2: torch.Tensor | None = None,
+    ):
+        if previous1 is None and previous2 is None:
+            if current is None:
+                raise ValueError("Temporal Smoothness needs the current parameters not to be None")
+            logging.warning("You called Temporal Smoothness loss with previous parameters None, returning norm of identity")
+            return torch.norm(current)**2
+        elif previous2 is None:
+            logging.warning("You called Temporal Smoothness loss with previous2 parameters None, returning velocity constraint")
+            return torch.norm(current - previous1)**2
+        elif previous1 is not None and previous2 is not None and current is not None:
+            return torch.norm(current - 2*previous1 + previous2)**2
+        else:
+            raise ValueError(
+                f"""Invalid parameters configuration. Is None? \n
+                 Current: {(current is None)}, Previous1 {(previous1 is None)}, Previous2 {(previous2 is None)}"""
+            )
+
+class VPoserLoss(Loss):
+    def __init__(
+        self,
+        name: str = "VPoser Loss",
+        weight: float = 1.0,
+    ) -> None:
+        super().__init__(name, weight)
+
+        from human_body_prior.tools.model_loader import load_model
+        from human_body_prior.models.vposer_model import VPoser
+
+        self.vposer, _ = load_model(
+            CONFIG.fusion.loss.VPoser_path,
+            model_code=VPoser,
+            remove_words_in_model_weights="vp_model.",
+            disable_grad=True,
+        )
+        self.vposer.eval()
+
+    def forward(self, pose: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the VPoser KL-divergence prior on body pose.
+
+        Parameters
+        ----------
+        pose : ``(*, J, 3)`` — SMPLX pose in **axis-angle** format.
+            J must be ≥ 22 (first 22 joints are SMPL body joints; root is
+            index 0 and is skipped, so joints 1-21 are used).
+            The tensor is flattened to ``(N, 63)`` before encoding, where
+            63 = 21 joints × 3 axis-angle values.
+
+        Returns
+        -------
+        Scalar KL loss: KL( q(z|x) ‖ N(0,I) )
+        """
+        # slice body joints 1-21 (skip root), flatten to (N, 63)
+        smpl_pose = pose[..., 1:22, :].reshape(-1, 63)
+
+        dist = self.vposer.encode(smpl_pose)
+
+        mean = dist.mean          # (N, latent_dim)
+        std  = dist.scale         # (N, latent_dim)
+        logvar = 2.0 * torch.log(std + 1e-8)
+
+        kl_loss = -0.5 * torch.sum(1 + logvar - mean ** 2 - logvar.exp(), dim=-1)
+
+        return kl_loss.mean()
+
+
+class BetaConsistencyLoss(Loss):
+    def __init__(
+        self,
+        name: str = "Beta Consistency Loss",
+        weight: float = 1.0,
+    ) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, beta_stream: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the consistency loss on shape parameters across cameras.
+
+        Parameters
+        ----------
+        beta_stream : (B, T, K, P, S) — stream of shape parameters for each camera
+
+        Returns
+        -------
+        Scalar loss encouraging consistency of shape parameters across cameras.
+        """
+
+        beta_mean = beta_stream.mean(dim=2, keepdim=True)  # (B, T, 1, P, S)
+        loss = torch.mean((beta_stream - beta_mean)**2)
+        return loss

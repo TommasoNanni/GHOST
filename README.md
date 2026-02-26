@@ -128,3 +128,5 @@ Removed the dependency <2 in sam3, also added a pyproject.toml to sam3d
 
 
 Run the download_model task in pixi with pixi run download-model
+
+Human body prior has to be installed with pixi run pip install --no-deps -e ./human_body_prior since it has conflicts with dependencies with torch.

@@ -10,3 +10,4 @@ body_models/
 sam-3d-body/
 logs/
 bash_jobs/download_rich_train.sh
+human_body_prior/
