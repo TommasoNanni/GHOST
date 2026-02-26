@@ -4,10 +4,15 @@ Implements the metrics from
 *"Reconstructing People, Places, and Cameras"*
 (Müller, Choi et al., arXiv 2412.17806, CVPR 2025):
 
-**Human metrics** (all in metres):
+**Human metrics — position-based (metres)**:
     W-MPJPE ↓  — world MPJPE (SE(3)-aligned cameras)
     GA-MPJPE ↓ — group-aligned MPJPE (Sim(3) over all humans)
     PA-MPJPE ↓ — Procrustes-aligned MPJPE (per-human Sim(3))
+
+**Human metrics — rotation-based (degrees)**:
+    W-MPJRE ↓  — world MPJRE (SE(3)-aligned cameras, root corrected)
+    GA-MPJRE ↓ — group-aligned MPJRE (shared root alignment across all humans)
+    PA-MPJRE ↓ — Procrustes-aligned MPJRE (per-human root alignment)
 
 **Camera metrics**:
     TE ↓       — translation error (m) after SE(3) alignment
@@ -17,6 +22,10 @@ Implements the metrics from
     CCA@τ ↑    — camera centre accuracy (fraction within τ% of scene scale, SE(3))
     s-CCA@τ ↑  — camera centre accuracy (Sim(3))
 
+Position-based metrics take ``(P, J, 3)`` 3-D joint positions.
+Rotation-based metrics take ``(P, J, 3, 3)`` relative joint rotation matrices
+(joint 0 = root; all others are parent-relative).
+
 Every metric subclasses :class:`Metric` with a uniform
 ``update`` / ``compute`` / ``reset`` interface.
 """
@@ -24,90 +33,19 @@ Every metric subclasses :class:`Metric` with a uniform
 from __future__ import annotations
 
 import itertools
-import math
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Sequence
 
 import numpy as np
-import torch
 
+from utilities.metrics_utilities import (
+    umeyama,
+    apply_alignment,
+    geodesic_deg,
+    batch_geodesic_deg,
+    mean_rotation,
+)
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Alignment utilities
-# ═══════════════════════════════════════════════════════════════════════════
-
-def _umeyama(
-    src: np.ndarray,
-    dst: np.ndarray,
-    with_scale: bool = True,
-) -> tuple[np.ndarray, np.ndarray, float]:
-    """Umeyama alignment (SE(3) or Sim(3)).
-
-    Finds ``R, t, s`` that minimise ``‖dst − (s·R·src + t)‖²``.
-
-    Parameters
-    ----------
-    src, dst : ndarray, shape ``(N, 3)``
-    with_scale : bool
-        If ``True`` solve for ``s`` (Sim(3)); if ``False`` fix ``s = 1`` (SE(3)).
-
-    Returns
-    -------
-    R : ndarray ``(3, 3)``
-    t : ndarray ``(3,)``
-    s : float
-    """
-    assert src.shape == dst.shape and src.shape[1] == 3
-    n = src.shape[0]
-
-    mu_src = src.mean(axis=0)
-    mu_dst = dst.mean(axis=0)
-    src_c = src - mu_src
-    dst_c = dst - mu_dst
-
-    var_src = np.sum(src_c ** 2) / n
-
-    cov = (dst_c.T @ src_c) / n  # (3, 3)
-
-    U, D, Vt = np.linalg.svd(cov)
-
-    # Correct reflection
-    S = np.eye(3)
-    if np.linalg.det(U) * np.linalg.det(Vt) < 0:
-        S[2, 2] = -1
-
-    R = U @ S @ Vt
-
-    if with_scale:
-        s = np.trace(np.diag(D) @ S) / var_src if var_src > 1e-12 else 1.0
-    else:
-        s = 1.0
-
-    t = mu_dst - s * R @ mu_src
-    return R, t, float(s)
-
-
-def _apply_alignment(
-    pts: np.ndarray,
-    R: np.ndarray,
-    t: np.ndarray,
-    s: float,
-) -> np.ndarray:
-    """Apply ``s·R·pts + t``."""
-    return (s * (pts @ R.T)) + t
-
-
-def _geodesic_deg(R_a: np.ndarray, R_b: np.ndarray) -> float:
-    """Geodesic angle (degrees) between two 3×3 rotation matrices."""
-    R_diff = R_a.T @ R_b
-    trace = np.clip(np.trace(R_diff), -1.0, 3.0)
-    cos_angle = np.clip((trace - 1.0) / 2.0, -1.0, 1.0)
-    return float(np.degrees(np.arccos(cos_angle)))
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Base class
-# ═══════════════════════════════════════════════════════════════════════════
 
 class Metric(ABC):
     """Base class for all HSfM evaluation metrics.
@@ -160,17 +98,17 @@ class Metric(ABC):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Human metrics
+# Human metrics — position-based (metres)
 # ═══════════════════════════════════════════════════════════════════════════
 
 class WMPJPE(Metric):
-    """World Mean Per-Joint Position Error (metres).
+    """World Mean Per-Joint Position Error (W-MPJPE, metres).
 
-    Predicted human meshes are brought into the GT world coordinate system
-    via **SE(3)** alignment of *camera positions* (pred → GT), then the
-    per-joint Euclidean error is computed.
+    Predicted human joints are brought into the GT world frame via SE(3)
+    alignment of camera positions (pred → GT), then the per-joint Euclidean
+    error is computed.
 
-    Call :meth:`update` once per scene.
+    Call update once per scene.
     """
 
     def __init__(self) -> None:
@@ -186,15 +124,13 @@ class WMPJPE(Metric):
         """
         Parameters
         ----------
-        pred_joints : ``(H, J, 3)`` — predicted 3-D joints for *H* humans,
-            *J* joints each, in the predicted world frame.
-        gt_joints : ``(H, J, 3)`` — ground-truth joints.
-        pred_cam_pos : ``(C, 3)`` — predicted camera centres.
-        gt_cam_pos : ``(C, 3)`` — ground-truth camera centres.
+        pred_joints  : (P, J, 3)  predicted 3-D joints in predicted world frame.
+        gt_joints    : (P, J, 3)  ground-truth 3-D joints.
+        pred_cam_pos : (C, 3)     predicted camera centres.
+        gt_cam_pos   : (C, 3)     ground-truth camera centres.
         """
-        R, t, _ = _umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
-        H, J, _ = pred_joints.shape
-        aligned = _apply_alignment(pred_joints.reshape(-1, 3), R, t, 1.0)
+        R, t, _ = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        aligned = apply_alignment(pred_joints.reshape(-1, 3), R, t, 1.0)
         errs = np.linalg.norm(aligned - gt_joints.reshape(-1, 3), axis=-1)
         self._record(float(errs.mean()))
 
@@ -203,11 +139,10 @@ class WMPJPE(Metric):
 
 
 class GAMPJPE(Metric):
-    """Group-Aligned MPJPE (metres).
+    """Group-Aligned MPJPE (GA-MPJPE, metres).
 
-    All humans' joints in a scene are **concatenated** and then
-    **Sim(3)**-aligned to GT jointly.  Measures relative positioning
-    among people in the scene.
+    All humans' joints in a scene are concatenated and Sim(3)-aligned to GT
+    jointly.  Measures relative positioning among people in the scene.
     """
 
     def __init__(self) -> None:
@@ -221,13 +156,13 @@ class GAMPJPE(Metric):
         """
         Parameters
         ----------
-        pred_joints : ``(H, J, 3)``
-        gt_joints : ``(H, J, 3)``
+        pred_joints : (P, J, 3)
+        gt_joints   : (P, J, 3)
         """
         src = pred_joints.reshape(-1, 3)
         dst = gt_joints.reshape(-1, 3)
-        R, t, s = _umeyama(src, dst, with_scale=True)
-        aligned = _apply_alignment(src, R, t, s)
+        R, t, s = umeyama(src, dst, with_scale=True)
+        aligned = apply_alignment(src, R, t, s)
         errs = np.linalg.norm(aligned - dst, axis=-1)
         self._record(float(errs.mean()))
 
@@ -236,10 +171,10 @@ class GAMPJPE(Metric):
 
 
 class PAMPJPE(Metric):
-    """Procrustes-Aligned MPJPE (metres).
+    """Procrustes-Aligned MPJPE (PA-MPJPE, metres).
 
-    Each human is independently **Sim(3)**-aligned to its GT.
-    Measures local pose accuracy irrespective of scale & location.
+    Each human is independently Sim(3)-aligned to its GT.  Measures local pose
+    accuracy irrespective of scale and location.
     """
 
     def __init__(self) -> None:
@@ -253,20 +188,137 @@ class PAMPJPE(Metric):
         """
         Parameters
         ----------
-        pred_joints : ``(H, J, 3)``
-        gt_joints : ``(H, J, 3)``
+        pred_joints : (P, J, 3)
+        gt_joints   : (P, J, 3)
         """
-        H = pred_joints.shape[0]
+        P = pred_joints.shape[0]
         scene_errs: List[float] = []
-        for h in range(H):
-            src = pred_joints[h]  # (J, 3)
-            dst = gt_joints[h]
-            R, t, s = _umeyama(src, dst, with_scale=True)
-            aligned = _apply_alignment(src, R, t, s)
+        for person in range(P):
+            src = pred_joints[person]   # (J, 3)
+            dst = gt_joints[person]
+            R, t, s = umeyama(src, dst, with_scale=True)
+            aligned = apply_alignment(src, R, t, s)
             errs = np.linalg.norm(aligned - dst, axis=-1)
             scene_errs.append(float(errs.mean()))
-        # Average over humans in this scene
         self._record(float(np.mean(scene_errs)))
+
+    def compute(self) -> Dict[str, float]:
+        return self._aggregate()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Human metrics — rotation-based (degrees)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class WMPJRE(Metric):
+    """
+    World Mean Per-Joint Rotation Error (W-MPJRE, degrees).
+
+    The predicted world frame is aligned to GT via SE(3) alignment of camera
+    positions.  The resulting rotation R_world is applied to the root joint
+    (joint 0) of every predicted person; non-root joints are parent-relative
+    and need no correction.  Mean geodesic error is then computed across all
+    joints and people.
+
+    Call :meth:`update` once per scene.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(name="W-MPJRE", higher_is_better=False)
+
+    def update(
+        self,
+        pred_rotations: np.ndarray,
+        gt_rotations: np.ndarray,
+        pred_cam_pos: np.ndarray,
+        gt_cam_pos: np.ndarray,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        pred_rotations : (P, J, 3, 3)  predicted relative joint rotations.
+        gt_rotations   : (P, J, 3, 3)  ground-truth relative joint rotations.
+        pred_cam_pos   : (C, 3)        predicted camera centres.
+        gt_cam_pos     : (C, 3)        ground-truth camera centres.
+        """
+        R_world, _, _ = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        pred_aligned = pred_rotations.copy()
+        # Correct root orientation: (3,3) @ (P,3,3) broadcasts correctly
+        pred_aligned[:, 0] = R_world @ pred_rotations[:, 0]
+        errs = batch_geodesic_deg(pred_aligned, gt_rotations)  # (P, J)
+        self._record(float(errs.mean()))
+
+    def compute(self) -> Dict[str, float]:
+        return self._aggregate()
+
+
+class GAMPJRE(Metric):
+    """Group-Aligned MPJRE (GA-MPJRE, degrees).
+
+    A single global rotation R_align is estimated from the root joints of all
+    people in the scene as the Fréchet mean of
+    ``{gt_root[p] @ pred_root[p]^T}``, then applied to every predicted root.
+    Measures relative pose accuracy among people after removing a shared
+    global orientation offset.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(name="GA-MPJRE", higher_is_better=False)
+
+    def update(
+        self,
+        pred_rotations: np.ndarray,
+        gt_rotations: np.ndarray,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        pred_rotations : ``(P, J, 3, 3)``
+        gt_rotations   : ``(P, J, 3, 3)``
+        """
+        # R_diffs[p] = gt_root[p] @ pred_root[p]^T  →  (P, 3, 3)
+        R_diffs = gt_rotations[:, 0] @ pred_rotations[:, 0].swapaxes(-1, -2)
+        R_align = mean_rotation(R_diffs)  # (3, 3)
+        pred_aligned = pred_rotations.copy()
+        pred_aligned[:, 0] = R_align @ pred_rotations[:, 0]
+        errs = batch_geodesic_deg(pred_aligned, gt_rotations)  # (P, J)
+        self._record(float(errs.mean()))
+
+    def compute(self) -> Dict[str, float]:
+        return self._aggregate()
+
+
+class PAMPJRE(Metric):
+    """Procrustes-Aligned MPJRE (PA-MPJRE, degrees).
+
+    Each predicted person's root joint is independently aligned to GT via
+    ``R_align[p] = gt_root[p] @ pred_root[p]^T``.  Geodesic errors are then
+    computed over all joints.  Removes global orientation ambiguity per person,
+    measuring local / relative pose accuracy.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(name="PA-MPJRE", higher_is_better=False)
+
+    def update(
+        self,
+        pred_rotations: np.ndarray,
+        gt_rotations: np.ndarray,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        pred_rotations : ``(P, J, 3, 3)``
+        gt_rotations   : ``(P, J, 3, 3)``
+        """
+        # R_aligns[p] = gt_root[p] @ pred_root[p]^T  →  (P, 3, 3)
+        R_aligns = gt_rotations[:, 0] @ pred_rotations[:, 0].swapaxes(-1, -2)
+        pred_aligned = pred_rotations.copy()
+        # (P,3,3) @ (P,3,3) → per-person batched matmul
+        pred_aligned[:, 0] = R_aligns @ pred_rotations[:, 0]
+        errs = batch_geodesic_deg(pred_aligned, gt_rotations)  # (P, J)
+        # Mean per person, then over the scene
+        self._record(float(errs.mean(axis=-1).mean()))
 
     def compute(self) -> Dict[str, float]:
         return self._aggregate()
@@ -277,7 +329,7 @@ class PAMPJPE(Metric):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TranslationError(Metric):
-    """Camera translation error (**TE**, metres) after SE(3) alignment.
+    """Camera translation error (TE, metres) after SE(3) alignment.
 
     Mean Euclidean distance between predicted and GT camera centres
     after a rigid (SE(3)) alignment of the full camera set.
@@ -296,8 +348,8 @@ class TranslationError(Metric):
         ----------
         pred_cam_pos, gt_cam_pos : ``(C, 3)``
         """
-        R, t, _ = _umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
-        aligned = _apply_alignment(pred_cam_pos, R, t, 1.0)
+        R, t, _ = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        aligned = apply_alignment(pred_cam_pos, R, t, 1.0)
         errs = np.linalg.norm(aligned - gt_cam_pos, axis=-1)
         self._record(float(errs.mean()))
 
@@ -321,8 +373,8 @@ class ScaledTranslationError(Metric):
         ----------
         pred_cam_pos, gt_cam_pos : ``(C, 3)``
         """
-        R, t, s = _umeyama(pred_cam_pos, gt_cam_pos, with_scale=True)
-        aligned = _apply_alignment(pred_cam_pos, R, t, s)
+        R, t, s = umeyama(pred_cam_pos, gt_cam_pos, with_scale=True)
+        aligned = apply_alignment(pred_cam_pos, R, t, s)
         errs = np.linalg.norm(aligned - gt_cam_pos, axis=-1)
         self._record(float(errs.mean()))
 
@@ -356,7 +408,7 @@ class AngleError(Metric):
         for i, j in itertools.combinations(range(C), 2):
             R_rel_pred = pred_rotations[i] @ pred_rotations[j].T
             R_rel_gt = gt_rotations[i] @ gt_rotations[j].T
-            errs.append(_geodesic_deg(R_rel_pred, R_rel_gt))
+            errs.append(geodesic_deg(R_rel_pred, R_rel_gt))
         if errs:
             self._record(float(np.mean(errs)))
 
@@ -395,7 +447,7 @@ class RRA(Metric):
         for i, j in itertools.combinations(range(C), 2):
             R_rel_pred = pred_rotations[i] @ pred_rotations[j].T
             R_rel_gt = gt_rotations[i] @ gt_rotations[j].T
-            err = _geodesic_deg(R_rel_pred, R_rel_gt)
+            err = geodesic_deg(R_rel_pred, R_rel_gt)
             if err <= self.threshold:
                 correct += 1
             total += 1
@@ -432,10 +484,9 @@ class CCA(Metric):
         ----------
         pred_cam_pos, gt_cam_pos : ``(C, 3)``
         """
-        R, t, _ = _umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
-        aligned = _apply_alignment(pred_cam_pos, R, t, 1.0)
+        R, t, _ = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        aligned = apply_alignment(pred_cam_pos, R, t, 1.0)
 
-        # Scene scale: max distance from GT camera to GT centroid
         centroid = gt_cam_pos.mean(axis=0)
         scene_scale = np.linalg.norm(gt_cam_pos - centroid, axis=-1).max()
         if scene_scale < 1e-8:
@@ -474,8 +525,8 @@ class ScaledCCA(Metric):
         ----------
         pred_cam_pos, gt_cam_pos : ``(C, 3)``
         """
-        R, t, s = _umeyama(pred_cam_pos, gt_cam_pos, with_scale=True)
-        aligned = _apply_alignment(pred_cam_pos, R, t, s)
+        R, t, s = umeyama(pred_cam_pos, gt_cam_pos, with_scale=True)
+        aligned = apply_alignment(pred_cam_pos, R, t, s)
 
         centroid = gt_cam_pos.mean(axis=0)
         scene_scale = np.linalg.norm(gt_cam_pos - centroid, axis=-1).max()
@@ -500,7 +551,11 @@ class MetricCollection:
     Example — create the full HSfM evaluation suite::
 
         mc = MetricCollection([
+            # position-based human metrics
             WMPJPE(), GAMPJPE(), PAMPJPE(),
+            # rotation-based human metrics
+            WMPJRE(), GAMPJRE(), PAMPJRE(),
+            # camera metrics
             TranslationError(), ScaledTranslationError(),
             AngleError(),
             RRA(threshold=10), RRA(threshold=15),

@@ -87,8 +87,16 @@ class PersonSegmenter:
         if self._models_ready:
             return
 
+        import importlib.util as _ilu
+        import os as _os
+        # pkg_resources.resource_filename fails when sam3 is a namespace package
+        # (no __file__). Locate the asset via importlib instead.
+        _mb_spec = _ilu.find_spec("sam3.model_builder")
+        _sam3_dir = _os.path.dirname(_os.path.abspath(_mb_spec.origin))
+        _bpe_path = _os.path.join(_sam3_dir, "assets", "bpe_simple_vocab_16e6.txt.gz")
         self._predictor = Sam3VideoPredictor(
             checkpoint_path=self.checkpoint_path,
+            bpe_path=_bpe_path,
         )
 
         self._models_ready = True
@@ -398,8 +406,16 @@ class PersonSegmenter:
         torch.cuda.set_device(gpu_id)
 
         # Load SAM3 model on this GPU
-        predictor = Sam3VideoPredictor(checkpoint_path=checkpoint_path)
+        import sam3.model_builder as _mb
+        _sam3_bpe = str(Path(_mb.__file__).parent / "assets" / "bpe_simple_vocab_16e6.txt.gz")
+        predictor = Sam3VideoPredictor(checkpoint_path=checkpoint_path, bpe_path=_sam3_bpe)
         print(f"  [GPU {gpu_id}] SAM3 model loaded for {video_id}")
+
+        # Model loading leaves fragmented intermediate allocations in PyTorch's caching
+        # allocator.  Clear them now so the large contiguous video-frames tensor in
+        # start_session (images.cuda()) can be allocated without hitting OOM.
+        gc.collect()
+        torch.cuda.empty_cache()
 
         # Set up output directories
         vid_out = Path(output_dir)

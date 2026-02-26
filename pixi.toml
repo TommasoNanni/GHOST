@@ -18,6 +18,7 @@ pillow = ">=9.4.0"
 scikit-learn = ">=1.8.0,<2"
 pyyaml = ">=6.0.3,<7"
 wandb = ">=0.25.0,<0.26"
+huggingface_hub = ">=1.4.1,<2"
 
 [pypi-options]
 # SAM-2 and groundingdino import torch at build time; build them inside the
@@ -30,7 +31,7 @@ dependency-overrides = { iopath = ">=0.1.7" }
 groundingdino = {path = "Grounded-SAM-2/grounding_dino", editable = true}
 mhr = { path = "MHR", editable = true }
 sam-3d-body = { path = "sam-3d-body", editable = true }
-# sam3 = {path = "sam3", editable = true}
+sam3 = {path = "sam3", editable = true}
 detectron2 = { git = "https://github.com/facebookresearch/detectron2.git", rev = "a1ce2f9" }
 moge = { git = "https://github.com/microsoft/MoGe.git" }
 transformers = ">=4.0"
@@ -71,3 +72,4 @@ hatchling = ">=1.28.0, <2"
 # Installs the CUDA 12.6 build of the SAME torch version that pymomentum depends on
 # (currently 2.7.1). Same version = ABI-compatible, so pymomentum keeps working.
 setup-cuda = "python -m pip install --force-reinstall 'torch==2.7.1+cu128' 'torchvision==0.22.1+cu128' --index-url https://download.pytorch.org/whl/cu128"
+download-model = "python -c \"from huggingface_hub import snapshot_download; snapshot_download(repo_id='facebook/sam3', local_dir='checkpoints', local_dir_use_symlinks=False)\""

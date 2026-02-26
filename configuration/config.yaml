@@ -1,13 +1,13 @@
 data:
   data_root: "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
-  output_directory: "/cluster/project/cvg/students/tnanni/ghost/test_outputs/new_new_segmentation_test_15"
+  output_directory: "/cluster/project/cvg/students/tnanni/ghost/test_outputs/sam3_segmentation_test_15"
   slice: 1                    # Number of scenes to load (set for testing)
   exclude_egocentric: true    # Exclude egocentric videos for simplicity
   smplx_model_path: "body_models"
   mhr_model_path: null
 
 segmentation:
-  checkpoint_path: null         # Path to SAM3 checkpoint; null = auto-download from HuggingFace
+  checkpoint_path: "/cluster/project/cvg/students/tnanni/ghost/checkpoints/sam3.pt"         # Path to SAM3 checkpoint; null = auto-download from HuggingFace
   text_prompt: "person"         # Text query for SAM3 detection
   redetect_interval: 15         # Add text prompt every N frames so late arrivals are detected
 

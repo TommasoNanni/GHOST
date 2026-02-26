@@ -125,3 +125,6 @@ SMPL body model files should be placed in `body_models/`.
 
 
 Removed the dependency <2 in sam3, also added a pyproject.toml to sam3d
+
+
+Run the download_model task in pixi with pixi run download-model
