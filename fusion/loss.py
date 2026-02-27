@@ -8,11 +8,13 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+from pytorch3d.transforms import matrix_to_quaternion
 
 from utilities.smplx_utilities import get_smplx_vertices
 from utilities.camera_utilities import extract_cameras
 from utilities.geometry import project_to_2d, skew_symmetric
 from configuration import CONFIG
+from utilities.smplx_utilities import PARENTS_TABLE
 
 class Loss(ABC):
     """Base class for all fusion training losses.
@@ -244,17 +246,16 @@ class VPoserLoss(Loss):
         Parameters
         ----------
         pose : ``(*, J, 3)`` — SMPLX pose in **axis-angle** format.
-            J must be ≥ 22 (first 22 joints are SMPL body joints; root is
-            index 0 and is skipped, so joints 1-21 are used).
-            The tensor is flattened to ``(N, 63)`` before encoding, where
-            63 = 21 joints × 3 axis-angle values.
+            J must be 55.
+            The tensor is flattened to (N, 162) before encoding, where
+            162 = 54 joints × 3 axis-angle values.
 
         Returns
         -------
         Scalar KL loss: KL( q(z|x) ‖ N(0,I) )
         """
-        # slice body joints 1-21 (skip root), flatten to (N, 63)
-        smpl_pose = pose[..., 1:22, :].reshape(-1, 63)
+        # slice body joints 1-55 (skip root), flatten to (N, 54*3)
+        smpl_pose = pose[..., 1:, :].reshape(-1, 162)
 
         dist = self.vposer.encode(smpl_pose)
 
@@ -265,6 +266,44 @@ class VPoserLoss(Loss):
         kl_loss = -0.5 * torch.sum(1 + logvar - mean ** 2 - logvar.exp(), dim=-1)
 
         return kl_loss.mean()
+
+
+class BoneLengthconsistencyLoss(Loss):
+    def __init__(
+        self, 
+        name: str = "Bone Lenght Consistency Loss",
+        weight: float = 1.0
+    )-> None:
+        super().__init__(name, weight)
+
+    def forward(self, joints):
+        """
+        Encodes the fact that all joints must have the same length across views
+        and over time
+
+        Parameters
+        ----------
+        joints: (B, T, K, P, J, 3) — joints in axis-angle format
+
+        Returns
+        -------
+        Scalar loss encouraging constant bone length across time and cameras.
+        """
+        parent_mapping = torch.tensor(
+            PARENTS_TABLE, device = joints.device, dtype = joints.dtype
+        )
+
+        parents = parent_mapping[0, :]
+        parent_joints = joints[:, :, :, :, parents, :] # Tensor of father joints
+
+        bone_lengths = torch.norm(joints - parent_joints, p = 2, dim = -1) # Bone lengths
+        indices = torch.arange(len(parents), device = joints.device)
+        mask = parent_mapping != indices
+        valid_lengths = bone_lengths[..., mask] # (B, T, K, P, J_valid)
+
+        lengths_to_persist = valid_lengths.permute(0, 3, 4, 1, 2).contiguous().flatten(start_dim = -2) #(B, P, J_valid, T*K)
+        bone_std = torch.std(lengths_to_persist, dim = -1) + 1e-6
+        return bone_std.mean()        
 
 
 class BetaConsistencyLoss(Loss):
@@ -291,3 +330,43 @@ class BetaConsistencyLoss(Loss):
         beta_mean = beta_stream.mean(dim=2, keepdim=True)  # (B, T, 1, P, S)
         loss = torch.mean((beta_stream - beta_mean)**2)
         return loss
+
+
+class CameraMSELoss(Loss):
+    def __init__(
+        self,
+        name: str = "Camera error (geodesic + MSE) loss",
+        weight: float = 1.0
+    )-> None:
+        super().__init__(name, weight)
+
+    def forward(self, R, t, R_gt, t_gt):
+        """
+        Computes the distance between the predicted and the ground truth cameras
+        Parameters
+        ----------
+        R : (B, T, K, 3, 3) — stream of rotation camera parameters
+        t : (B, T, K, 3) - stream of translation camera parameters
+        R_gt : (B, T, K, 3, 3) — stream of GT rotation camera parameters
+        t_gt : (B, T, K, 3) - stream of GT translation camera parameters
+
+        Returns
+        -------
+        Scalar loss encouraging adherence of camera parameters to the GT
+        """
+        R_flat = R.reshape(-1, 3, 3)
+        R_gt_flat = R_gt.reshape(-1, 3, 3)
+
+        q = matrix_to_quaternion(R_flat)
+        q_gt = matrix_to_quaternion(R_gt_flat)
+
+        dot_product = torch.sum(q * q_gt, dim=-1)
+        dot_product = torch.clamp(dot_product, -1.0 + 1e-7, 1.0 - 1e-7)
+
+        quaternion_loss = 1 - torch.abs(dot_product)
+        quaternion_mean = quaternion_loss.mean()
+
+        translation_loss = torch.norm(t - t_gt, dim=-1)**2
+        translation_mean = translation_loss.mean()
+
+        return translation_mean + quaternion_mean

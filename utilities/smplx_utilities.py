@@ -1,7 +1,9 @@
 import smplx
+import pickle
 import torch
 from configuration import CONFIG
 from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_axis_angle
+import numpy as np
 
 _smplx_cache: dict = {}
 
@@ -65,3 +67,19 @@ def get_smplx_vertices(pose: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
     else:
         return output.vertices.reshape(B, T, P, V, 3)
 
+
+def get_joint_parent_mapping():
+    data = np.load(CONFIG.data.smplx_model_path, allow_pickle=True)
+
+    print(data.keys())
+    print(data["kintree_table"])
+
+
+PARENTS_TABLE = [
+    [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19, 15, 15,
+     15, 20, 25, 26, 20, 28, 29, 20, 31, 32, 20, 34, 35, 20, 37, 38, 21, 40, 41, 21, 43, 44, 21, 46,
+     47, 21, 49, 50, 21, 52, 53],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+     24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+     48, 49, 50, 51, 52, 53, 54]
+]

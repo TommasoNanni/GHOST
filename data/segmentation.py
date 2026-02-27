@@ -21,6 +21,7 @@ Output layout for each scene::
 
 from __future__ import annotations
 
+import functools
 import gc
 import io
 import json
@@ -97,6 +98,12 @@ class PersonSegmenter:
         self._predictor = Sam3VideoPredictor(
             checkpoint_path=self.checkpoint_path,
             bpe_path=_bpe_path,
+        )
+        # Use async (lazy) frame loading + CPU-offloaded frames to avoid OOM.
+        # See _segment_video_on_gpu for the full explanation.
+        self._predictor.async_loading_frames = True
+        self._predictor.model.init_state = functools.partial(
+            self._predictor.model.init_state, offload_video_to_cpu=True
         )
 
         self._models_ready = True
@@ -179,9 +186,20 @@ class PersonSegmenter:
             # Free the main-process models before spawning children
             self._free_models()
 
+            # Group tasks by GPU so each worker process handles all of its
+            # GPU's videos sequentially.  This prevents two workers from
+            # loading a SAM3 model onto the same GPU simultaneously (which
+            # would exceed VRAM and cause an OOM).
+            gpu_batches: dict[int, list] = {}
+            for args in worker_args:
+                gpu_id = args[0]
+                gpu_batches.setdefault(gpu_id, []).append(args)
+            gpu_batch_list = list(gpu_batches.values())
+
             mp.set_start_method("spawn", force=True)
-            with mp.Pool(processes=min(num_gpus, len(worker_args))) as pool:
-                results = pool.starmap(PersonSegmenter._segment_video_on_gpu, worker_args)
+            with mp.Pool(processes=len(gpu_batch_list)) as pool:
+                batch_results = pool.map(PersonSegmenter._segment_gpu_batch, gpu_batch_list)
+            results = [r for batch in batch_results for r in batch]
 
             for r in results:
                 video_results[r["video_id"]] = r
@@ -389,6 +407,19 @@ class PersonSegmenter:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _segment_gpu_batch(task_list: list) -> list:
+        """Process multiple videos sequentially on a single GPU.
+
+        Accepts a list of arg-tuples for :meth:`_segment_video_on_gpu` that
+        all share the same ``gpu_id``.  Running them inside one process
+        guarantees only one SAM3 model exists on that GPU at a time.
+        """
+        results = []
+        for task_args in task_list:
+            results.append(PersonSegmenter._segment_video_on_gpu(*task_args))
+        return results
+
+    @staticmethod
     def _segment_video_on_gpu(
         gpu_id: int,
         video_path: str,
@@ -409,11 +440,25 @@ class PersonSegmenter:
         import sam3.model_builder as _mb
         _sam3_bpe = str(Path(_mb.__file__).parent / "assets" / "bpe_simple_vocab_16e6.txt.gz")
         predictor = Sam3VideoPredictor(checkpoint_path=checkpoint_path, bpe_path=_sam3_bpe)
+        # Use async (lazy) frame loading + CPU-offloaded frames to avoid OOM.
+        #
+        # async_loading_frames=True  → returns AsyncImageFrameLoader instead of
+        #   a large tensor; copy_data_to_device skips it (unknown type → as-is).
+        # offload_video_to_cpu=True  → the async loader keeps each frame on CPU;
+        #   SAM3's _get_img_feats moves individual frames to GPU on-demand.
+        #
+        # Without both flags, all ~3k frames (~19 GiB) end up on the GPU
+        # (either as a contiguous tensor, or accumulated by the async loader's
+        # background thread), causing OOM alongside the ~5 GiB model.
+        # start_session doesn't forward offload_video_to_cpu, so we inject it.
+        predictor.async_loading_frames = True
+        predictor.model.init_state = functools.partial(
+            predictor.model.init_state, offload_video_to_cpu=True
+        )
         print(f"  [GPU {gpu_id}] SAM3 model loaded for {video_id}")
 
         # Model loading leaves fragmented intermediate allocations in PyTorch's caching
-        # allocator.  Clear them now so the large contiguous video-frames tensor in
-        # start_session (images.cuda()) can be allocated without hitting OOM.
+        # allocator.  Clear them now before the first session starts.
         gc.collect()
         torch.cuda.empty_cache()
 
