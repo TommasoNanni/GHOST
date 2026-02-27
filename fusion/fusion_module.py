@@ -423,11 +423,29 @@ class CameraStreamLayer(nn.Module):
         return x
 
 
+class CameraWeightedPooling(nn.Module):
+    def __init__(self, d_dim: int):
+        super().__init__()
+        self.score_net = nn.Sequential(
+            nn.Linear(d_dim, d_dim // 2),
+            nn.ReLU(),
+            nn.Linear(d_dim // 2, 1)
+        )
+
+    def forward(self, x: torch.Tensor, k_dim: int = 2) -> torch.Tensor:
+        # x: [B, T, K, P, (J), D]
+        scores = self.score_net(x) # [B, T, K, P, (J), 1]
+        weights = F.softmax(scores, dim=k_dim)
+        return torch.sum(x * weights, dim=k_dim)
+
+
 class SSTOutputHeads(nn.Module):
     """Final norm + linear decoders for pose, shape, camera."""
 
     def __init__(self, embedding_dim: int):
         super().__init__()
+        self.pose_pool = CameraWeightedPooling(embedding_dim)
+        self.shape_pool = CameraWeightedPooling(embedding_dim)
         self.pose_norm = nn.LayerNorm(embedding_dim)
         self.pose_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
@@ -453,18 +471,23 @@ class SSTOutputHeads(nn.Module):
         shape_stream: torch.Tensor,
         camera_stream: torch.Tensor,
         B: int, T: int, K: int, P: int, J: int, D: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         pose = self.pose_norm(pose_stream)
-        pose = self.pose_head(pose.mean(dim=2).reshape(B * T * P * J, D)).reshape(B, T, P, J, 6)
+
+        pose_per_cam = self.pose_head(pose.reshape(B * T * P * K * J, D)).reshape(B, T, K, P, J, 6)
+        pose_aggr_feat = self.pose_pool(pose, k_dim=2) # [B, T, P, J, D]
+        pose_aggr = self.pose_head(pose_aggr_feat.reshape(B * T * P * J, D)).reshape(B, T, P, J, 6)
 
         shape = self.shape_norm(shape_stream)
-        shape = self.shape_head(shape.mean(dim=2).reshape(B * T * P, D)).reshape(B, T, P, 10)
+
+        shape_per_cam = self.shape_head(shape.reshape(B * T * K * P, D)).reshape(B, T, K, P, 10)
+        shape_aggr_feat = self.shape_pool(shape, k_dim=2) # [B, T, P, D]
+        shape_aggr = self.shape_head(shape_aggr_feat.reshape(B * T * P, D)).reshape(B, T, P, 10)
 
         camera = self.camera_norm(camera_stream)
         camera = self.camera_head(camera.reshape(B * T * K, D)).reshape(B, T, K, 7)
 
-        return pose, shape, camera
-
+        return pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam
 
 class SSTNetwork(nn.Module):
     """Spatio-Spatio-Temporal attention module that fuses parameters across
@@ -534,7 +557,7 @@ class SSTNetwork(nn.Module):
         shape: torch.Tensor,
         camera: torch.Tensor,
         joint_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters
         ----------

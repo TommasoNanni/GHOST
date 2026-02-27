@@ -6,9 +6,13 @@ runs per-frame 3D body model estimation via SAM3D Body.
 Expected input layout (produced by :class:`PersonSegmenter`)::
 
     output_dir/<scene_id>/<video_id>/
-        frames/          extracted JPEGs
-        mask_data/       .npy uint16 masks
+        mask_data.npz    compressed mask archive
         json_data/       .json per-frame instance metadata
+
+Frames live next to the source data, not inside the segmentation output::
+
+    data_root/<scene_id>/<video_id>/
+        frames/          extracted JPEGs
 
 Output (added to existing directories)::
 
@@ -139,6 +143,7 @@ class BodyParameterEstimator:
                     self.sam3d_step,
                     self.bbox_padding,
                     self._PARAM_KEYS,
+                    frames_dir=str(video.frames_home) if video.frames_home else None,
                 )
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -155,7 +160,11 @@ class BodyParameterEstimator:
         mp.set_start_method("spawn", force=True)
         task_queue: mp.Queue = mp.Queue()
         for video in scene.videos:
-            task_queue.put((video.video_id, str(video_dirs[video.video_id])))
+            task_queue.put((
+                video.video_id,
+                str(video_dirs[video.video_id]),
+                str(video.frames_home) if video.frames_home else None,
+            ))
         # One sentinel per worker signals end of work
         num_workers = min(num_gpus, num_videos)
         for _ in range(num_workers):
@@ -214,7 +223,7 @@ class BodyParameterEstimator:
             if task is None:
                 break
 
-            video_id, video_dir = task
+            video_id, video_dir, frames_dir = task
             logging.info(f"{gpu_label}Processing {video_id}")
             try:
                 BodyParameterEstimator._process_video_core(
@@ -224,6 +233,7 @@ class BodyParameterEstimator:
                     sam3d_step,
                     bbox_padding,
                     param_keys,
+                    frames_dir=frames_dir,
                     gpu_label=gpu_label,
                 )
             except Exception as e:
@@ -245,6 +255,7 @@ class BodyParameterEstimator:
         sam3d_step: int,
         bbox_padding: float,
         param_keys: tuple[str, ...],
+        frames_dir: str | None = None,
         gpu_label: str = "",
     ) -> None:
         """Process all frames of one video with batched per-frame inference.
@@ -256,7 +267,9 @@ class BodyParameterEstimator:
         # create the output directories
         video_path = Path(video_dir)
         json_dir = video_path / "json_data"
-        frame_dir = video_path / "frames"
+        # Frames live co-located with the source data, not inside video_dir.
+        # frames_dir is the canonical data/<scene>/<video_id>/frames/ path.
+        frame_dir = Path(frames_dir) if frames_dir else video_path / "frames"
         body_dir = video_path / "body_data"
         body_dir.mkdir(exist_ok=True)
 

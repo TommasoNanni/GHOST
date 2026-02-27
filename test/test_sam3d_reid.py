@@ -124,6 +124,7 @@ def main():
         visualize_reid(
             video_dir=Path(video_dirs[video.video_id]),
             fps=int(video.fps),
+            frames_dir=video.frames_home,
         )
 
 

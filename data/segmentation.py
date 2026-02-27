@@ -8,15 +8,22 @@ consistent person IDs within each video and across videos
 
 Output layout for each scene::
 
-    output_dir/
+    output_dir/                          ← e.g. test_outputs/segmentation/
         <scene_id>/
             <video_id>/
-                frames/          extracted JPEGs (can be cleaned up)
                 mask_data.npz    compressed mask archive (uint16, pixel value = person ID)
                 json_data/       .json per-frame instance metadata
                 result/          (optional) annotated visualisation frames
                 segmentation.mp4 (optional) visualisation video
-            cross_video_id_mapping.json   (if match_across_videos=True)
+            cross_video_id_mapping.json  (if match_across_videos=True)
+
+Extracted frames are stored **co-located with the source data**, not inside
+the segmentation output directory::
+
+    data_root/
+        <scene_id>/
+            <video_id>/
+                frames/          extracted JPEGs (written here, next to the video)
 """
 
 from __future__ import annotations
@@ -38,8 +45,6 @@ from tqdm import tqdm
 
 from sam3.model.sam3_video_predictor import Sam3VideoPredictor  # type: ignore
 from sam3.visualization_utils import render_masklet_frame       # type: ignore
-
-from decord import VideoReader, cpu
 
 from data.video_dataset import Scene, Video
 
@@ -173,7 +178,8 @@ class PersonSegmenter:
             gpu_id = vi % num_gpus
             worker_args.append((
                 gpu_id,
-                str(video.path),
+                str(video.path) if video.path is not None else None,
+                str(video.frames_dir) if video.frames_dir is not None else None,
                 video.video_id,
                 str(vid_out),
                 self.checkpoint_path,
@@ -283,9 +289,11 @@ class PersonSegmenter:
         mask_data_dir.mkdir(exist_ok=True)
         json_data_dir.mkdir(exist_ok=True)
 
-        # SAM3 accepts a directory of numbered JPEGs or an MP4 file.
-        frame_dir = output_dir / "frames"
-        frame_names = self._extract_frames(video, frame_dir)
+        # SAM3 accepts a directory of numbered JPEGs.
+        # Frames are always extracted to the canonical co-located path
+        # (data/<scene>/<video_id>/frames/), never inside the output_dir.
+        frame_dir, frame_names = video.extract_frames(video.frames_home)
+        video.frames_dir = frame_dir
 
         print(f"  {video.video_id}: {len(frame_names)} frames")
 
@@ -422,7 +430,8 @@ class PersonSegmenter:
     @staticmethod
     def _segment_video_on_gpu(
         gpu_id: int,
-        video_path: str,
+        video_path: str | None,
+        video_frames_dir: str | None,
         video_id: str,
         output_dir: str,
         checkpoint_path: str | None,
@@ -470,11 +479,14 @@ class PersonSegmenter:
         mask_data_dir.mkdir(exist_ok=True)
         json_data_dir.mkdir(exist_ok=True)
 
-        # Extract frames directly with decord
-        frame_dir = vid_out / "frames"
-        frame_names = PersonSegmenter._extract_frames_from_path(
-            video_path, video_id, frame_dir
+        # Reconstruct a Video handle and extract (or locate) frames.
+        video_handle = Video(
+            path=Path(video_path) if video_path is not None else None,
+            frames_dir=Path(video_frames_dir) if video_frames_dir is not None else None,
         )
+        video_handle.video_id = video_id  # keep consistent with caller's id
+        # Extract frames to the canonical co-located path, not into vid_out.
+        frame_dir, frame_names = video_handle.extract_frames(video_handle.frames_home)
 
         print(f"  [GPU {gpu_id}] {video_id}: {len(frame_names)} frames")
 
@@ -592,51 +604,6 @@ class PersonSegmenter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_frames_from_path(
-        video_path: str, video_id: str, frame_dir: Path
-    ) -> list[str]:
-        """
-        Extract frames using decord directly from a video path and saves thm in the desired folder
-        """
-        frame_dir.mkdir(parents=True, exist_ok=True)
-
-        existing = sorted(
-            p.name for p in frame_dir.iterdir()
-            if p.suffix.lower() in (".jpg", ".jpeg")
-        )
-        if existing:
-            print(f"  Reusing {len(existing)} existing frames in {frame_dir}")
-            return existing
-
-        vr = VideoReader(video_path, ctx=cpu(0))
-        total = len(vr)
-        frame_names: list[str] = []
-
-        for idx in tqdm(range(total), desc=f"  Extracting {video_id}", leave=False):
-            frame_np = vr[idx].asnumpy()
-            name = f"{idx:06d}.jpg"
-            cv2.imwrite(
-                str(frame_dir / name),
-                cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR),
-            )
-            frame_names.append(name)
-            del frame_np
-
-        del vr
-        return frame_names
-
-
-    def _extract_frames(self, video: Video, frame_dir: Path) -> list[str]:
-        """
-        Decode every frame of a Video object and write numbered JPEGs.
-
-        Returns the sorted list of file names (``"000000.jpg"``, ...).
-        """
-        return self._extract_frames_from_path(
-            str(video.path), video.video_id, frame_dir
-        )
-
-    @staticmethod
     def _load_mask_from_npz(npz_path: Path, frame_stem: str) -> np.ndarray | None:
         """Load a single frame's mask array from a mask_data.npz file.
 
@@ -684,7 +651,6 @@ class PersonSegmenter:
         return {
             "video_id": video_id,
             "objects_count": objects_count,
-            "frame_dir": str(vid_out / "frames"),
             "mask_data_dir": str(vid_out / "mask_data"),
             "json_data_dir": str(vid_out / "json_data"),
         }
@@ -743,7 +709,22 @@ class PersonSegmenter:
         Unpacks ``mask_data.npz`` to reconstruct per-frame SAM3 output
         format, renders overlays, and writes an mp4 video.
         """
-        frame_dir = video_dir / "frames"
+        # Frames are co-located with the source data, not inside video_dir.
+        # Check canonical location first, then fall back to frames_dir / path.
+        home = video.frames_home
+        if home is not None and home.is_dir() and any(
+            p.suffix.lower() in (".jpg", ".jpeg", ".png") for p in home.iterdir()
+        ):
+            frame_dir = home
+        elif video.frames_dir is not None and video.frames_dir.is_dir() and any(
+            p.suffix.lower() in (".jpg", ".jpeg", ".png") for p in video.frames_dir.iterdir()
+        ):
+            frame_dir = video.frames_dir
+        elif video.path is not None and video.path.is_dir():
+            frame_dir = video.path
+        else:
+            print(f"  _visualize: no frame directory found for {video.video_id}, skipping.")
+            return
         npz_path = video_dir / "mask_data.npz"
         json_dir = video_dir / "json_data"
         result_dir = video_dir / "result"

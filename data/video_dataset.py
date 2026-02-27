@@ -1,82 +1,240 @@
 """
 EgoExo4D multi-view scene dataset — lazy video loading.
 
-Expected directory layout:
+Expected directory layout::
+
     data_root/
         scene_001/
             cam01.mp4
+            cam01/
+                frames/      ← extracted JPEGs always live here, next to the video
             cam02.mp4
-            ...
+            cam02/
+                frames/
         scene_002/
-            cam01.mp4
             ...
 
 Videos are NEVER fully loaded into memory upfront.  ``__getitem__`` returns
 a lightweight ``Scene`` object that holds ``Video`` handles.  Frames are
 decoded on demand — one at a time, in slices, or in batches.
+
+Extracted frames are always stored **co-located with the source data** at
+``data_root/<scene_id>/<video_id>/frames/``.  If frames are found directly
+inside ``<video_id>/`` (not in a ``frames/`` sub-directory) they are
+automatically migrated into ``frames/``.
 """
 
 from __future__ import annotations
 
 import random
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import tqdm
 
+import cv2
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
 from decord import VideoReader, cpu
 
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+
 
 # ======================================================================
-# Video — wrapper around a single .mp4 on disk
+# Video — wrapper around a single video
 # ======================================================================
 
 class Video:
-    """Lazy handle to a single video file.
+    """Lazy handle to a single video or image sequence.
 
-    No frames are decoded until you ask for them.  Supports integer
-    indexing, slicing, and explicit batch reads.
+    Supports three construction modes:
+
+    * **Video only** — ``Video(path="clip.mp4")``
+      Frames are decoded on demand; :meth:`extract_frames` extracts JPEGs
+      to a given directory, skipping if they already exist there.
+
+    * **Images only** — ``Video(frames_dir="cam01/frames/")``
+      No video file involved.  :meth:`extract_frames` returns the images
+      in-place — nothing is copied.
+
+    * **Both** — ``Video(path="clip.mp4", frames_dir="cam01/frames/")``
+      Metadata (fps, resolution, …) is read from the video file, but
+      :meth:`extract_frames` prefers the pre-extracted directory when it is
+      non-empty, falling back to video extraction otherwise.
 
     Parameters
     ----------
-    path : Path
-        Path to the video file.
+    path : Path | None
+        Path to a video file **or** to a directory of JPEG/PNG frames.
+        At least one of *path* or *frames_dir* must be provided.
     resolution : tuple[int, int] | None
-        Optional (H, W) to resize during decoding.
+        Optional (H, W) to resize during video decoding.
+    frames_dir : Path | None
+        Pre-existing directory of extracted frames.  When provided and
+        non-empty, :meth:`extract_frames` returns these frames directly.
     """
 
-    def __init__(self, path: Path, resolution: tuple[int, int] | None = None):
-        self.path = path
-        self.video_id: str = path.stem
+    def __init__(
+        self,
+        path: Path | None = None,
+        resolution: tuple[int, int] | None = None,
+        *,
+        frames_dir: Path | None = None,
+    ):
+        if path is None and frames_dir is None:
+            raise ValueError("At least one of 'path' or 'frames_dir' must be provided.")
+
+        self.path = Path(path) if path is not None else None
+        self.frames_dir = Path(frames_dir) if frames_dir is not None else None
         self._resolution = resolution
 
-        # Open the reader once just to grab metadata, then close it.
-        # Readers are re-created on demand so the object stays picklable
-        # (important for DataLoader with num_workers > 0).
-        vr = self._make_reader()
-        self.num_frames: int = len(vr)
-        self.start: int = 0
-        self.end: int = self.num_frames
-        self.fps: float = float(vr.get_avg_fps())
-        # Get resolution from container metadata — no frame decoding needed.
-        self.original_w, self.original_h = vr[0].shape[1], vr[0].shape[0]
-        self.duration_s: float = self.num_frames / self.fps if self.fps > 0 else 0.0
+        # Determine video_id
+        if self.path is not None:
+            self.video_id: str = self.path.stem if self.path.is_file() else self.path.name
+        else:
+            self.video_id = self.frames_dir.name  # type: ignore[union-attr]
+
+        # Gather metadata from the best available source
+        if self.path is not None and self.path.is_file():
+            # Video file → open VideoReader once for metadata, then close.
+            # Readers are re-created on demand so the object stays picklable
+            vr = self._make_reader()
+            self.num_frames: int = len(vr)
+            self.start: int = 0
+            self.end: int = self.num_frames
+            self.fps: float = float(vr.get_avg_fps())
+            self.original_w, self.original_h = vr[0].shape[1], vr[0].shape[0]
+            self.duration_s: float = self.num_frames / self.fps if self.fps > 0 else 0.0
+            del vr
+        else:
+            # Image directory (path is a dir, or only frames_dir provided).
+            img_source: Path = (
+                self.path if (self.path is not None and self.path.is_dir())
+                else self.frames_dir  # type: ignore[assignment]
+            )
+            frame_paths = sorted(
+                p for p in img_source.iterdir()
+                if p.suffix.lower() in _IMAGE_EXTS
+            )
+            self.num_frames = len(frame_paths)
+            self.start = 0
+            self.end = self.num_frames
+            self.fps = 30.0  # not embedded in images; assume 30 fps
+            if frame_paths:
+                img = cv2.imread(str(frame_paths[0]))
+                self.original_h, self.original_w = img.shape[:2]
+            else:
+                self.original_h = self.original_w = 0
+            self.duration_s = 0.0
+
         self.frame_resolution: tuple[int, int] = (
             resolution if resolution is not None else (self.original_h, self.original_w)
         )
         self.metadata: dict = {
             "video_id": self.video_id,
-            "path": str(self.path),
+            "path": str(self.path) if self.path is not None else None,
+            "frames_dir": str(self.frames_dir) if self.frames_dir is not None else None,
             "fps": self.fps,
             "num_frames": self.num_frames,
             "duration_s": self.duration_s,
             "original_h": self.original_h,
             "original_w": self.original_w,
         }
+
+    def extract_frames(self, frame_dir: Path) -> tuple[Path, list[str]]:
+        """Locate or extract frames for this video.
+
+        Resolution order:
+
+        1. If *frames_dir* was supplied at construction and is non-empty →
+           return those frames directly (no extraction).
+        2. If *path* is an image directory → return its images in-place.
+        3. If *path* is a video file → write numbered JPEGs to *frame_dir*,
+           skipping extraction when files already exist there.
+
+        Parameters
+        ----------
+        frame_dir : Path
+            Destination for extracted frames (used only in case 3 above).
+
+        Returns
+        -------
+        (actual_frame_dir, sorted_frame_names)
+            *actual_frame_dir* is the directory that actually holds the frames
+            (may differ from *frame_dir* for cases 1 and 2).
+        """
+        # Case 1: pre-extracted frames directory given at construction.
+        if self.frames_dir is not None and self.frames_dir.is_dir():
+            frames = sorted(
+                p.name for p in self.frames_dir.iterdir()
+                if p.suffix.lower() in _IMAGE_EXTS
+            )
+            if frames:
+                return self.frames_dir, frames
+
+        # Case 2: path is itself an image directory.
+        if self.path is not None and self.path.is_dir():
+            frames_subdir = self.path / "frames"
+            # If already migrated, use the frames/ subdirectory.
+            if frames_subdir.is_dir():
+                frames = sorted(
+                    p.name for p in frames_subdir.iterdir()
+                    if p.suffix.lower() in _IMAGE_EXTS
+                )
+                if frames:
+                    return frames_subdir, frames
+            # Migrate images sitting directly in path into path/frames/.
+            images_in_root = sorted(
+                p for p in self.path.iterdir()
+                if p.suffix.lower() in _IMAGE_EXTS
+            )
+            if images_in_root:
+                frames_subdir.mkdir(exist_ok=True)
+                for img in images_in_root:
+                    shutil.move(str(img), str(frames_subdir / img.name))
+                print(
+                    f"  {self.video_id}: migrated {len(images_in_root)} frames"
+                    f" → {frames_subdir}"
+                )
+                frames = sorted(
+                    p.name for p in frames_subdir.iterdir()
+                    if p.suffix.lower() in _IMAGE_EXTS
+                )
+                return frames_subdir, frames
+            # No images found anywhere.
+            return self.path, []
+
+        # Case 3: path is a video file — extract to frame_dir.
+        if self.path is None:
+            raise ValueError(
+                f"Video '{self.video_id}': no video file or valid frames directory available."
+            )
+        frame_dir = Path(frame_dir)
+        frame_dir.mkdir(parents=True, exist_ok=True)
+        existing = sorted(
+            p.name for p in frame_dir.iterdir()
+            if p.suffix.lower() in _IMAGE_EXTS
+        )
+        if existing:
+            print(f"  {self.video_id}: reusing {len(existing)} existing frames in {frame_dir}")
+            return frame_dir, existing
+
+        vr = VideoReader(str(self.path), ctx=cpu(0))
+        total = len(vr)
+        frame_names: list[str] = []
+        for idx in tqdm.tqdm(range(total), desc=f"  Extracting {self.video_id}", leave=False):
+            frame_np = vr[idx].asnumpy()
+            name = f"{idx:06d}.jpg"
+            cv2.imwrite(
+                str(frame_dir / name),
+                cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR),
+            )
+            frame_names.append(name)
+            del frame_np
         del vr
+        return frame_dir, frame_names
 
     def get_frame(self, index: int) -> torch.Tensor:
         """Decode a single frame -> (C, H, W) uint8 tensor."""
@@ -121,6 +279,22 @@ class Video:
             return self.get_batch(indices)
         raise TypeError(f"index must be int or slice, got {type(key)}")
 
+    @property
+    def frames_home(self) -> Path | None:
+        """Canonical frames directory co-located with the source data.
+
+        For a video file at ``data/scene1/cam01.mp4`` this returns
+        ``data/scene1/cam01/frames/``.  For an image directory at
+        ``data/scene1/cam01/`` the same path is returned.  When only
+        *frames_dir* was supplied at construction, that directory is
+        returned as-is (assumed canonical already).
+        """
+        if self.path is not None:
+            return self.path.parent / self.video_id / "frames"
+        if self.frames_dir is not None:
+            return self.frames_dir
+        return None
+
     def __repr__(self) -> str:
         return (
             f"Video({self.video_id!r}, frames={self.num_frames}, "
@@ -128,6 +302,10 @@ class Video:
         )
 
     def _make_reader(self) -> VideoReader:
+        if self.path is None or not self.path.is_file():
+            raise RuntimeError(
+                f"Video '{self.video_id}': VideoReader requires a video file path."
+            )
         kwargs = {}
         if self._resolution is not None:
             kwargs["height"] = self._resolution[0]
@@ -224,6 +402,14 @@ class EgoExoSceneDataset(Dataset):
     Actual frame pixels are still decoded lazily — nothing heavy is loaded
     until you explicitly request frames from a ``Video``.
 
+    If *frames_root* is provided, frames are extracted for every video
+    during ``__init__`` (skipped if already present) and each
+    ``Video.frames_dir`` is set to the extraction target.  Downstream
+    consumers (e.g. ``PersonSegmenter``) will then find pre-extracted
+    frames immediately without doing any extraction themselves.  This also
+    makes the pipeline work with image-only datasets that never had a
+    video file.
+
     Parameters
     ----------
     data_root : str | Path
@@ -232,6 +418,10 @@ class EgoExoSceneDataset(Dataset):
         (H, W) to resize frames during decoding.  None keeps original.
     video_extensions : tuple[str, ...]
         File extensions treated as video files.
+    preextract_frames : bool
+        If ``True``, extract frames for every video during ``__init__``
+        (skipped if already present).  Frames are always written to the
+        canonical co-located path ``<data_root>/<scene>/<video_id>/frames/``.
     """
 
     def __init__(
@@ -241,6 +431,7 @@ class EgoExoSceneDataset(Dataset):
         video_extensions: tuple[str, ...] = (".mp4", ".mkv", ".avi"),
         slice: int | None = None,
         exclude_ego: bool = True,
+        preextract_frames: bool = False,
     ):
         self.data_root = Path(data_root)
         self.resolution = resolution
@@ -298,6 +489,16 @@ class EgoExoSceneDataset(Dataset):
 
         print(f"Dataset created: {len(self.scenes)} scenes, "
               f"{sum(len(s) for s in self.scenes)} videos total")
+
+        # Pre-extract frames to the canonical co-located path if requested.
+        if preextract_frames:
+            total_vids = sum(len(s) for s in self.scenes)
+            print(f"Pre-extracting frames for {total_vids} videos (co-located with data) ...")
+            for scene in tqdm.tqdm(self.scenes, desc="Scenes"):
+                for video in tqdm.tqdm(scene.videos, desc=f"  {scene.scene_id}", leave=False):
+                    actual_dir, _ = video.extract_frames(video.frames_home)
+                    video.frames_dir = actual_dir
+            print("Frame extraction complete.")
 
     def __len__(self) -> int:
         return len(self.scenes)

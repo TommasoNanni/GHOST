@@ -1,11 +1,15 @@
 """Visualise re-identified segmentation tracks as an annotated mp4.
 
 Reads all required data from a single video output directory:
-  - frames/           original JPEG frames
   - mask_data.npz     per-frame uint16 masks (pixel value = canonical person ID)
   - json_data/        per-frame bbox + label metadata
   - body_data/
       reid_id_mapping.json   raw SAM2 id → canonical id (written by BodyParameterEstimator)
+
+Original frames are read from the frames_dir argument (co-located with the
+source data at data/<scene>/<video_id>/frames/).  Pass ``frames_dir`` explicitly;
+if omitted the function falls back to ``video_dir/frames/`` for backward
+compatibility.
 
 Renders one mp4 with:
   - a coloured translucent mask per person
@@ -41,24 +45,32 @@ def _color(person_id: int) -> tuple[int, int, int]:
     return _PALETTE[person_id % len(_PALETTE)]
 
 
-def visualize_reid(video_dir: Path, fps: int = 30) -> Path:
+def visualize_reid(
+    video_dir: Path,
+    fps: int = 30,
+    frames_dir: Path | None = None,
+) -> Path:
     """Render an mp4 showing re-identified persons with coloured masks and labels.
 
     Parameters
     ----------
     video_dir : Path
         Root output directory for one video, as produced by PersonSegmenter +
-        BodyParameterEstimator.  Must contain frames/, mask_data.npz,
-        json_data/, and body_data/.
+        BodyParameterEstimator.  Must contain mask_data.npz, json_data/, and
+        body_data/.
     fps : int
         Frame rate for the output mp4.
+    frames_dir : Path | None
+        Directory containing the extracted JPEG frames.  Should point to the
+        canonical co-located path (e.g. ``data/<scene>/<video_id>/frames/``).
+        Falls back to ``video_dir/frames/`` when not provided.
 
     Returns
     -------
     Path
         Path to the written mp4 file.
     """
-    frame_dir = video_dir / "frames"
+    frame_dir = frames_dir if frames_dir is not None else video_dir / "frames"
     npz_path  = video_dir / "mask_data.npz"
     json_dir  = video_dir / "json_data"
     body_dir  = video_dir / "body_data"
