@@ -7,23 +7,28 @@ import json
 import numpy as np
 
 from configuration import CONFIG
-from data.video_dataset import EgoExoSceneDataset
+from data.video_dataset import EgoExoSceneDataset, RichDataset
 from data.segmentation import PersonSegmenter
 from data.parameters_extraction import BodyParameterEstimator
 from utilities.visualize_segmented_reids import visualize_reid
 
 def main():
 
-    data_root = CONFIG.data.data_root
+    egoexo_data_root = CONFIG.data.rich_data_root
+    rich_data_root = CONFIG.data.rich_data_root
     output_dir = CONFIG.data.output_directory
     scenes_slice = CONFIG.data.slice
     exclude_ego = CONFIG.data.exclude_egocentric
 
     # Load dataset (1 scene for testing)
-    ds = EgoExoSceneDataset(
-        data_root = data_root, 
-        slice=scenes_slice, 
-        exclude_ego=exclude_ego,
+    # ds = EgoExoSceneDataset(
+    #     data_root = data_root, 
+    #     slice=scenes_slice, 
+    #     exclude_ego=exclude_ego,
+    # )
+    ds = RichDataset(
+        data_root = rich_data_root,
+        slice = scenes_slice,
     )
     scene = ds[0]
     print(f"\n=== Scene: {scene.scene_id} ({len(scene)} videos) ===")
@@ -53,6 +58,12 @@ def main():
         bbox_padding = CONFIG.parameters_extraction.bbox_padding,
         smplx_model_path = CONFIG.data.smplx_model_path,
         mhr_model_path  = CONFIG.data.mhr_model_path,
+        reid_threshold = CONFIG.parameters_extraction.reid_threshold,
+        gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
+        reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
+        cross_view_reid_threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
+        cross_view_appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
+        cross_view_shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
     )
     print(f"\n--- Running body parameter estimation ---")
     estimator.estimate_scene(
@@ -60,7 +71,14 @@ def main():
         video_dirs=video_dirs,
     )
 
-    # Step 3: Inspect output format for each video
+    # Step 3: Match person IDs across camera views
+    print(f"\n--- Running cross-view person re-identification ---")
+    estimator.match_persons_across_views(
+        scene=scene,
+        video_dirs=video_dirs,
+    )
+
+    # Step 4: Inspect output format for each video
     print(f"\n=== Body parameter output format ===")
     for video_id, video_dir in video_dirs.items():
         body_dir = Path(video_dir) / "body_data"
@@ -115,7 +133,7 @@ def main():
         else:
             print(f"  WARNING: summary JSON not found at {summary_path}")
 
-    # Step 4: Visualise the re-ID corrected segmentation.
+    # Step 5: Visualise the re-ID corrected segmentation.
     print(f"\n--- Visualising re-ID corrected segmentation ---")
     for video in scene.videos:
         if video.video_id not in video_dirs:

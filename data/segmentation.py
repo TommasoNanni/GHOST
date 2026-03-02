@@ -32,6 +32,7 @@ import functools
 import gc
 import io
 import json
+import logging
 import shutil
 import zipfile
 from pathlib import Path
@@ -210,11 +211,16 @@ class PersonSegmenter:
             for r in results:
                 video_results[r["video_id"]] = r
 
+            # --- filter short-lived tracks (hallucinated detections) ---
+            for video in scene.videos:
+                PersonSegmenter._filter_short_tracks(
+                    scene_dir / video.video_id / "mask_data",
+                    scene_dir / video.video_id / "json_data",
+                )
+
             # --- compact per-frame .npy files into a single compressed .npz to save space ---
             for video in scene.videos:
                 PersonSegmenter._compact_mask_data(scene_dir / video.video_id)
-
-        # --- optional visualisation (unpacks .npz temporarily) ---
         if vis:
             for video in scene.videos:
                 self._visualize(video, scene_dir / video.video_id)
@@ -263,6 +269,13 @@ class PersonSegmenter:
             torch.cuda.empty_cache()
 
         if newly_segmented:
+            # --- filter short-lived tracks (hallucinated detections) ---
+            for video in scene.videos:
+                PersonSegmenter._filter_short_tracks(
+                    scene_dir / video.video_id / "mask_data",
+                    scene_dir / video.video_id / "json_data",
+                )
+
             # --- compact per-frame .npy files into a single compressed .npz to save space---
             for video in scene.videos:
                 PersonSegmenter._compact_mask_data(scene_dir / video.video_id)
@@ -304,18 +317,29 @@ class PersonSegmenter:
         session_id = response["session_id"]
 
         try:
-            # Add text prompt at regular intervals so people entering after
-            # frame 0 are also detected and tracked.
-            keyframes = range(0, len(frame_names), self.redetect_interval)
-            for kf in keyframes:
-                self._predictor.handle_request(
-                    request=dict(
-                        type="add_prompt",
-                        session_id=session_id,
-                        frame_index=kf,
-                        text=self.text_prompt,
-                    )
+            # A single text prompt is sufficient: SAM3's add_prompt resets
+            # all state (calls reset_state internally), so only the last
+            # call would survive anyway.  During propagation, SAM3 runs
+            # detection on every frame when a text prompt is active
+            # (allow_new_detections=True), so people entering mid-video
+            # are still picked up.
+            self._predictor.handle_request(
+                request=dict(
+                    type="add_prompt",
+                    session_id=session_id,
+                    frame_index=0,
+                    text=self.text_prompt,
                 )
+            )
+
+            # Lower the new-detection threshold so that people who are
+            # partially visible or far away are not rejected during
+            # propagation (default 0.7 is too aggressive, but 0.5 lets
+            # too many false positives through).
+            try:
+                self._predictor.model.new_det_thresh = 0.6
+            except AttributeError:
+                pass
 
             # Propagate through the entire video
             objects_count = 0
@@ -362,25 +386,75 @@ class PersonSegmenter:
                 for i, obj_id in enumerate(obj_ids):
                     oid = int(obj_id)
                     binary = masks[i]  # (H, W) bool
+
+                    # Discard low-confidence detections that SAM3
+                    # emits but are likely false positives (e.g.
+                    # random objects mistaken for people).  Threshold
+                    # matches new_det_thresh (0.6) to prevent propagated
+                    # hallucinations from surviving below that level.
+                    if float(scores[i]) < 0.6:
+                        continue
+
+                    # Discard degenerate masks that cover most of the image.
+                    # SAM3 occasionally produces flood-fill masks that span
+                    # the entire frame — these corrupt the visualisation.
+                    mask_pixel_count = int(binary.sum())
+                    if mask_pixel_count > 0.80 * H * W:
+                        logging.warning(
+                            f"Discarding mask for obj {oid} in frame "
+                            f"{frame_idx}: covers {mask_pixel_count}/{H*W} "
+                            f"pixels ({100*mask_pixel_count/(H*W):.1f}%)"
+                        )
+                        continue
+
+                    # Discard non-person detections whose mask fills too little
+                    # of its own bounding box.  A real person silhouette
+                    # typically fills ≥10% of the tight bbox area.  Artifacts
+                    # like a hand holding a phone produce a tiny mask inside a
+                    # large propagated bbox (fill ratio well below 5%).
+                    if mask_pixel_count > 0:
+                        ys_m, xs_m = np.where(binary)
+                        bbox_area = (int(xs_m.max()) - int(xs_m.min()) + 1) * (
+                            int(ys_m.max()) - int(ys_m.min()) + 1
+                        )
+                        fill_ratio = mask_pixel_count / max(bbox_area, 1)
+                        if fill_ratio < 0.10:
+                            logging.warning(
+                                f"Discarding mask for obj {oid} in frame "
+                                f"{frame_idx}: fill ratio {fill_ratio:.2f} "
+                                f"({mask_pixel_count} px in {bbox_area} px bbox)"
+                            )
+                            continue
+
                     mask_img[binary] = oid
 
-                    # Compute bounding box from binary mask
-                    ys, xs = np.where(binary)
-                    if len(ys) > 0:
-                        x1, y1, x2, y2 = int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
-                    else:
-                        x1 = y1 = x2 = y2 = 0
-
+                    # Store score; bbox will be computed after the full loop
+                    # from the committed pixels in mask_img (not from `binary`)
+                    # so that the bbox always matches what is actually stored.
                     labels_meta[str(oid)] = {
                         "instance_id": oid,
                         "class_name": self.text_prompt,
-                        "x1": x1, "y1": y1,
-                        "x2": x2, "y2": y2,
+                        "x1": 0, "y1": 0, "x2": 0, "y2": 0,
                         "score": float(scores[i]),
                     }
 
-                    if oid > objects_count:
-                        objects_count = oid
+                # Recompute bboxes from committed pixels in mask_img and drop
+                # persons whose pixels were entirely overwritten by a later
+                # (higher-priority) object.  This resolves the desync between
+                # the per-object binary mask and the shared mask_img canvas.
+                for str_oid in list(labels_meta.keys()):
+                    committed = mask_img == int(str_oid)
+                    if not committed.any():
+                        del labels_meta[str_oid]
+                        continue
+                    ys_c, xs_c = np.where(committed)
+                    labels_meta[str_oid]["x1"] = int(xs_c.min())
+                    labels_meta[str_oid]["y1"] = int(ys_c.min())
+                    labels_meta[str_oid]["x2"] = int(xs_c.max())
+                    labels_meta[str_oid]["y2"] = int(ys_c.max())
+                    oid_val = int(str_oid)
+                    if oid_val > objects_count:
+                        objects_count = oid_val
 
                 np.save(str(mask_data_dir / mask_name), mask_img)
 
@@ -498,18 +572,29 @@ class PersonSegmenter:
 
         objects_count = 0
         try:
-            # Add text prompt at regular intervals so people entering after
-            # frame 0 are also detected and tracked.
-            keyframes = range(0, len(frame_names), redetect_interval)
-            for kf in keyframes:
-                predictor.handle_request(
-                    request=dict(
-                        type="add_prompt",
-                        session_id=session_id,
-                        frame_index=kf,
-                        text=text_prompt,
-                    )
+            # A single text prompt is sufficient: SAM3's add_prompt resets
+            # all state (calls reset_state internally), so only the last
+            # call would survive anyway.  During propagation, SAM3 runs
+            # detection on every frame when a text prompt is active
+            # (allow_new_detections=True), so people entering mid-video
+            # are still picked up.
+            predictor.handle_request(
+                request=dict(
+                    type="add_prompt",
+                    session_id=session_id,
+                    frame_index=0,
+                    text=text_prompt,
                 )
+            )
+
+            # Lower the new-detection threshold so that people who are
+            # partially visible or far away are not rejected during
+            # propagation (default 0.7 is too aggressive, but 0.5 lets
+            # too many false positives through).
+            try:
+                predictor.model.new_det_thresh = 0.6
+            except AttributeError:
+                pass
 
             # Propagate through entire video
             for resp in predictor.handle_stream_request(
@@ -551,24 +636,70 @@ class PersonSegmenter:
                 for i, obj_id in enumerate(obj_ids):
                     oid = int(obj_id)
                     binary = masks[i]
+
+                    # Discard low-confidence detections.  Threshold matches
+                    # new_det_thresh (0.6) to prevent propagated hallucinations
+                    # from surviving below that level.
+                    if float(scores[i]) < 0.6:
+                        continue
+
+                    # Discard degenerate masks that cover most of the image.
+                    # SAM3 occasionally produces flood-fill masks that span
+                    # the entire frame — these corrupt downstream re-ID
+                    # and visualisation.
+                    mask_pixel_count = int(binary.sum())
+                    if mask_pixel_count > 0.80 * H * W:
+                        logging.warning(
+                            f"[GPU {gpu_id}] Discarding mask for obj {oid} "
+                            f"in frame {frame_idx}: covers "
+                            f"{mask_pixel_count}/{H*W} pixels "
+                            f"({100*mask_pixel_count/(H*W):.1f}%)"
+                        )
+                        continue
+
+                    # Discard non-person detections whose mask fills too little
+                    # of its own bounding box.
+                    if mask_pixel_count > 0:
+                        ys_m, xs_m = np.where(binary)
+                        bbox_area = (int(xs_m.max()) - int(xs_m.min()) + 1) * (
+                            int(ys_m.max()) - int(ys_m.min()) + 1
+                        )
+                        fill_ratio = mask_pixel_count / max(bbox_area, 1)
+                        if fill_ratio < 0.10:
+                            logging.warning(
+                                f"[GPU {gpu_id}] Discarding mask for obj "
+                                f"{oid} in frame {frame_idx}: fill ratio "
+                                f"{fill_ratio:.2f} ({mask_pixel_count} px "
+                                f"in {bbox_area} px bbox)"
+                            )
+                            continue
+
                     mask_img[binary] = oid
 
-                    ys, xs = np.where(binary)
-                    if len(ys) > 0:
-                        x1, y1, x2, y2 = int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
-                    else:
-                        x1 = y1 = x2 = y2 = 0
-
+                    # Store score; bbox will be computed after the full loop.
                     labels_meta[str(oid)] = {
                         "instance_id": oid,
                         "class_name": text_prompt,
-                        "x1": x1, "y1": y1,
-                        "x2": x2, "y2": y2,
+                        "x1": 0, "y1": 0, "x2": 0, "y2": 0,
                         "score": float(scores[i]),
                     }
 
-                    if oid > objects_count:
-                        objects_count = oid
+                # Recompute bboxes from committed pixels in mask_img and drop
+                # persons whose pixels were entirely overwritten by a later
+                # (higher-priority) object.
+                for str_oid in list(labels_meta.keys()):
+                    committed = mask_img == int(str_oid)
+                    if not committed.any():
+                        del labels_meta[str_oid]
+                        continue
+                    ys_c, xs_c = np.where(committed)
+                    labels_meta[str_oid]["x1"] = int(xs_c.min())
+                    labels_meta[str_oid]["y1"] = int(ys_c.min())
+                    labels_meta[str_oid]["x2"] = int(xs_c.max())
+                    labels_meta[str_oid]["y2"] = int(ys_c.max())
+                    oid_val = int(str_oid)
+                    if oid_val > objects_count:
+                        objects_count = oid_val
 
                 np.save(str(mask_data_dir / mask_name), mask_img)
 
@@ -654,6 +785,67 @@ class PersonSegmenter:
             "mask_data_dir": str(vid_out / "mask_data"),
             "json_data_dir": str(vid_out / "json_data"),
         }
+
+    # ------------------------------------------------------------------
+    # Short-track filter
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _filter_short_tracks(
+        mask_data_dir: Path,
+        json_data_dir: Path,
+        min_frames: int = 3,
+    ) -> None:
+        """Remove person IDs that appear in fewer than *min_frames* frames.
+
+        Hallucinated detections from SAM3 (spurious new-detection prompts
+        that get confirmed for only 1-2 frames) inflate person counts and
+        generate ghost re-ID entries.  Scanning the per-frame .npy masks
+        after propagation and zeroing out short-lived IDs removes these.
+        """
+        npy_files = sorted(mask_data_dir.glob("*.npy"))
+        if not npy_files:
+            return
+
+        # Count the number of frames each non-zero ID appears in.
+        appearance_count: dict[int, int] = {}
+        for p in npy_files:
+            arr = np.load(str(p))
+            for uid in np.unique(arr):
+                if uid == 0:
+                    continue
+                appearance_count[int(uid)] = appearance_count.get(int(uid), 0) + 1
+
+        short_ids = {
+            uid for uid, cnt in appearance_count.items() if cnt < min_frames
+        }
+        if not short_ids:
+            return
+
+        logging.info(
+            f"Filtering {len(short_ids)} short-lived track(s) "
+            f"(< {min_frames} frames): {sorted(short_ids)}"
+        )
+
+        # Zero out short-lived IDs in every .npy mask file.
+        for p in npy_files:
+            arr = np.load(str(p))
+            if any(uid in np.unique(arr) for uid in short_ids):
+                for uid in short_ids:
+                    arr[arr == uid] = 0
+                np.save(str(p), arr)
+
+        # Remove their entries from corresponding JSON metadata files.
+        for jp in sorted(json_data_dir.glob("*.json")):
+            with open(jp) as f:
+                data = json.load(f)
+            labels = data.get("labels", {})
+            if any(str(uid) in labels for uid in short_ids):
+                for uid in short_ids:
+                    labels.pop(str(uid), None)
+                data["labels"] = labels
+                with open(jp, "w") as f:
+                    json.dump(data, f)
 
     # ------------------------------------------------------------------
     # Mask compaction

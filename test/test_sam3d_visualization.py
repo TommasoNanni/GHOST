@@ -9,6 +9,7 @@ Assumes segmentation has already been run (test_parameters_extraction_sam3d.py).
 
 import sys
 import json
+import traceback
 from pathlib import Path
 
 import cv2
@@ -20,7 +21,7 @@ from notebook.utils import setup_sam_3d_body
 from tools.vis_utils import visualize_sample_together
 
 SEGMENTATION_DIR = Path(
-    "/cluster/project/cvg/students/tnanni/ghost/test_outputs/segmentation_test"
+    "/cluster/project/cvg/students/tnanni/ghost/test_outputs/first_sam3_segmentation_test_15"
 )
 OUTPUT_DIR = Path(
     "/cluster/project/cvg/students/tnanni/ghost/test_outputs/sam3d_single_frame"
@@ -28,9 +29,10 @@ OUTPUT_DIR = Path(
 HF_REPO = "facebook/sam-3d-body-dinov3"
 
 
-def find_first_frame_with_people(seg_dir: Path):
+def find_first_frame_with_people(seg_dir: Path, index: int = 0):
     """Walk the segmentation output and return (frame_path, bbox_array) for
-    the first frame that has at least one person detection."""
+    the nth frame (0-based) that has at least one person detection."""
+    count = 0
     for scene_dir in sorted(seg_dir.iterdir()):
         if not scene_dir.is_dir():
             continue
@@ -62,6 +64,9 @@ def find_first_frame_with_people(seg_dir: Path):
                 )
                 if len(bboxes) == 0:
                     continue
+                if count < index:
+                    count += 1
+                    continue
                 return frame_path, bboxes, json_path
     return None, None, None
 
@@ -70,7 +75,7 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # --- Find a frame to test on ---
-    frame_path, bboxes, json_path = find_first_frame_with_people(SEGMENTATION_DIR)
+    frame_path, bboxes, json_path = find_first_frame_with_people(SEGMENTATION_DIR, index=99)
     if frame_path is None:
         raise RuntimeError(
             f"No segmented frames with people found under {SEGMENTATION_DIR}. "
@@ -86,10 +91,15 @@ def main():
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
     # --- Load SAM-3D Body ---
-    estimator = setup_sam_3d_body(hf_repo_id=HF_REPO)
+    try:
+        estimator = setup_sam_3d_body(hf_repo_id=HF_REPO)
+    except Exception as e:
+        print(traceback.format_exc())
 
     # --- Run inference ---
+    print("bjqsbfjwebfwe")
     outputs = estimator.process_one_image(img_rgb, bboxes=bboxes)
+    print("nwkebfiwekhfiwer")
 
     if not outputs:
         print("SAM-3D Body returned no outputs for this frame.")
@@ -97,7 +107,8 @@ def main():
 
     print(f"\n{len(outputs)} person(s) detected:")
     for i, out in enumerate(outputs):
-        print(f"  person {i}: bbox={out['bbox'].tolist()}")
+        print(f"    Keys:  {list(out.keys())}")
+        print(f"    person {i}: bbox={out['bbox'].tolist()}")
         print(f"    pred_cam_t      : {out['pred_cam_t'].tolist()}")
         print(f"    pred_keypoints_3d shape: {out['pred_keypoints_3d'].shape}")
         print(f"    pred_vertices   shape: {out['pred_vertices'].shape}")

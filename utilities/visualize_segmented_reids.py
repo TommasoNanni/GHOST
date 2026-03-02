@@ -150,6 +150,10 @@ def visualize_reid(
                     person_mask = mask_img == canon_id
                     if not person_mask.any():
                         continue
+                    # Skip degenerate masks (>80% of frame) — render bbox
+                    # only so the issue is visible for debugging.
+                    if int(person_mask.sum()) > 0.80 * H * W:
+                        continue
                     color = np.array(_color(canon_id), dtype=np.float32)
                     overlay[person_mask] = (
                         0.5 * overlay[person_mask] + 0.5 * color
