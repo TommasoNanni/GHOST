@@ -39,7 +39,7 @@ from torch.utils.data import Dataset
 
 from decord import VideoReader, cpu
 
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
 # ======================================================================
@@ -100,6 +100,8 @@ class Video:
         if self.path is not None and self.path.is_file():
             # Video file → open VideoReader once for metadata, then close.
             # Readers are re-created on demand so the object stays picklable
+            self._is_image_sequence = False
+            self._frame_paths: list[Path] = []
             vr = self._make_reader()
             self.num_frames: int = len(vr)
             self.start: int = 0
@@ -110,20 +112,21 @@ class Video:
             del vr
         else:
             # Image directory (path is a dir, or only frames_dir provided).
+            self._is_image_sequence = True
             img_source: Path = (
                 self.path if (self.path is not None and self.path.is_dir())
                 else self.frames_dir  # type: ignore[assignment]
             )
-            frame_paths = sorted(
+            self._frame_paths = sorted(
                 p for p in img_source.iterdir()
                 if p.suffix.lower() in _IMAGE_EXTS
             )
-            self.num_frames = len(frame_paths)
+            self.num_frames = len(self._frame_paths)
             self.start = 0
             self.end = self.num_frames
             self.fps = 30.0  # not embedded in images; assume 30 fps
-            if frame_paths:
-                img = cv2.imread(str(frame_paths[0]))
+            if self._frame_paths:
+                img = cv2.imread(str(self._frame_paths[0]))
                 self.original_h, self.original_w = img.shape[:2]
             else:
                 self.original_h = self.original_w = 0
@@ -185,7 +188,8 @@ class Video:
                 )
                 if frames:
                     return frames_subdir, frames
-            # Migrate images sitting directly in path into path/frames/.
+            # Symlink images sitting directly in path into path/frames/.
+            # Uses symlinks so the original data is never modified.
             images_in_root = sorted(
                 p for p in self.path.iterdir()
                 if p.suffix.lower() in _IMAGE_EXTS
@@ -193,9 +197,11 @@ class Video:
             if images_in_root:
                 frames_subdir.mkdir(exist_ok=True)
                 for img in images_in_root:
-                    shutil.move(str(img), str(frames_subdir / img.name))
+                    link = frames_subdir / img.name
+                    if not link.exists():
+                        link.symlink_to(img.resolve())
                 print(
-                    f"  {self.video_id}: migrated {len(images_in_root)} frames"
+                    f"  {self.video_id}: symlinked {len(images_in_root)} frames"
                     f" → {frames_subdir}"
                 )
                 frames = sorted(
@@ -238,6 +244,14 @@ class Video:
 
     def get_frame(self, index: int) -> torch.Tensor:
         """Decode a single frame -> (C, H, W) uint8 tensor."""
+        if self._is_image_sequence:
+            frame_bgr = cv2.imread(str(self._frame_paths[index]))
+            if self._resolution is not None:
+                frame_bgr = cv2.resize(
+                    frame_bgr, (self._resolution[1], self._resolution[0])
+                )
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            return torch.from_numpy(frame_rgb).permute(2, 0, 1)  # (C, H, W)
         vr = self._make_reader()
         frame_np = vr[index].asnumpy()          # (H, W, C)
         del vr
@@ -245,6 +259,9 @@ class Video:
 
     def get_batch(self, indices: list[int]) -> torch.Tensor:
         """Decode an arbitrary set of frame indices -> (T, C, H, W) uint8."""
+        if self._is_image_sequence:
+            frames = [self.get_frame(i) for i in indices]
+            return torch.stack(frames)  # (T, C, H, W)
         vr = self._make_reader()
         frames_np: np.ndarray = vr.get_batch(indices).asnumpy()  # (T, H, W, C)
         del vr
@@ -431,7 +448,7 @@ class EgoExoSceneDataset(Dataset):
         video_extensions: tuple[str, ...] = (".mp4", ".mkv", ".avi"),
         slice: int | None = None,
         exclude_ego: bool = True,
-        preextract_frames: bool = False,
+        preextract_frames: bool = True,
     ):
         self.data_root = Path(data_root)
         self.resolution = resolution
@@ -523,10 +540,149 @@ class EgoExoSceneDataset(Dataset):
         )
 
 
+class RichDataset(Dataset):
+    """PyTorch dataset where each item is one RICH scene.
+
+    RICH stores data as image sequences (originally ``.bmp``; can be
+    converted to ``.jpg`` to save disk space).  The expected layout is::
+
+        data_root/
+            BBQ_001_guitar/          ← scene
+                cam_00/              ← camera (image sequence)
+                    00000_00.jpg     ← or .bmp if not yet converted
+                    00001_00.jpg
+                    ...
+                cam_01/
+                    ...
+            LectureHall_018_.../
+                ...
+
+    Each camera directory becomes a :class:`Video` object in
+    image-sequence mode (``frames_dir``).  No video files are involved.
+
+    Parameters
+    ----------
+    data_root : str | Path
+        Root directory containing one sub-folder per scene.
+    resolution : tuple[int, int] | None
+        (H, W) to resize frames during decoding.  None keeps original.
+    image_extensions : tuple[str, ...]
+        File extensions treated as image frames.
+    slice : int | None
+        Limit the number of scenes loaded (for debugging).
+
+    During construction, a ``frames/`` sub-directory is created inside
+    each camera directory (e.g. ``cam_00/frames/``) containing symlinks
+    back to the original images.  The source data is never modified.
+    """
+
+    def __init__(
+        self,
+        data_root: str | Path,
+        resolution: tuple[int, int] | None = None,
+        image_extensions: tuple[str, ...] = (".jpg", ".jpeg", ".bmp"),
+        slice: int | None = None,
+    ):
+        self.data_root = Path(data_root)
+        self.resolution = resolution
+        self.image_extensions = image_extensions
+
+        # Discover scene directories that contain camera sub-dirs with images.
+        scene_dirs = sorted(
+            p for p in self.data_root.iterdir()
+            if p.is_dir() and self._has_images(p)
+        )
+        if slice is not None:
+            scene_dirs = scene_dirs[:slice]
+
+        if len(scene_dirs) == 0:
+            raise FileNotFoundError(
+                f"No scene folders with images found under {self.data_root}"
+            )
+
+        # Collect (scene_dir, [cam_dir, ...]) pairs.
+        # Each camera directory is an image sequence → one Video.
+        scene_cam_dirs: list[tuple[Path, list[Path]]] = []
+        for scene_dir in scene_dirs:
+            cam_dirs = self._list_camera_dirs(scene_dir)
+            scene_cam_dirs.append((scene_dir, cam_dirs))
+
+        total_cams = sum(len(cds) for _, cds in scene_cam_dirs)
+        print(f"Loading metadata for {total_cams} cameras across "
+              f"{len(scene_dirs)} scenes...")
+
+        # Build Video objects in parallel (I/O-bound: reads one image for
+        # resolution metadata).  Each camera directory is passed as `path`
+        # (directory mode) so that extract_frames can migrate images into
+        # a canonical `frames/` sub-directory.
+        all_cam_dirs = [cd for _, cds in scene_cam_dirs for cd in cds]
+        video_map: dict[Path, Video] = {}
+        with ThreadPoolExecutor(max_workers=min(32, len(all_cam_dirs) or 1)) as pool:
+            futures = {
+                pool.submit(Video, cd, self.resolution): cd
+                for cd in all_cam_dirs
+            }
+            for future in tqdm.tqdm(
+                as_completed(futures), total=len(futures), desc="Loading cameras"
+            ):
+                cam_dir = futures[future]
+                video_map[cam_dir] = future.result()
+
+        # Assemble scenes in the original order.
+        self.scenes: list[Scene] = []
+        for scene_dir, cam_dirs in scene_cam_dirs:
+            videos = [video_map[cd] for cd in cam_dirs]
+            self.scenes.append(Scene(scene_id=scene_dir.name, videos=videos))
+
+        print(f"Dataset created: {len(self.scenes)} scenes, "
+              f"{sum(len(s) for s in self.scenes)} cameras total")
+
+        # Always ensure frames live in a canonical frames/ sub-directory.
+        # For RICH this creates symlinks from cam_XX/frames/<frame>.{jpg,bmp} →
+        # cam_XX/<frame>.{jpg,bmp} so downstream code always finds frames at a
+        # consistent path without modifying the original data.
+        total_cams = sum(len(s) for s in self.scenes)
+        print(f"Ensuring frames/ layout for {total_cams} cameras ...")
+        for scene in tqdm.tqdm(self.scenes, desc="Scenes"):
+            for video in tqdm.tqdm(scene.videos, desc=f"  {scene.scene_id}", leave=False):
+                actual_dir, _ = video.extract_frames(video.frames_home)
+                video.frames_dir = actual_dir
+        print("Frame layout ready.")
+
+    def __len__(self) -> int:
+        return len(self.scenes)
+
+    def __getitem__(self, idx: int) -> Scene:
+        return self.scenes[idx]
+
+    def get_scene_ids(self) -> list[str]:
+        return [s.scene_id for s in self.scenes]
+
+    def _list_camera_dirs(self, scene_dir: Path) -> list[Path]:
+        """Return sorted sub-directories of *scene_dir* that contain images."""
+        return sorted(
+            d for d in scene_dir.iterdir()
+            if d.is_dir() and any(
+                p.suffix.lower() in self.image_extensions
+                for p in d.iterdir() if p.is_file()
+            )
+        )
+
+    def _has_images(self, scene_dir: Path) -> bool:
+        """Check whether *scene_dir* has at least one camera sub-dir with images."""
+        return any(
+            d.is_dir() and any(
+                p.suffix.lower() in self.image_extensions
+                for p in d.iterdir() if p.is_file()
+            )
+            for d in scene_dir.iterdir()
+        )
+
 
 if __name__ =="__main__":
-    path = "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
-    video_ds = EgoExoSceneDataset(path, slice=5)
+    egoexo_path = "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
+    rich_path = "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train/"
+    video_ds = RichDataset(rich_path, slice=5)
     print(f"Found {len(video_ds)} scenes: {video_ds.get_scene_ids()}")
 
     scene = video_ds[0]
