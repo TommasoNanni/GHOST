@@ -81,13 +81,21 @@ def main(args):
     parameters_extractor = BodyParameterEstimator(
         sam3d_hf_repo=args.sam3d_hf_repo,
         sam3d_step=args.sam3d_step,
-        smooth=args.smooth,
     )
 
     # Extract people parameters
     for scene in tqdm(dataset.scenes, desc="Extracting Body Parameters from scenes"):
         video_dir_dict = scene_directories[scene.scene_id]
         parameters_extractor.estimate_scene(
+            scene = scene,
+            video_dirs = video_dir_dict,
+        )
+
+    # Match person identities across camera views so that body_data/,
+    # mask_data.npz, and json_data/ use consistent IDs throughout every scene.
+    for scene in tqdm(dataset.scenes, desc="Cross-view person re-identification"):
+        video_dir_dict = scene_directories[scene.scene_id]
+        parameters_extractor.match_persons_across_views(
             scene = scene,
             video_dirs = video_dir_dict,
         )
