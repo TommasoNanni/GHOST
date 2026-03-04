@@ -1,16 +1,45 @@
-# ghost
-
-Multi-view person segmentation, 3D body estimation, and temporal synchronization for the [EgoExo4D](https://ego-exo4d-data.org/) dataset.
+# GHOST - Geometric Human Out-of-sync Spatio Temporal reconstruction
 
 ## Overview
 
-This project processes multi-camera scene recordings in three stages:
+This repository contains the code for GHOST, a novel approach that leverages state-of-the-art models, time warping algorithms and a transformer based geometric fusion in order to reconstruct human meshes from casual, unsynchronized and multi-view videos. 
 
-1. **Person segmentation** — Grounding DINO detects people in keyframes; SAM2 propagates masks across all frames within each video.
-2. **Body parameter estimation** — SAM3D Body estimates per-frame SMPL body parameters (pose, shape, keypoints) for each tracked person.
-3. **Video synchronization** — Pairwise DTW on 3D joint sequences recovers temporal offsets between cameras, solved globally via least squares.
+GHOST receives as input videos containing humans and employs [SAM3](https://ai.meta.com/research/sam3/) and [SAM 3D Body](https://ai.meta.com/research/sam3d/) to detect people and extract per-view [SMPL-X](https://smpl-x.is.tue.mpg.de/) parameters. Such human parameters are then used to temporally align videos and extract initial relative camera poses. 
 
-## Project structure
+Such initial parameters are then processed by the fusion module, which aligns shape, pose and camera parameters into a unique world representation. Such a representation is obtained exclusively through geometric constraints and confidence masks.
+## Quick start
+
+### Installation
+This code leverages several external repositories. For [SAM3](https://huggingface.co/facebook/sam3) and [SAM 3D Body](https://huggingface.co/facebook/sam-3d-body-dinov3) (make sure to download the DINOv3 version).
+
+```bash
+# From inside /ghost:
+git clone https://github.com/facebookresearch/sam3.git
+git clone https://github.com/facebookresearch/sam-3d-body.git
+git clone git@github.com:facebookresearch/MHR.git
+cd MHR
+curl -OL https://github.com/facebookresearch/MHR/releases/download/v1.0.0/assets.zip
+unzip assets.zip
+
+git clone https://github.com/nghorbani/human_body_prior.git
+```
+Then make sure you have [pixi](https://github.com/prefix-dev/pixi) installed, since the code uses pixi for installation.
+```bash
+pixi install
+pixi run setup-cuda
+pixi run download-model # download sam3
+pip install --no-deps -e ./human_body_prior
+```
+In case you are on a devicee without GPU available (or on a login node on a cluster)
+```bash
+CONDA_OVERRIDE_CUDA=12.6 pixi install
+CONDA_OVERRIDE_CUDA=12.6 pixi run setup-cuda
+CONDA_OVERRIDE_CUDA=12.6 pixi run download-model
+pip install --no-deps -e ./human_body_prior
+```
+We built this project using python 3.12 and torch 2.7.1 with cuda 12.6 support.
+
+Moreover, make sure to have SMPLX and SMPL body models installed in `ghost/body_models/`. Download the `SMPLX_NEUTRAL.pkl` and `SMPL_NEUTRAL.pkl` body models from [SMPL-X](https://smpl-x.is.tue.mpg.de/).
 
 ```
 ghost/
@@ -24,34 +53,35 @@ ghost/
 ├── utilities/                  # Offline helper scripts
 ├── bash_jobs/                  # SLURM job scripts
 ├── test/                       # Unit and integration tests
-├── Grounded-SAM-2/             # Grounded SAM2 submodule
 ├── sam-3d-body/                # SAM3D Body submodule
 ├── MHR/                        # MHR / SMPL conversion tools
 ├── checkpoints/                # Model weights (not tracked)
 └── body_models/                # SMPL body model files (not tracked)
 ```
+### Repo modifications
+Two key modifications have to be done to the external repositories:
 
-## Installation
+1. In `sam3/pyproject.toml`, make sure to remove the `numpy<2` dependency. This causes conflicts with our new versions of pytorch and doesn't cause issues in SAM3 usage
+2. SAM 3D Body doesn't have a `pyproject.toml` file. We created a minimal one that contains the dependencies needed to install it in our repo. Run:
+    ```bash
+    cd sam-3d-body
+    cat <<EOF > pyproject.toml
+    # PlaceHolder
+    EOF
+    ```
 
-This project uses [pixi](https://pixi.sh) for environment management. The setup requires two steps because the login node has no GPU driver.
+### Dataset
+This repo has been trained using the [RICH dataset](https://rich.is.tue.mpg.de/). To replicate training using rich, follow the instructions on their website for downloading the dataset. The dataset downloads images in `.bmp` format, taking approximately 30 Mb each. To overcome the problem of such an extreme space usage, we provide a script that converts the images to `.jpg` format.
 
+To run it, go in `bash_jobs/convert_rich_bmp_to_jpeg.sh` and change the `--root` argument to your rich directory. Then launch
 ```bash
-# 1. Install conda dependencies (works without a GPU)
-CONDA_OVERRIDE_CUDA=12.6 pixi install
-
-# 2. Replace the CPU-only PyTorch with a CUDA build
-CONDA_OVERRIDE_CUDA=12.6 pixi run setup-cuda
+bash_jobs/convert_rich_bmp_to_jpeg.sh
 ```
+Notably, our pipeline resize images to approximately 1000 x 1000 resolution and saves them inside a `/frames` folder in the data directory. If higher resolution images are not needed, they can be deleted and this will save even more space.
 
-On **GPU compute nodes** `CONDA_OVERRIDE_CUDA` is not needed:
+Also make sure to go to `configuration/config.py` and update your data directories.
 
-```bash
-pixi install
-pixi run setup-cuda
-```
-
-> **Note:** always use `python -m pip` (not bare `pip`) inside pixi tasks to avoid the system pip shadowing the environment.
-
+The expected dataset layouts are the ones that the scripts automatically download. 
 ## Usage
 
 ```bash
@@ -66,17 +96,6 @@ pixi run python main.py \
     [--device cuda]
 ```
 
-### Expected input layout
-
-```
-data_root/
-    scene_001/
-        cam01.mp4
-        cam02.mp4
-        ...
-    scene_002/
-        ...
-```
 
 ### Output layout
 
@@ -110,23 +129,3 @@ Logs are written to `logs/<job_name>_<job_id>.{out,err}`.
 - **Incremental processing**: already-segmented videos are skipped automatically (detected by the presence of `mask_data.npz`).
 - **Mask storage**: per-frame `.npy` files are merged into a single `.npz` after segmentation (typically 20–50× compression).
 - **Synchronization**: pairwise DTW offsets between all camera pairs are combined in a global least-squares solve, giving robust start times even with missing pairs.
-
-## Checkpoints
-
-Download model weights and place them in `checkpoints/`:
-
-| Model | Source |
-|---|---|
-| SAM 2.1 Hiera-L | [Meta / HuggingFace](https://huggingface.co/facebook/sam2.1-hiera-large) |
-| Grounding DINO | `IDEA-Research/grounding-dino-tiny` (auto-downloaded via HuggingFace) |
-| SAM3D Body | `facebook/sam-3d-body-dinov3` (auto-downloaded via HuggingFace) |
-
-SMPL body model files should be placed in `body_models/`.
-
-
-Removed the dependency <2 in sam3, also added a pyproject.toml to sam3d
-
-
-Run the download_model task in pixi with pixi run download-model
-
-Human body prior has to be installed with pixi run pip install --no-deps -e ./human_body_prior since it has conflicts with dependencies with torch.

@@ -16,8 +16,8 @@ import torch
 import torch.nn as nn
 
 from data.video_dataset import EgoExoSceneDataset
-from data.segmentation import PersonSegmenter
-from data.parameters_extraction import BodyParameterEstimator
+from preprocessing.segmentation import PersonSegmenter
+from preprocessing.parameters_extraction import BodyParameterEstimator
 from configuration import CONFIG
 
 def main():

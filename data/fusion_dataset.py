@@ -44,10 +44,6 @@ from torch.utils.data import DataLoader, Dataset
 logger = logging.getLogger(__name__)
 
 
-# ======================================================================
-# Base class
-# ======================================================================
-
 class FusionDataset(Dataset, ABC):
     """Abstract multi-view temporal-window dataset for SST fusion.
 

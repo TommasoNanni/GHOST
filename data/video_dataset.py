@@ -42,10 +42,6 @@ from decord import VideoReader, cpu
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
-# ======================================================================
-# Video — wrapper around a single video
-# ======================================================================
-
 class Video:
     """Lazy handle to a single video or image sequence.
 

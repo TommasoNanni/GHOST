@@ -8,8 +8,8 @@ import numpy as np
 
 from configuration import CONFIG
 from data.video_dataset import EgoExoSceneDataset, RichDataset
-from data.segmentation import PersonSegmenter
-from data.parameters_extraction import BodyParameterEstimator
+from preprocessing.segmentation import PersonSegmenter
+from preprocessing.parameters_extraction import BodyParameterEstimator
 from utilities.visualize_segmented_reids import visualize_reid
 
 def main():

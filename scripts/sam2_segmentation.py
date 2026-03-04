@@ -3,7 +3,7 @@ Test for segmentation of one random scene for testing if the segmenter works
 """
 
 from data.video_dataset import EgoExoSceneDataset
-from data.segmentation import PersonSegmenter
+from preprocessing.segmentation import PersonSegmenter
 from configuration import CONFIG
 
 def main():
