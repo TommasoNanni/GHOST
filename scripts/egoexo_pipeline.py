@@ -14,21 +14,16 @@ from utilities.visualize_segmented_reids import visualize_reid
 
 def main():
 
-    egoexo_data_root = CONFIG.data.rich_data_root
-    rich_data_root = CONFIG.data.rich_data_root
+    egoexo_data_root = CONFIG.data.egoexo_data_root
     output_dir = CONFIG.data.output_directory
     scenes_slice = CONFIG.data.slice
     exclude_ego = CONFIG.data.exclude_egocentric
 
     # Load dataset (1 scene for testing)
-    # ds = EgoExoSceneDataset(
-    #     data_root = data_root, 
-    #     slice=scenes_slice, 
-    #     exclude_ego=exclude_ego,
-    # )
-    ds = RichDataset(
-        data_root = rich_data_root,
-        slice = scenes_slice,
+    ds = EgoExoSceneDataset(
+        data_root = egoexo_data_root, 
+        slice=scenes_slice, 
+        exclude_ego=exclude_ego,
     )
     scene = ds[0]
     print(f"\n=== Scene: {scene.scene_id} ({len(scene)} videos) ===")

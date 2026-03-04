@@ -38,7 +38,7 @@ echo ""
 
 
 # Run via pixi (activates the correct conda env automatically)
-pixi run python -m test.test_sam3d_reid
+pixi run python -m scripts.rich_pipeline
 
 echo ""
 echo "Done: $(date)"
