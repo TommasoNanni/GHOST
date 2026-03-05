@@ -1,17 +1,13 @@
 .claude/
 checkpoints/
 test_outputs/
-Grounded-SAM-2/
 *.pyc
 __pycache__/
-MHR/
 body_models/
 .pixi/
-sam-3d-body/
 logs/
 bash_jobs/download_rich_train.sh
 human_body_prior/
 CLAUDE.md
 .pytest_cache/
-sam3/
 *.out

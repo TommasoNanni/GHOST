@@ -1,0 +1,9 @@
+[submodule "sam3"]
+	path = sam3
+	url = https://github.com/facebookresearch/sam3.git
+[submodule "MHR"]
+	path = MHR
+	url = https://github.com/facebookresearch/MHR.git
+[submodule "sam-3d-body"]
+	path = sam-3d-body
+	url = https://github.com/facebookresearch/sam-3d-body.git
