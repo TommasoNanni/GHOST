@@ -13,7 +13,7 @@ from collections import defaultdict
 
 from data.video_dataset import Video, Scene, EgoExoSceneDataset
 from data.segmentation import PersonSegmenter
-from data.parameters_extraction import BodyParameterEstimator
+from data.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
 from synchronize_videos.synchronizer import Synchronizer
 
 
@@ -39,6 +39,8 @@ def parse_args():
     # Body estimation
     parser.add_argument("--sam3d_hf_repo", type=str, default="facebook/sam-3d-body-dinov3")
     parser.add_argument("--sam3d_step", type=int, default=1, help="Run SAM3D every N frames")
+    parser.add_argument("--smplx_model_path", type=str, default=None, help="Path to SMPLX_NEUTRAL.npz")
+    parser.add_argument("--mhr_model_path", type=str, default=None, help="Path to MHR assets folder")
     parser.add_argument("--smooth", action="store_true", help="Apply temporal smoothing to body params")
 
     # General
@@ -81,7 +83,10 @@ def main(args):
     parameters_extractor = BodyParameterEstimator(
         sam3d_hf_repo=args.sam3d_hf_repo,
         sam3d_step=args.sam3d_step,
+        smplx_model_path=args.smplx_model_path,
+        mhr_model_path=args.mhr_model_path,
     )
+    reidentifier = CrossViewReidentifier()
 
     # Extract people parameters
     for scene in tqdm(dataset.scenes, desc="Extracting Body Parameters from scenes"):
@@ -95,7 +100,7 @@ def main(args):
     # mask_data.npz, and json_data/ use consistent IDs throughout every scene.
     for scene in tqdm(dataset.scenes, desc="Cross-view person re-identification"):
         video_dir_dict = scene_directories[scene.scene_id]
-        parameters_extractor.match_persons_across_views(
+        reidentifier.match_across_views(
             scene = scene,
             video_dirs = video_dir_dict,
         )

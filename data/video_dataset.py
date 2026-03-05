@@ -78,6 +78,7 @@ class Video:
         resolution: tuple[int, int] | None = None,
         *,
         frames_dir: Path | None = None,
+        max_side: int | None = None,
     ):
         if path is None and frames_dir is None:
             raise ValueError("At least one of 'path' or 'frames_dir' must be provided.")
@@ -85,6 +86,7 @@ class Video:
         self.path = Path(path) if path is not None else None
         self.frames_dir = Path(frames_dir) if frames_dir is not None else None
         self._resolution = resolution
+        self._max_side = max_side
 
         # Determine video_id
         if self.path is not None:
@@ -171,40 +173,27 @@ class Video:
                 if p.suffix.lower() in _IMAGE_EXTS
             )
             if frames:
-                return self.frames_dir, frames
+                return self._maybe_resize(self.frames_dir, frames)
 
         # Case 2: path is itself an image directory.
         if self.path is not None and self.path.is_dir():
             frames_subdir = self.path / "frames"
-            # If already migrated, use the frames/ subdirectory.
+            # If a frames/ sub-directory already exists, prefer it.
             if frames_subdir.is_dir():
                 frames = sorted(
                     p.name for p in frames_subdir.iterdir()
                     if p.suffix.lower() in _IMAGE_EXTS
                 )
                 if frames:
-                    return frames_subdir, frames
-            # Symlink images sitting directly in path into path/frames/.
-            # Uses symlinks so the original data is never modified.
+                    return self._maybe_resize(frames_subdir, frames)
+            # Use images directly from this directory — no copying or
+            # symlinking; the source data stays exactly where it is.
             images_in_root = sorted(
-                p for p in self.path.iterdir()
+                p.name for p in self.path.iterdir()
                 if p.suffix.lower() in _IMAGE_EXTS
             )
             if images_in_root:
-                frames_subdir.mkdir(exist_ok=True)
-                for img in images_in_root:
-                    link = frames_subdir / img.name
-                    if not link.exists():
-                        link.symlink_to(img.resolve())
-                print(
-                    f"  {self.video_id}: symlinked {len(images_in_root)} frames"
-                    f" → {frames_subdir}"
-                )
-                frames = sorted(
-                    p.name for p in frames_subdir.iterdir()
-                    if p.suffix.lower() in _IMAGE_EXTS
-                )
-                return frames_subdir, frames
+                return self._maybe_resize(self.path, images_in_root)
             # No images found anywhere.
             return self.path, []
 
@@ -296,13 +285,27 @@ class Video:
     def frames_home(self) -> Path | None:
         """Canonical frames directory co-located with the source data.
 
-        For a video file at ``data/scene1/cam01.mp4`` this returns
-        ``data/scene1/cam01/frames/``.  For an image directory at
-        ``data/scene1/cam01/`` the same path is returned.  When only
-        *frames_dir* was supplied at construction, that directory is
-        returned as-is (assumed canonical already).
+        For a **video file** at ``data/scene1/cam01.mp4`` returns
+        ``data/scene1/cam01/frames/`` (where frames will be extracted).
+
+        For an **image directory** at ``data/scene1/cam01/``:
+        - returns ``data/scene1/cam01/frames/`` if that sub-directory exists
+          and contains images (already migrated);
+        - otherwise returns ``data/scene1/cam01/`` itself so that images
+          sitting directly in the directory are used in-place without any
+          copying or moving.
+
+        When only *frames_dir* was supplied at construction, that directory
+        is returned as-is.
         """
         if self.path is not None:
+            if self.path.is_dir():
+                frames_subdir = self.path / "frames"
+                if frames_subdir.is_dir() and any(
+                    p.suffix.lower() in _IMAGE_EXTS for p in frames_subdir.iterdir()
+                ):
+                    return frames_subdir
+                return self.path
             return self.path.parent / self.video_id / "frames"
         if self.frames_dir is not None:
             return self.frames_dir
@@ -313,6 +316,42 @@ class Video:
             f"Video({self.video_id!r}, frames={self.num_frames}, "
             f"fps={self.fps:.1f}, dur={self.duration_s:.1f}s)"
         )
+
+    def _maybe_resize(self, src_dir: Path, src_frames: list[str]) -> tuple[Path, list[str]]:
+        """Return (src_dir, src_frames) as-is, or write aspect-ratio-preserving
+        resized copies to a frames/ subdirectory when max_side is set and the
+        images are larger than max_side on their longest dimension."""
+        if self._max_side is None:
+            return src_dir, src_frames
+
+        # Check the first image — if it already fits, no resize needed.
+        first = cv2.imread(str(src_dir / src_frames[0]))
+        if first is None or max(first.shape[:2]) <= self._max_side:
+            return src_dir, src_frames
+
+        # Write resized copies to a frames/ subdirectory next to the source.
+        # If src_dir is already named "frames", write to a sibling "frames_resized/".
+        dst_dir = (
+            src_dir.parent / "frames_resized"
+            if src_dir.name == "frames"
+            else src_dir / "frames"
+        )
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        existing = sorted(p.name for p in dst_dir.iterdir() if p.suffix.lower() in _IMAGE_EXTS)
+        if existing:
+            print(f"  {self.video_id}: reusing {len(existing)} resized frames in {dst_dir}")
+            self.frames_dir = dst_dir
+            return dst_dir, existing
+
+        max_s = self._max_side
+        for name in tqdm.tqdm(src_frames, desc=f"  Resizing {self.video_id}", leave=False):
+            img = cv2.imread(str(src_dir / name))
+            h, w = img.shape[:2]
+            scale = max_s / max(h, w)
+            img = cv2.resize(img, (round(w * scale), round(h * scale)))
+            cv2.imwrite(str(dst_dir / name), img)
+        self.frames_dir = dst_dir
+        return dst_dir, src_frames
 
     def _make_reader(self) -> VideoReader:
         if self.path is None or not self.path.is_file():
@@ -578,10 +617,12 @@ class RichDataset(Dataset):
         resolution: tuple[int, int] | None = None,
         image_extensions: tuple[str, ...] = (".jpg", ".jpeg", ".bmp"),
         slice: int | None = None,
+        max_side: int | None = None,
     ):
         self.data_root = Path(data_root)
         self.resolution = resolution
         self.image_extensions = image_extensions
+        self._max_side = max_side
 
         # Discover scene directories that contain camera sub-dirs with images.
         scene_dirs = sorted(
@@ -615,7 +656,7 @@ class RichDataset(Dataset):
         video_map: dict[Path, Video] = {}
         with ThreadPoolExecutor(max_workers=min(32, len(all_cam_dirs) or 1)) as pool:
             futures = {
-                pool.submit(Video, cd, self.resolution): cd
+                pool.submit(Video, cd, self.resolution, max_side=self._max_side): cd
                 for cd in all_cam_dirs
             }
             for future in tqdm.tqdm(

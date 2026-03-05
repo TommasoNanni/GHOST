@@ -75,11 +75,15 @@ class PersonSegmenter:
         device: str = "cuda",
         text_prompt: str = "person",
         redetect_interval: int = 15,
+        new_det_thresh: float = 0.4,
+        score_threshold_detection: float = 0.3,
     ):
         self.checkpoint_path = checkpoint_path
         self.device = device
         self.text_prompt = text_prompt
         self.redetect_interval = redetect_interval
+        self.new_det_thresh = new_det_thresh
+        self.score_threshold_detection = score_threshold_detection
 
         # Populated by _init_models()
         self._predictor: Sam3VideoPredictor | None = None
@@ -186,6 +190,8 @@ class PersonSegmenter:
                 self.checkpoint_path,
                 self.text_prompt,
                 self.redetect_interval,
+                self.new_det_thresh,
+                self.score_threshold_detection,
             ))
 
         newly_segmented = bool(worker_args)
@@ -317,6 +323,14 @@ class PersonSegmenter:
         session_id = response["session_id"]
 
         try:
+            # Apply detection thresholds before add_prompt so they take
+            # effect on the first-frame detection too.
+            try:
+                self._predictor.model.new_det_thresh = self.new_det_thresh
+                self._predictor.model.score_threshold_detection = self.score_threshold_detection
+            except AttributeError:
+                pass
+
             # A single text prompt is sufficient: SAM3's add_prompt resets
             # all state (calls reset_state internally), so only the last
             # call would survive anyway.  During propagation, SAM3 runs
@@ -331,15 +345,6 @@ class PersonSegmenter:
                     text=self.text_prompt,
                 )
             )
-
-            # Lower the new-detection threshold so that people who are
-            # partially visible or far away are not rejected during
-            # propagation (default 0.7 is too aggressive, but 0.5 lets
-            # too many false positives through).
-            try:
-                self._predictor.model.new_det_thresh = 0.6
-            except AttributeError:
-                pass
 
             # Propagate through the entire video
             objects_count = 0
@@ -384,15 +389,18 @@ class PersonSegmenter:
                 labels_meta: dict[str, dict] = {}
 
                 for i, obj_id in enumerate(obj_ids):
-                    oid = int(obj_id)
+                    # SAM3 may assign object ID 0, which conflicts with the
+                    # background value in the uint16 mask canvas.  Offset by 1
+                    # so that all person IDs are strictly positive.
+                    oid = int(obj_id) + 1
                     binary = masks[i]  # (H, W) bool
 
                     # Discard low-confidence detections that SAM3
                     # emits but are likely false positives (e.g.
                     # random objects mistaken for people).  Threshold
-                    # matches new_det_thresh (0.6) to prevent propagated
+                    # matches new_det_thresh to prevent propagated
                     # hallucinations from surviving below that level.
-                    if float(scores[i]) < 0.6:
+                    if float(scores[i]) < self.new_det_thresh:
                         continue
 
                     # Discard degenerate masks that cover most of the image.
@@ -511,6 +519,8 @@ class PersonSegmenter:
         checkpoint_path: str | None,
         text_prompt: str,
         redetect_interval: int = 30,
+        new_det_thresh: float = 0.4,
+        score_threshold_detection: float = 0.3,
     ) -> dict:
         """Segment one video on a specific GPU (runs in a child process).
 
@@ -572,6 +582,14 @@ class PersonSegmenter:
 
         objects_count = 0
         try:
+            # Apply detection thresholds before add_prompt so they take
+            # effect on the first-frame detection too.
+            try:
+                predictor.model.new_det_thresh = new_det_thresh
+                predictor.model.score_threshold_detection = score_threshold_detection
+            except AttributeError:
+                pass
+
             # A single text prompt is sufficient: SAM3's add_prompt resets
             # all state (calls reset_state internally), so only the last
             # call would survive anyway.  During propagation, SAM3 runs
@@ -586,15 +604,6 @@ class PersonSegmenter:
                     text=text_prompt,
                 )
             )
-
-            # Lower the new-detection threshold so that people who are
-            # partially visible or far away are not rejected during
-            # propagation (default 0.7 is too aggressive, but 0.5 lets
-            # too many false positives through).
-            try:
-                predictor.model.new_det_thresh = 0.6
-            except AttributeError:
-                pass
 
             # Propagate through entire video
             for resp in predictor.handle_stream_request(
@@ -634,13 +643,16 @@ class PersonSegmenter:
                 labels_meta: dict[str, dict] = {}
 
                 for i, obj_id in enumerate(obj_ids):
-                    oid = int(obj_id)
+                    # SAM3 may assign object ID 0, which conflicts with the
+                    # background value in the uint16 mask canvas.  Offset by 1
+                    # so that all person IDs are strictly positive.
+                    oid = int(obj_id) + 1
                     binary = masks[i]
 
                     # Discard low-confidence detections.  Threshold matches
-                    # new_det_thresh (0.6) to prevent propagated hallucinations
+                    # new_det_thresh to prevent propagated hallucinations
                     # from surviving below that level.
-                    if float(scores[i]) < 0.6:
+                    if float(scores[i]) < new_det_thresh:
                         continue
 
                     # Discard degenerate masks that cover most of the image.

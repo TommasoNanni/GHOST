@@ -99,17 +99,26 @@ def visualize_reid(
         raise FileNotFoundError(f"mask_data.npz not found at {npz_path}")
 
     # ── Determine output video dimensions from the first readable frame ───────
+    _FRAME_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
+
+    def _find_frame(fi_str: str) -> Path | None:
+        for ext in _FRAME_EXTS:
+            p = frame_dir / f"{fi_str}{ext}"
+            if p.exists():
+                return p
+        return None
+
     H, W = 0, 0
     for jf in json_files:
         fi_str = jf.stem.replace("mask_", "")
-        p = frame_dir / f"{fi_str}.jpg"
-        if p.exists():
+        p = _find_frame(fi_str)
+        if p is not None:
             sample = cv2.imread(str(p))
             if sample is not None:
                 H, W = sample.shape[:2]
                 break
     if H == 0:
-        raise FileNotFoundError(f"No readable JPEG frames found in {frame_dir}")
+        raise FileNotFoundError(f"No readable frames found in {frame_dir}")
 
     out_path = video_dir / "segmentation_reid.mp4"
     writer = cv2.VideoWriter(
@@ -124,8 +133,8 @@ def visualize_reid(
 
         for json_path in tqdm(json_files, desc=f"Rendering {video_dir.name}", leave=False):
             fi_str = json_path.stem.replace("mask_", "")
-            frame_path = frame_dir / f"{fi_str}.jpg"
-            if not frame_path.exists():
+            frame_path = _find_frame(fi_str)
+            if frame_path is None:
                 continue
 
             frame = cv2.imread(str(frame_path))

@@ -15,3 +15,4 @@ with open(rich_data , "rb") as f:
     body_summary = pickle.load(f)
 
 print(body_summary.keys())
+print(body_summary["transl"])

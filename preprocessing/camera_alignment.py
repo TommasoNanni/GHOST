@@ -15,29 +15,65 @@ import numpy as np
 
 
 class CameraAlignment:
-    """Estimate and persist relative camera poses using Kabsch."""
+    """Estimate and persist relative camera poses using Kabsch.
+
+    This class provides the minimal machinery to compute pairwise relative
+    transforms (rotation `R` and translation `t`) between camera coordinate
+    frames from stacked 3D joint correspondences. It also includes simple
+    helpers to save/load the resulting alignments to a single `.npz` file.
+    """
 
     @staticmethod
     def _kabsch(pts_a: np.ndarray, pts_b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Compute a rigid transform (R, t) that maps pts_a -> pts_b.
+
+        Implements the standard Kabsch algorithm using SVD with a determinant
+        guard to ensure a proper rotation (det(R) = +1).
+
+        Parameters
+        ----------
+        pts_a, pts_b : (N, 3) arrays
+            Source and target point clouds. Must have identical shapes and N>=3.
+
+        Returns
+        -------
+        R : (3,3) rotation matrix
+        t : (3,)  translation vector
+        """
+        # Validate inputs
         if pts_a.shape != pts_b.shape or pts_a.ndim != 2 or pts_a.shape[1] != 3:
             raise ValueError("pts_a and pts_b must both be (N, 3)")
         if len(pts_a) < 3:
             raise ValueError("Need at least 3 point pairs for rotation")
 
+        # Centroids of each point cloud
         mu_a = pts_a.mean(axis=0)
         mu_b = pts_b.mean(axis=0)
+
+        # Centre the clouds
         A_c = pts_a - mu_a
         B_c = pts_b - mu_b
+
+        # Cross-covariance
         H = A_c.T @ B_c
+
+        # SVD and reflection guard
         U, _, Vt = np.linalg.svd(H)
         d = np.linalg.det(Vt.T @ U.T)
         D = np.diag([1.0, 1.0, d])
+
+        # Proper rotation and translation
         R = Vt.T @ D @ U.T
         t = mu_b - R @ mu_a
         return R, t
 
     @staticmethod
     def _load_person_npz(body_dir: Path, person_id: int) -> dict[str, np.ndarray] | None:
+        """Load a `person_<id>.npz` file and return its arrays as a dict.
+
+        Returns None if the file does not exist. This helper centralises the
+        `np.load` usage so callers receive plain Python dicts.
+        """
         path = body_dir / f"person_{person_id}.npz"
         if not path.exists():
             return None
@@ -46,6 +82,15 @@ class CameraAlignment:
 
     @staticmethod
     def _absolute_joints(data: dict[str, np.ndarray], row: int) -> np.ndarray | None:
+        """Return absolute 3D joint positions for a single frame row.
+
+        The function adds the root translation (`pred_cam_t`) to the
+        root-relative keypoints (`pred_keypoints_3d`) to obtain absolute
+        camera-space joint coordinates. If keypoints are missing, it falls
+        back to returning the root translation as a single 3D point.
+
+        Returns None when `pred_cam_t` is absent.
+        """
         cam_t = data.get("pred_cam_t")
         kpts = data.get("pred_keypoints_3d")
         if cam_t is None:
@@ -53,10 +98,12 @@ class CameraAlignment:
         root = cam_t[row]
         if kpts is not None:
             joints = kpts[row]
+            # Convert to absolute positions and filter all-zero (missing) joints
             abs_joints = joints + root[None, :]
             valid = np.any(abs_joints != 0, axis=-1)
             if valid.sum() >= 1:
                 return abs_joints[valid]
+        # Fallback to a single root point
         return root[None, :]
 
     def estimate(
@@ -64,6 +111,21 @@ class CameraAlignment:
         video_dirs: dict[str, Path],
         min_correspondences: int = 30,
     ) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
+        """Estimate pairwise relative camera poses from per-view body outputs.
+
+        Parameters
+        ----------
+        video_dirs : mapping video_id -> output directory
+            Each directory is expected to contain a `body_data/` folder with
+            `body_params_summary.json` and `person_<id>.npz` files.
+        min_correspondences : int
+            Minimum number of 3D point correspondences required to attempt
+            estimation for a pair.
+
+        Returns
+        -------
+        dict mapping (video_id_A, video_id_B) -> (R, t)
+        """
         video_ids = list(video_dirs.keys())
         video_persons: dict[str, dict[int, dict[str, np.ndarray]]] = {}
 
@@ -86,7 +148,8 @@ class CameraAlignment:
 
         active_vids = [v for v in video_ids if v in video_persons]
         results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
-
+        # Loop over videos
+        # Iterate all unordered pairs of active videos
         for ii, vid_a in enumerate(active_vids):
             for vid_b in active_vids[ii + 1 :]:
                 persons_a = video_persons[vid_a]
@@ -99,6 +162,7 @@ class CameraAlignment:
                 pts_a_parts: list[np.ndarray] = []
                 pts_b_parts: list[np.ndarray] = []
 
+                # Gather correspondences across all shared persons and frames
                 for pid in shared_pids:
                     data_a = persons_a[pid]
                     data_b = persons_b[pid]
@@ -134,27 +198,29 @@ class CameraAlignment:
                     continue
 
                 try:
+                    # Compute rigid transform using Kabsch
                     R, t = self._kabsch(pts_a, pts_b)
                 except ValueError as e:
-                    logging.warning(f"Camera alignment: {vid_a} ↔ {vid_b}: Kabsch failed: {e}")
+                    logging.warning(f"Camera alignment: {vid_a} - {vid_b}: Kabsch failed: {e}")
                     continue
 
+                # Per-point residuals and RMSE for diagnostics
                 residuals = pts_b - (pts_a @ R.T + t[None, :])
                 rmse = float(np.sqrt((residuals ** 2).sum(axis=-1).mean()))
                 logging.info(
-                    f"Camera alignment: {vid_a} ↔ {vid_b}: {n_pairs} correspondences, RMSE = {rmse:.4f} m, |t| = {np.linalg.norm(t):.3f} m"
+                    f"Camera alignment: {vid_a} - {vid_b}: {n_pairs} correspondences, RMSE = {rmse:.4f} m, |t| = {np.linalg.norm(t):.3f} m"
                 )
                 results[(vid_a, vid_b)] = (R, t)
 
         return results
 
-
-# ---------------------------------------------------------------------------
-# I/O helpers
-# ---------------------------------------------------------------------------
-
     @staticmethod
     def save(alignment: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]], output_dir: Path) -> Path:
+        """Save computed alignments to `<output_dir>/camera_alignment.npz`.
+
+        The saved arrays use keys `<vid_a>__to__<vid_b>__R` and `__t` for each
+        stored pair.
+        """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         arrays: dict[str, np.ndarray] = {}
@@ -170,6 +236,10 @@ class CameraAlignment:
 
     @staticmethod
     def load(path: Path) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
+        """Load alignments previously written by `save`.
+
+        Returns a dict mapping (vid_a, vid_b) -> (R, t).
+        """
         results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
         with np.load(str(path)) as f:
             prefixes: set[str] = set()
@@ -189,6 +259,10 @@ class CameraAlignment:
 
     @staticmethod
     def relative_pose_to_matrix(R: np.ndarray, t: np.ndarray) -> np.ndarray:
+        """Pack (R, t) into a 4×4 homogeneous transform T_{B←A}.
+
+        The returned matrix maps points in A into B: X_B = T @ X_A_h.
+        """
         T = np.eye(4, dtype=np.float64)
         T[:3, :3] = R
         T[:3, 3] = t
@@ -196,10 +270,13 @@ class CameraAlignment:
 
     @staticmethod
     def camera_center_in_A(R: np.ndarray, t: np.ndarray) -> np.ndarray:
+        """Return camera B optical centre expressed in camera A's frame.
+
+        Derived from X_B = R @ X_A + t; with X_B = 0 (camera origin) gives
+        X_A = -R^T @ t.
+        """
         return -(R.T @ t)
 
-
-# Compatibility wrappers (small convenience functions)
 
 def estimate_relative_camera_poses(
     video_dirs: dict[str, Path], min_correspondences: int = 30

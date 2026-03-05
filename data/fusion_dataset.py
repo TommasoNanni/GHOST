@@ -59,16 +59,21 @@ class FusionDataset(Dataset, ABC):
     """
 
     # Default raw fields when loading from the ghost pipeline npz files.
+    # MHR-native keys (body_pose_params, shape_params, global_rot, …) are
+    # intentionally absent: the pipeline now saves only SMPL-X params.
     _NPZ_FIELDS = (
         "frame_indices",
-        "body_pose_params",
-        "hand_pose_params",
-        "shape_params",
-        "global_rot",
         "pred_cam_t",
         "focal_length",
         "pred_keypoints_2d",
         "pred_keypoints_3d",
+        "smplx_betas",
+        "smplx_body_pose",
+        "smplx_global_orient",
+        "smplx_transl",
+        "smplx_left_hand_pose",
+        "smplx_right_hand_pose",
+        "smplx_expression",
         "bbox",
     )
 
@@ -100,6 +105,7 @@ class FusionDataset(Dataset, ABC):
         self.load_body_data(**kwargs)
         self.load_cameras(**kwargs)
         self.load_ground_truth(**kwargs)
+        self._transform_to_world_frame()
 
         # ---- Derived book-keeping (dataset-agnostic) --------------------
         self.num_cameras: int = len(self._cam_dirs)
@@ -168,6 +174,18 @@ class FusionDataset(Dataset, ABC):
         If no GT is available (self-supervised), leave ``self._gt`` empty.
         """
         ...
+
+    def _transform_to_world_frame(self) -> None:
+        """Re-express all body parameters in a common world coordinate frame.
+
+        The default implementation is a no-op.  Subclasses that have
+        calibrated camera extrinsics should override this to transform
+        ``self._raw`` (predictions) and ``self._gt`` (ground truth) from
+        their native coordinate frames into the shared world frame.
+
+        Called automatically by ``__init__`` after all three data-loading
+        hooks complete.
+        """
 
     # ------------------------------------------------------------------
     # Conversion hooks (override per-dataset if needed)
@@ -321,21 +339,34 @@ class FusionDataset(Dataset, ABC):
                     li = lut[gf_int]
 
                     # --- Pose ---
-                    bpp = pdata.get("body_pose_params")
-                    hpp = pdata.get("hand_pose_params")
-                    gr = pdata.get("global_rot")
+                    bpp = pdata.get("smplx_body_pose")
+                    lhp = pdata.get("smplx_left_hand_pose")
+                    rhp = pdata.get("smplx_right_hand_pose")
+                    gr = pdata.get("smplx_global_orient")
                     if bpp is not None and gr is not None:
+                        # Concatenate both hands into a single (90,) array so
+                        # convert_pose can place them at the correct joint slots.
+                        if lhp is not None and rhp is not None:
+                            hpp_li: np.ndarray | None = np.concatenate(
+                                [lhp[li], rhp[li]]
+                            )
+                        elif lhp is not None:
+                            hpp_li = lhp[li]
+                        elif rhp is not None:
+                            hpp_li = rhp[li]
+                        else:
+                            hpp_li = None
                         pose[t, k, p_slot] = self.convert_pose(
-                            bpp[li],
-                            hpp[li] if hpp is not None else None,
-                            gr[li],
+                            bpp[li], hpp_li, gr[li]
                         )
 
                     # --- Shape ---
-                    sp = pdata.get("shape_params")
+                    sp = pdata.get("smplx_betas")
                     if sp is not None:
-                        n_betas = min(10, sp.shape[1])
-                        shape[t, k, p_slot, :n_betas] = sp[li, :n_betas]
+                        n_betas = min(10, sp.shape[1] if sp.ndim > 1 else sp.shape[0])
+                        shape[t, k, p_slot, :n_betas] = (
+                            sp[li, :n_betas] if sp.ndim > 1 else sp[:n_betas]
+                        )
 
                     # --- Joint mask ---
                     joint_mask[t, k, p_slot, :] = 1.0
@@ -439,6 +470,63 @@ class EgoExoFusionDataset(FusionDataset):
     def load_ground_truth(self, **kwargs: Any) -> None:
         # Self-supervised: no GT.
         self._gt = [{} for _ in self._cam_dirs]
+
+    def convert_pose(
+        self,
+        body_pose_params: np.ndarray,
+        hand_pose_params: np.ndarray | None,
+        global_rot: np.ndarray,
+    ) -> np.ndarray:
+        """Convert SMPL-X axis-angle params to ``[J, 6]`` (6-D rotation).
+
+        Joint layout (matches SMPL-X full_pose ordering):
+            0        : global_orient   (3,)
+            1 – 21   : body_pose       (63,)  = 21 joints
+            22 – 36  : left_hand_pose  (45,)  = 15 joints  ─┐ from
+            37 – 51  : right_hand_pose (45,)  = 15 joints  ─┘ hand_pose_params
+            52 – 54  : jaw / leye / reye       — zeros (not estimated)
+
+        Parameters
+        ----------
+        body_pose_params : (63,) float32
+            21 body joints × 3 axis-angle.
+        hand_pose_params : (90,) | (45,) | None
+            Left+right hand concatenated (90,), left only (45,), or None.
+        global_rot : (3,) float32
+            Global orientation axis-angle.
+        """
+        J = self.num_joints  # 55
+        out = np.zeros((J, 6), dtype=np.float32)
+        if body_pose_params is None or global_rot is None:
+            return out
+
+        try:
+            from scipy.spatial.transform import Rotation as SciR
+        except Exception:
+            return out
+
+        go = np.asarray(global_rot, dtype=np.float32).reshape(1, 3)   # (1, 3)
+        bp = np.asarray(body_pose_params, dtype=np.float32).reshape(-1, 3)  # (21, 3)
+        parts = [go, bp]  # (22, 3)
+        if hand_pose_params is not None:
+            hp = np.asarray(hand_pose_params, dtype=np.float32).reshape(-1, 3)
+            parts.append(hp)  # (30, 3) when both hands present
+        aa = np.concatenate(parts, axis=0)  # (22,) or (52,) joints
+
+        # Pad remaining slots (face joints) with identity = zero axis-angle.
+        if aa.shape[0] < J:
+            aa = np.concatenate(
+                [aa, np.zeros((J - aa.shape[0], 3), dtype=np.float32)], axis=0
+            )
+
+        try:
+            mats = SciR.from_rotvec(aa).as_matrix()
+        except Exception:
+            return out
+
+        sixd = np.concatenate([mats[:, :, 0], mats[:, :, 1]], axis=1)
+        out[:J] = sixd[:J]
+        return out
 
 
 # ======================================================================
@@ -643,6 +731,117 @@ class RICHFusionDataset(FusionDataset):
         self._gt = [gt_final] * n_cams
 
     # ------------------------------------------------------------------
+    # World-frame transform
+    # ------------------------------------------------------------------
+
+    def _transform_to_world_frame(self) -> None:
+        """Re-express all body parameters in camera-0's coordinate frame.
+
+        Camera-0 is treated as the world origin.  For each camera i the
+        extrinsic ``[R_i | t_i]`` maps true-world → cam-i.  The transform
+        to cam-0 (= world) is:
+
+            x_world = R_0 @ R_i^T @ (x_cami - t_i) + t_0
+
+        For rotations (axis-angle):
+
+            R_body_world = R_0 @ R_i^T @ R_body_cami
+
+        GT (RICH) is in true world coordinates so it maps as:
+
+            x_world = R_0 @ x_true_world + t_0
+
+        Fields transformed in ``self._raw``:
+            ``smplx_global_orient``, ``smplx_transl``, ``pred_keypoints_3d``
+
+        Fields transformed in ``self._gt``:
+            ``global_orient``, ``transl``
+        """
+        from scipy.spatial.transform import Rotation as SciR
+
+        if not self._cameras:
+            return
+
+        ext0 = self._cameras[0].get("extrinsics")   # (3, 4) world→cam0
+        if ext0 is None:
+            return
+        R0 = ext0[:3, :3].astype(np.float64)        # (3, 3)
+        t0 = ext0[:3, 3].astype(np.float64)         # (3,)
+
+        # ---- Predictions: cam-i → cam-0 --------------------------------
+        for cam_idx, (cam_calib, persons) in enumerate(
+            zip(self._cameras, self._raw)
+        ):
+            ext_i = cam_calib.get("extrinsics")
+            if ext_i is None:
+                continue
+            R_i = ext_i[:3, :3].astype(np.float64)
+            t_i = ext_i[:3, 3].astype(np.float64)
+
+            # Affine: x_world = R_i2w @ x_cami + d_i
+            R_i2w = R0 @ R_i.T             # (3, 3)
+            d_i = t0 - R_i2w @ t_i        # (3,)
+
+            for pdata in persons.values():
+                # smplx_global_orient: (N, 3) axis-angle
+                go = pdata.get("smplx_global_orient")
+                if go is not None:
+                    R_body = SciR.from_rotvec(
+                        go.astype(np.float64)
+                    ).as_matrix()                              # (N, 3, 3)
+                    R_body_w = R_i2w[None] @ R_body            # (N, 3, 3)
+                    pdata["smplx_global_orient"] = (
+                        SciR.from_matrix(R_body_w)
+                        .as_rotvec()
+                        .astype(np.float32)
+                    )
+
+                # smplx_transl: (N, 3)
+                tr = pdata.get("smplx_transl")
+                if tr is not None:
+                    pdata["smplx_transl"] = (
+                        tr.astype(np.float64) @ R_i2w.T + d_i
+                    ).astype(np.float32)
+
+                # pred_keypoints_3d: (N, J, 3)
+                # Note: assumes keypoints are in absolute camera space
+                # (not root-relative).  Adjust if SAM3D outputs root-relative.
+                kp = pdata.get("pred_keypoints_3d")
+                if kp is not None:
+                    pdata["pred_keypoints_3d"] = (
+                        kp.astype(np.float64) @ R_i2w.T + d_i
+                    ).astype(np.float32)
+
+        # ---- GT: true world → cam-0 ------------------------------------
+        # self._gt is a list of references to the same dict object, so
+        # transforming self._gt[0] covers all camera slots at once.
+        if not self._gt:
+            return
+        gt_dict = self._gt[0]   # {pid: {field: array}}
+
+        for gt in gt_dict.values():
+            # global_orient: (N, 3) axis-angle in true world space
+            go = gt.get("global_orient")
+            if go is not None:
+                R_body = SciR.from_rotvec(
+                    go.astype(np.float64).reshape(-1, 3)
+                ).as_matrix()                                  # (N, 3, 3)
+                R_body_w = R0[None] @ R_body                   # (N, 3, 3)
+                gt["global_orient"] = (
+                    SciR.from_matrix(R_body_w)
+                    .as_rotvec()
+                    .astype(np.float32)
+                    .reshape(go.shape)
+                )
+
+            # transl: (N, 3) in true world space
+            tr = gt.get("transl")
+            if tr is not None:
+                gt["transl"] = (
+                    tr.astype(np.float64) @ R0.T + t0
+                ).astype(np.float32)
+
+    # ------------------------------------------------------------------
     # Conversion overrides
     # ------------------------------------------------------------------
     # NOTE: convert_camera is NOT overridden here.
@@ -697,20 +896,32 @@ class RICHFusionDataset(FusionDataset):
             n = min(shape_out.shape[0], gt["betas"].shape[-1])
             shape_out[:n] = gt["betas"][gt_idx, :n]
 
-        # Pose: global_orient (3,) + body_pose (63,) -> (22, 3) axis-angle
-        # Convert to 6-D rotation (first two columns of rotation matrix).
+        # Pose: build full 55-joint axis-angle matching the same layout used
+        # by EgoExoFusionDataset.convert_pose:
+        #   [global(1), body(21), lhand(15), rhand(15), jaw+eyes(3)]
         if "body_pose" in gt and "global_orient" in gt:
             from scipy.spatial.transform import Rotation as SciR
-            go = gt["global_orient"][gt_idx]  # (3,)
-            bp = gt["body_pose"][gt_idx]      # (63,) = 21 joints * 3
-            aa = np.concatenate([go, bp]).reshape(-1, 3)  # (22, 3)
-            mats = SciR.from_rotvec(aa).as_matrix()       # (22, 3, 3)
-            # 6-D: first two columns [col0 | col1], shape (22, 6)
+            go = gt["global_orient"][gt_idx].reshape(1, 3)   # (1, 3)
+            bp = gt["body_pose"][gt_idx].reshape(-1, 3)       # (21, 3)
+            parts = [go, bp]
+            for key in ("left_hand_pose", "right_hand_pose"):
+                if key in gt:
+                    parts.append(gt[key][gt_idx].reshape(-1, 3))  # (15, 3)
+            for key in ("jaw_pose", "leye_pose", "reye_pose"):
+                if key in gt:
+                    parts.append(gt[key][gt_idx].reshape(-1, 3))   # (1, 3)
+            aa = np.concatenate(parts, axis=0)  # up to (55, 3)
+            J_pose = pose_out.shape[0]          # 55
+            if aa.shape[0] < J_pose:
+                aa = np.concatenate(
+                    [aa, np.zeros((J_pose - aa.shape[0], 3), dtype=np.float32)],
+                    axis=0,
+                )
+            mats = SciR.from_rotvec(aa).as_matrix()      # (55, 3, 3)
             sixd = np.concatenate(
                 [mats[:, :, 0], mats[:, :, 1]], axis=1
-            )  # (22, 6)
-            J = min(pose_out.shape[0], sixd.shape[0])
-            pose_out[:J] = sixd[:J]
+            )                                             # (55, 6)
+            pose_out[:J_pose] = sixd[:J_pose]
 
 
 # ======================================================================

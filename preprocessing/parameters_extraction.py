@@ -79,11 +79,6 @@ class BodyParameterEstimator:
     _GALLERY_EMA_ALPHA: float = 0.9
     _REID_MATCH_WINDOW: int = 5
 
-    # Cross-view re-identification defaults.
-    _CROSS_VIEW_REID_THRESHOLD: float = 0.4
-    _CROSS_VIEW_APPEARANCE_WEIGHT: float = 0.7
-    _CROSS_VIEW_SHAPE_WEIGHT: float = 0.3
-
     def __init__(
         self,
         sam3d_hf_repo: str = "facebook/sam-3d-body-dinov3",
@@ -94,9 +89,6 @@ class BodyParameterEstimator:
         reid_threshold: float | None = None,
         gallery_ema_alpha: float | None = None,
         reid_match_window: int | None = None,
-        cross_view_reid_threshold: float | None = None,
-        cross_view_appearance_weight: float | None = None,
-        cross_view_shape_weight: float | None = None,
     ):
         self.sam3d_hf_repo = sam3d_hf_repo
         self.sam3d_step = sam3d_step
@@ -106,21 +98,6 @@ class BodyParameterEstimator:
         self.reid_threshold = reid_threshold if reid_threshold is not None else self._REID_THRESHOLD
         self.gallery_ema_alpha = gallery_ema_alpha if gallery_ema_alpha is not None else self._GALLERY_EMA_ALPHA
         self.reid_match_window = reid_match_window if reid_match_window is not None else self._REID_MATCH_WINDOW
-        self.cross_view_reid_threshold = (
-            cross_view_reid_threshold
-            if cross_view_reid_threshold is not None
-            else self._CROSS_VIEW_REID_THRESHOLD
-        )
-        self.cross_view_appearance_weight = (
-            cross_view_appearance_weight
-            if cross_view_appearance_weight is not None
-            else self._CROSS_VIEW_APPEARANCE_WEIGHT
-        )
-        self.cross_view_shape_weight = (
-            cross_view_shape_weight
-            if cross_view_shape_weight is not None
-            else self._CROSS_VIEW_SHAPE_WEIGHT
-        )
 
         self._estimator: object | None = None
         self._converter: object | None = None
@@ -162,6 +139,15 @@ class BodyParameterEstimator:
         num_gpus = torch.cuda.device_count()
         num_videos = len(scene.videos)
 
+        # When an MHR->SMPLX converter is configured, save only SMPL-X keys
+        # plus the model-agnostic geometric outputs.  MHR-native params
+        # (body_pose_params, shape_params, global_rot, etc.) are discarded.
+        param_keys = (
+            self._AGNOSTIC_KEYS + self._SMPLX_PARAM_KEYS
+            if (self.mhr_model_path is not None and self.smplx_model_path is not None)
+            else self._PARAM_KEYS
+         )
+
         if num_gpus <= 1:
             # Fallback: sequential on single GPU
             self._init_sam3d()
@@ -174,7 +160,7 @@ class BodyParameterEstimator:
                     str(video_dir),
                     self.sam3d_step,
                     self.bbox_padding,
-                    self._PARAM_KEYS,
+                    param_keys,
                     frames_dir=str(video.frames_home) if video.frames_home else None,
                     reid_threshold=self.reid_threshold,
                     gallery_ema_alpha=self.gallery_ema_alpha,
@@ -217,7 +203,7 @@ class BodyParameterEstimator:
                     self.sam3d_hf_repo,
                     self.sam3d_step,
                     self.bbox_padding,
-                    self._PARAM_KEYS,
+                    param_keys,
                     self.reid_threshold,
                     self.gallery_ema_alpha,
                     self.reid_match_window,
@@ -395,7 +381,7 @@ class BodyParameterEstimator:
             # Load frame idx and bounding boxes
 
             frame_idx_str = json_path.stem.replace("mask_", "")
-            frame_idx = int(frame_idx_str)
+            frame_idx = int(frame_idx_str.split("_")[0])
 
             if sam3d_step > 1 and frame_idx % sam3d_step != 0:
                 continue
@@ -651,7 +637,11 @@ class BodyParameterEstimator:
                 if smplx_params_by_out_idx is not None and i in smplx_params_by_out_idx:
                     for k, v in smplx_params_by_out_idx[i].items():
                         params[k] = np.asarray(v, dtype=np.float32)
-                else:
+                elif converter is None:
+                    # Only fall back to MHR-native keys when no converter was
+                    # configured at all.  If a converter exists but failed for
+                    # this frame we deliberately leave the params empty rather
+                    # than mixing MHR and SMPL-X outputs.
                     for key in param_keys:
                         if key in body and key not in BodyParameterEstimator._AGNOSTIC_KEYS:
                             val = body[key]
@@ -794,45 +784,6 @@ class BodyParameterEstimator:
     ) -> None:
         """Save per-person .npz files and a summary JSON."""
         self._save_body_data_static(tracks, body_dir, video_id, self._PARAM_KEYS)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Cross-view person re-identification
-    # ──────────────────────────────────────────────────────────────────────
-
-    def match_persons_across_views(
-        self,
-        scene: Scene,
-        video_dirs: dict[str, Path],
-    ) -> None:
-        """Assign consistent global person IDs across all camera views in a scene.
-
-        After within-video re-ID, each video has locally consistent person IDs
-        that are independent across cameras.  This method builds hybrid
-        appearance+shape descriptors for each person in each video, solves
-        all-pairs optimal bipartite matching (Hungarian algorithm), closes the
-        transitive chains via Union-Find, and remaps every output file
-        (body_data/*.npz, mask_data.npz, json_data/*.json) so that the same
-        physical person carries the same integer ID across all views.
-
-        Persons visible in only a subset of views (e.g. only in views B and C
-        but not A) are still correctly re-identified because all view *pairs*
-        are matched, not just pairs that include a reference view.
-
-        Parameters
-        ----------
-        scene : Scene
-            The scene whose videos to process.
-        video_dirs : dict[str, Path]
-            Mapping of ``video_id`` → output directory as returned by
-            ``segment_scene`` / ``estimate_scene``.
-        """
-        BodyParameterEstimator._match_persons_across_views_static(
-            video_dirs=video_dirs,
-            scene_id=scene.scene_id,
-            cross_view_reid_threshold=self.cross_view_reid_threshold,
-            appearance_weight=self.cross_view_appearance_weight,
-            shape_weight=self.cross_view_shape_weight,
-        )
 
     @staticmethod
     def _match_persons_across_views_static(
@@ -1243,7 +1194,8 @@ class BodyParameterEstimator:
         if not mhr_model_path or not smplx_model_path:
             return None
         try:
-            mhr_model = MHR.from_files(folder=Path(mhr_model_path), lod=1)
+            _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            mhr_model = MHR.from_files(folder=Path(mhr_model_path), lod=1, device=_device)
             smplx_model = smplx.create(
                 model_path=smplx_model_path,
                 model_type='smplx',
@@ -1257,7 +1209,8 @@ class BodyParameterEstimator:
                 method="pytorch",
             )
         except Exception as e:
-            logging.warning(f"Could not initialise SMPLX converter: {e}")
+            import traceback as _tb
+            logging.warning(f"Could not initialise SMPLX converter: {e}\n{_tb.format_exc()}")
             return None
 
     def convert_hmr_to_smplx(self, sam3d_outputs):
@@ -1285,4 +1238,46 @@ class BodyParameterEstimator:
             return_smpl_parameters=True,
             return_smpl_vertices=False,
             return_fitting_errors=False,
+        )
+
+
+class CrossViewReidentifier:
+    """Assign consistent global person IDs across camera views in a scene.
+
+    Parameters
+    ----------
+    threshold : float
+        Minimum hybrid cosine similarity to accept a cross-view match.
+    appearance_weight : float
+        Weight for the DINOv3 appearance component of the hybrid descriptor.
+    shape_weight : float
+        Weight for the SMPL-X shape (beta) component.
+    """
+
+    _THRESHOLD: float = 0.4
+    _APPEARANCE_WEIGHT: float = 0.7
+    _SHAPE_WEIGHT: float = 0.3
+
+    def __init__(
+        self,
+        threshold: float | None = None,
+        appearance_weight: float | None = None,
+        shape_weight: float | None = None,
+    ):
+        self.threshold = threshold if threshold is not None else self._THRESHOLD
+        self.appearance_weight = appearance_weight if appearance_weight is not None else self._APPEARANCE_WEIGHT
+        self.shape_weight = shape_weight if shape_weight is not None else self._SHAPE_WEIGHT
+
+    def match_across_views(
+        self,
+        scene: Scene,
+        video_dirs: dict[str, Path],
+    ) -> None:
+        """Assign consistent global person IDs across all camera views in a scene."""
+        BodyParameterEstimator._match_persons_across_views_static(
+            video_dirs=video_dirs,
+            scene_id=scene.scene_id,
+            cross_view_reid_threshold=self.threshold,
+            appearance_weight=self.appearance_weight,
+            shape_weight=self.shape_weight,
         )
