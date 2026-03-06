@@ -15,13 +15,13 @@ dataset::
     inputs = dict(
         pose       = Tensor[T, K, P, J, 6],
         shape      = Tensor[T, K, P, 10],
-        camera     = Tensor[T, K, 7],
+        camera     = Tensor[T, K, 8],
         joint_mask = Tensor[T, K, P, J],
     )
     targets = dict(
         pose       = Tensor[T, K, P, J, 6],
         shape      = Tensor[T, K, P, 10],
-        camera     = Tensor[T, K, 7],
+        camera     = Tensor[T, K, 8],
         keypoints_3d = Tensor[T, K, P, 70, 3],
     )
 """
@@ -210,15 +210,18 @@ class FusionDataset(Dataset, ABC):
         global_rot: np.ndarray,
         cam_calib: dict[str, Any] | None = None,
     ) -> np.ndarray:
-        """Convert raw camera params to ``[7]`` = ``[quat(4), trans(3)]``.
+        """Convert raw camera params to ``[8]`` = ``[quat(4), trans(3), focal_raw(1)]``.
 
         ``cam_calib`` is ``self._cameras[cam_idx]`` -- available for
         subclasses that have proper extrinsics.
-        Default: identity rotation + pred_cam_t.
+        Default: identity rotation + pred_cam_t + softplus(focal_raw)=focal_length.
         """
-        cam = np.zeros(7, dtype=np.float32)
+        cam = np.zeros(8, dtype=np.float32)
         cam[3] = 1.0  # qw = 1 -> identity rotation
         cam[4:7] = pred_cam_t
+        # Store softplus_inv(focal) so that extract_cameras can recover the
+        # true focal length by applying softplus.  For f >> 1, softplus_inv(f) ≈ f.
+        cam[7] = float(np.log(np.exp(float(focal_length)) - 1.0 + 1e-6))
         return cam
 
     def build_gt_targets(
@@ -310,7 +313,7 @@ class FusionDataset(Dataset, ABC):
 
         pose = np.zeros((T, K, P, J, 6), dtype=np.float32)
         shape = np.zeros((T, K, P, 10), dtype=np.float32)
-        camera = np.zeros((T, K, 7), dtype=np.float32)
+        camera = np.zeros((T, K, 8), dtype=np.float32)
         joint_mask = np.zeros((T, K, P, J), dtype=np.float32)
         kp3d = np.zeros((T, K, P, 70, 3), dtype=np.float32)
 
@@ -641,23 +644,25 @@ class RICHFusionDataset(FusionDataset):
         calib_dir = rich_data_root / "scan_calibration" / stem / "calibration"
 
         self._cameras = []
-        self._gt_camera_vecs: list[np.ndarray] = []  # (7,) per camera
+        self._gt_camera_vecs: list[np.ndarray] = []  # (8,) per camera
         for i, cam_dir in enumerate(self._cam_dirs):
             xml_path = calib_dir / f"{i:03d}.xml"
             if xml_path.exists():
                 calib = self._parse_calib_xml(xml_path)
                 self._cameras.append(calib)
-                # Pre-compute GT camera vector [qx, qy, qz, qw, tx, ty, tz]
+                # Pre-compute GT camera vector [qx, qy, qz, qw, tx, ty, tz, focal]
                 # from the static (per-camera) extrinsic matrix.
                 ext = calib.get("extrinsics")  # (3, 4)
                 if ext is not None:
                     from scipy.spatial.transform import Rotation as R
                     q = R.from_matrix(ext[:3, :3]).as_quat()  # [qx,qy,qz,qw]
-                    vec = np.zeros(7, dtype=np.float32)
+                    vec = np.zeros(8, dtype=np.float32)
                     vec[:4] = q
                     vec[4:7] = ext[:3, 3]
+                    intr = calib.get("intrinsics")
+                    vec[7] = float(intr[0, 0]) if intr is not None else 1000.0
                 else:
-                    vec = np.array([0., 0., 0., 1., 0., 0., 0.], dtype=np.float32)
+                    vec = np.array([0., 0., 0., 1., 0., 0., 0., 1000.], dtype=np.float32)
                 self._gt_camera_vecs.append(vec)
                 logger.debug(
                     f"  {cam_dir.name}: loaded calibration from {xml_path.name}"
@@ -669,7 +674,7 @@ class RICHFusionDataset(FusionDataset):
                 )
                 self._cameras.append({})
                 self._gt_camera_vecs.append(
-                    np.array([0., 0., 0., 1., 0., 0., 0.], dtype=np.float32)
+                    np.array([0., 0., 0., 1., 0., 0., 0., 1000.], dtype=np.float32)
                 )
 
     def load_ground_truth(self, **kwargs: Any) -> None:

@@ -496,6 +496,12 @@ class SSTOutputHeads(nn.Module):
             nn.ReLU(),
             nn.Linear(embedding_dim, 8),
         )
+        # Initialise focal_raw bias so softplus(bias) ≈ 1000 px at the start
+        # of training (softplus_inv(1000) ≈ 1000 since 1000 >> 1).
+        import math as _math
+        _softplus_inv_1000 = _math.log(_math.exp(1000.0) - 1.0) if 1000.0 <= 20 else 1000.0
+        with torch.no_grad():
+            self.camera_head[-1].bias[7] = _softplus_inv_1000
 
     def forward(
         self,
