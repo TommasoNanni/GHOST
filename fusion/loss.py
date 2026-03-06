@@ -75,7 +75,7 @@ class EpipolarLoss(Loss):
         Input:
             pose_stream: a stream of 3D poses (B, T, K, P, J, 6)
             shape_stream: a stream of 3D shapes (B, T, K, P, S)
-            camera_stream: a stream of camera parameters (B, T, K, 8)
+            camera_stream: a stream of camera parameters (B, T, K, 7)
         Output:
             loss that checks the alignment of the 3D poses with the epipolar geometry defined by the camera parameters
         """

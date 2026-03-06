@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import pytest
 
-from data.camera_alignment import CameraAlignment
+from preprocessing.camera_alignment import CameraAlignment
 
 
 def _rot_z(deg: float) -> np.ndarray:
