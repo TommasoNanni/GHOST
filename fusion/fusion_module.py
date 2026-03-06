@@ -71,14 +71,22 @@ class SSTEncoder(nn.Module):
 
 
 class WindowedTemporalAttention(nn.Module):
-    """Multi-head attention restricted to a local temporal window.
+    """Multi-head attention restricted to a local temporal window via FlashAttention.
 
-    Each query at position *t* attends only to KV positions in
-    [t − W, t + W] where W = temporal_window.  The attention
-    matrix per query is (1, 2W+1) → O(T*W) instead of O(T^2).
+    Uses torch.nn.attention.flex_attention so that:
+      - Q, K, V are never copied into per-window buffers (no unfold).
+      - The attention matrix is never materialised (FlashAttention tiles it).
+      - The local-window sparsity is expressed as a block_mask compiled once
+        per (T, device) and reused across all forward passes with the same T.
+      - The per-frame confidence bias is applied as a score_mod closure,
+        computed lazily per FA tile — no O(T²) tensor built upfront.
 
-    When T <= 2W + 1 (window covers the full sequence), it falls back
-    transparently to standard full attention.
+    Parameters
+    ----------
+    embedding_dim   : total model dimension (must be divisible by num_heads).
+    num_heads       : number of attention heads.
+    temporal_window : half-width W; frame t attends to frames [t-W … t+W].
+    dropout         : dropout applied to the output projection.
     """
 
     def __init__(
@@ -89,73 +97,94 @@ class WindowedTemporalAttention(nn.Module):
         dropout: float = 0.0,
     ):
         super().__init__()
+        assert embedding_dim % num_heads == 0, \
+            "embedding_dim must be divisible by num_heads"
         self.num_heads = num_heads
+        self.head_dim = embedding_dim // num_heads
         self.temporal_window = temporal_window
-        self.attn = nn.MultiheadAttention(
-            embedding_dim, num_heads, dropout=dropout, batch_first=True,
-        )
+
+        # Separate projections replace nn.MultiheadAttention.
+        # bias=False on Q/K follows the common practice for attention projections.
+        self.q_proj   = nn.Linear(embedding_dim, embedding_dim, bias=False)
+        self.k_proj   = nn.Linear(embedding_dim, embedding_dim, bias=False)
+        self.v_proj   = nn.Linear(embedding_dim, embedding_dim, bias=False)
+        self.out_proj = nn.Linear(embedding_dim, embedding_dim)
+        self.drop     = nn.Dropout(dropout)
+
+        # block_mask cache: keyed by (T, device_str) so create_block_mask
+        # (which triggers a torch.compile) runs only once per sequence length.
+        self._block_mask_cache: dict = {}
+
+    def _get_block_mask(self, T: int, device: torch.device):
+        """Return (cached) local-window block_mask for length T on device."""
+        from torch.nn.attention.flex_attention import create_block_mask
+        key = (T, str(device))
+        if key not in self._block_mask_cache:
+            W = self.temporal_window
+            # This closure is compiled by flex_attention into a sparse block pattern.
+            # It returns True for every (query, key) pair that should be computed.
+            def local_window(b, h, q_idx, kv_idx):
+                return (q_idx - kv_idx).abs() <= W
+            # B=None, H=None → mask is broadcast over all batch and head dims.
+            self._block_mask_cache[key] = create_block_mask(
+                local_window, B=None, H=None, Q_LEN=T, KV_LEN=T, device=device,
+            )
+        return self._block_mask_cache[key]
 
     def forward(
         self,
         x: torch.Tensor,
-        confidence_mask: torch.Tensor | None = None,
+        confidence: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Parameters
         ----------
-        x : (N, T, D)
-        confidence_mask : (N*H, T, T) or None
-            Additive soft mask (e.g. from joint confidence scores).  Only the
-            relevant (T, 2W+1) slice is gathered — the full matrix is
-            never passed to the MHA kernel.
+        x          : (N, T, D)
+        confidence : (N, T) per-frame confidence scores in [0, 1], or None.
+                     When provided, each attention logit is additively biased
+                     by log(conf[b, q_idx] * conf[b, kv_idx] + 1e-6), which
+                     is the same quantity that _build_confidence_mask produced
+                     but now computed lazily inside the FA kernel — no T×T
+                     matrix is ever allocated.
 
         Returns
         -------
         (N, T, D)
         """
+        from torch.nn.attention.flex_attention import flex_attention
+
         N, T, D = x.shape
-        W = min(self.temporal_window, T - 1)
-        win_size = 2 * W + 1
-        H = self.num_heads
+        H, Dh   = self.num_heads, self.head_dim
 
-        if win_size >= T:
-            out, _ = self.attn(x, x, x, attn_mask=confidence_mask)
-            return out
+        # Project and reshape to (N, H, T, Dh) — the format flex_attention expects.
+        # All three tensors are views of x (one matmul each), no window copies.
+        def _proj(linear):
+            return linear(x).reshape(N, T, H, Dh).transpose(1, 2)  # (N, H, T, Dh)
 
-        # build KV windows via pad + unfold
-        x_pad = F.pad(x, (0, 0, W, W))                       # (N, T+2W, D)
-        kv = x_pad.unfold(1, win_size, 1).permute(0, 1, 3, 2).contiguous()
+        q, k, v = _proj(self.q_proj), _proj(self.k_proj), _proj(self.v_proj)
 
-        q  = x.reshape(N * T, 1, D)
-        kv = kv.reshape(N * T, win_size, D)
+        # block_mask encodes "frame t only attends to [t-W … t+W]".
+        # It is compiled once and then reused — subsequent calls with the same T
+        # hit the cache and pay zero overhead.
+        block_mask = self._get_block_mask(T, x.device)
 
-        # boundary mask (padding positions → −inf)
-        t_idx = torch.arange(T, device=x.device)
-        r_idx = torch.arange(win_size, device=x.device)
-        orig_pos = t_idx.unsqueeze(1) + (r_idx - W).unsqueeze(0)   # (T, win)
-        boundary = torch.where(
-            (orig_pos >= 0) & (orig_pos < T), 0.0, float("-inf"),
-        )
+        # score_mod biases each logit by log(conf_q * conf_k + eps).
+        # flex_attention calls this closure per FA tile, not per element,
+        # so no T×T tensor is ever created.
+        score_mod = None
+        if confidence is not None:
+            conf = confidence  # captured by closure; shape (N, T)
+            def _score_mod(score, b, h, q_idx, kv_idx):  # noqa: E306
+                return score + torch.log(conf[b, q_idx] * conf[b, kv_idx] + 1e-6)
+            score_mod = _score_mod
 
-        mask = (
-            boundary
-            .unsqueeze(0).expand(N, -1, -1)
-            .reshape(N * T, 1, win_size)
-            .unsqueeze(1).expand(-1, H, -1, -1)
-            .reshape(N * T * H, 1, win_size)
-        )
+        # flex_attention runs FlashAttention with the sparse block_mask.
+        # Output shape: (N, H, T, Dh).
+        out: torch.Tensor = flex_attention(q, k, v, score_mod=score_mod, block_mask=block_mask)  # type: ignore[assignment]
 
-        # optional confidence mask slicing
-        if confidence_mask is not None:
-            cm = confidence_mask.reshape(N, H, T, T)
-            col_idx = orig_pos.clamp(0, T - 1)
-            col_idx = col_idx.unsqueeze(0).unsqueeze(0).expand(N, H, -1, -1)
-            cm_win = cm.gather(3, col_idx)
-            cm_win = cm_win.permute(0, 2, 1, 3).reshape(N * T * H, 1, win_size)
-            mask = mask + cm_win
-
-        out, _ = self.attn(q, kv, kv, attn_mask=mask)
-        return out.reshape(N, T, D)
+        # Merge heads back and project to D.
+        out = out.transpose(1, 2).reshape(N, T, D)
+        return self.drop(self.out_proj(out))
 
 
 
@@ -310,14 +339,17 @@ class PoseStreamLayer(nn.Module):
         B: int, T: int, K: int, P: int, J: int, D: int, H: int,
         joint_mask: torch.Tensor,
         view_mask: torch.Tensor,
-        temporal_mask: torch.Tensor | None,
+        temporal_conf: torch.Tensor | None,
         pe: PositionalEncoding | None,
         dropout: nn.Dropout,
     ) -> torch.Tensor:
         """
         Parameters
         ----------
-        x : (B, T, K, P, J, D)
+        x            : (B, T, K, P, J, D)
+        temporal_conf: (B*K*P*J, T) raw per-frame confidence scores, or None.
+                       Passed directly to WindowedTemporalAttention which turns
+                       them into a per-logit score_mod inside the FA kernel.
 
         Returns
         -------
@@ -339,7 +371,7 @@ class PoseStreamLayer(nn.Module):
         h = h.permute(0, 2, 3, 4, 1, 5).contiguous().reshape(B * K * P * J, T, D)
         if pe is not None:
             h = pe(h)
-        h = self.temporal_attn(h, confidence_mask=temporal_mask)
+        h = self.temporal_attn(h, confidence=temporal_conf)
         h = h.reshape(B, K, P, J, T, D).permute(0, 4, 1, 2, 3, 5).contiguous()
         x = x + dropout(h)
 
@@ -598,9 +630,10 @@ class SSTNetwork(nn.Module):
         view_mask_flat = joint_mask.permute(0, 1, 3, 4, 2).reshape(B * T * P * J, K)
         pose_view_mask = self._build_confidence_mask(view_mask_flat, H)
 
-        # For pose temporal attention — full (T,T) built once, sliced per window inside WTA
-        temp_mask_flat = joint_mask.permute(0, 2, 3, 4, 1).reshape(B * K * P * J, T)
-        pose_temporal_mask = self._build_confidence_mask(temp_mask_flat, H)
+        # For pose temporal attention: pass raw (B*K*P*J, T) confidence scores.
+        # WindowedTemporalAttention converts these to a per-logit score_mod
+        # inside the FlashAttention kernel — no T×T tensor is ever allocated.
+        pose_temporal_conf = joint_mask.permute(0, 2, 3, 4, 1).reshape(B * K * P * J, T)
 
         # layer loop
         pose_stream = pose_emb
@@ -614,7 +647,7 @@ class SSTNetwork(nn.Module):
                 pose_stream, B, T, K, P, J, D, H,
                 joint_mask=pose_joint_mask,
                 view_mask=pose_view_mask,
-                temporal_mask=pose_temporal_mask,
+                temporal_conf=pose_temporal_conf,
                 pe=pe,
                 dropout=self.dropout,
             )
