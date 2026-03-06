@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --time=6:00:00
+#SBATCH --time=8:00:00
 #SBATCH --account=ls_polle
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=15
 #SBATCH --mem-per-cpu=8G
 #SBATCH --gpus=2
 #SBATCH --gres=gpumem:40G
-#SBATCH --job-name=test_sam3d
+#SBATCH --job-name=rich_pipeline
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL          

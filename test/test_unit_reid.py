@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from data.parameters_extraction import BodyParameterEstimator
+from preprocessing.parameters_extraction import BodyParameterEstimator
 
 FEAT_DIM = 64   # arbitrary small backbone output channels
 
@@ -114,11 +114,8 @@ def _run_core(tmpdir: Path, estimator: _MockEstimator) -> Path:
         video_id="unit_test",
         video_dir=str(tmpdir),
         sam3d_step=1,
-        smooth=False,
-        smooth_params={},
         bbox_padding=0.0,
         param_keys=BodyParameterEstimator._PARAM_KEYS,
-        smooth_keys=BodyParameterEstimator._SMOOTH_KEYS,
     )
     return tmpdir / "body_data"
 

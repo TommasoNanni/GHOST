@@ -6,7 +6,7 @@
 #SBATCH --mem-per-cpu=8G
 #SBATCH --gpus=2
 #SBATCH --gres=gpumem:40G
-#SBATCH --job-name=test_sam3d
+#SBATCH --job-name=egoexo_pipeline
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL          

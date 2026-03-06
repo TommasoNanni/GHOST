@@ -2,8 +2,8 @@ data:
   egoexo_data_root: "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
   rich_data_root: "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"
   rich_max_side: 1440  # resize RICH frames so longest side <= this before SAM3; null to skip
-  output_directory: "/cluster/project/cvg/students/tnanni/ghost/test_outputs/sam3_segmentation_test"
-  slice: 1 # Number of scenes to load (set for testing)
+  output_directory: "/cluster/project/cvg/students/tnanni/ghost/test_outputs/rich2_segmentation_test"
+  slice: null # Number of scenes to load (set for testing)
   exclude_egocentric: true # Exclude egocentric videos for simplicity
   smplx_model_path: "body_models/SMPLX_NEUTRAL.npz"
   mhr_model_path: "/cluster/project/cvg/students/tnanni/ghost/MHR/assets"

@@ -9,7 +9,7 @@ import numpy as np
 from configuration import CONFIG
 from data.video_dataset import EgoExoSceneDataset, RichDataset
 from preprocessing.segmentation import PersonSegmenter
-from preprocessing.parameters_extraction import BodyParameterEstimator
+from preprocessing.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
 from utilities.visualize_segmented_reids import visualize_reid
 
 def main():
@@ -56,9 +56,11 @@ def main():
         reid_threshold = CONFIG.parameters_extraction.reid_threshold,
         gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
         reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
-        cross_view_reid_threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
-        cross_view_appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
-        cross_view_shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
+    )
+    reidentifier = CrossViewReidentifier(
+        threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
+        appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
+        shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
     )
     print(f"\n--- Running body parameter estimation ---")
     estimator.estimate_scene(
@@ -68,7 +70,7 @@ def main():
 
     # Step 3: Match person IDs across camera views
     print(f"\n--- Running cross-view person re-identification ---")
-    estimator.match_persons_across_views(
+    reidentifier.match_across_views(
         scene=scene,
         video_dirs=video_dirs,
     )

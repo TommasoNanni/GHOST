@@ -12,9 +12,66 @@ from tqdm import tqdm
 from collections import defaultdict
 
 from data.video_dataset import Video, Scene, EgoExoSceneDataset
-from data.segmentation import PersonSegmenter
-from data.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
+from preprocessing.segmentation import PersonSegmenter
+from preprocessing.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
 from synchronize_videos.synchronizer import Synchronizer
+
+
+def load_body_data(
+    scene,
+    video_dir_dict: dict,
+    device: str = "cuda",
+) -> tuple[list, list]:
+    """Load body joints and confidences from pipeline output for synchronization.
+
+    Parameters
+    ----------
+    scene : Scene
+        Scene object with video metadata.
+    video_dir_dict : dict
+        Maps video_id -> Path to that video's output directory.
+    device : str
+        Torch device string.
+
+    Returns
+    -------
+    body_joints_list : list[list[Tensor]]
+        K videos × P persons, each tensor shape (T, J, 3).
+    confidences_list : list[list[Tensor]]
+        K videos × P persons, each tensor shape (T, J).
+    """
+    body_joints_list = []
+    confidences_list = []
+
+    for video in scene.videos:
+        video_dir = video_dir_dict.get(video.video_id)
+        if video_dir is None:
+            continue
+        body_dir = Path(video_dir) / "body_data"
+        if not body_dir.is_dir():
+            continue
+
+        per_person_joints: list[torch.Tensor] = []
+        per_person_confs: list[torch.Tensor] = []
+
+        for npz_path in sorted(body_dir.glob("person_*.npz")):
+            data = np.load(str(npz_path), allow_pickle=False)
+            if "pred_keypoints_3d" not in data:
+                continue
+            kpts = data["pred_keypoints_3d"]  # (T, J, 3)
+            if len(kpts) == 0:
+                continue
+            joints = torch.from_numpy(kpts).float().to(device)  # (T, J, 3)
+            T, J = joints.shape[:2]
+            conf = torch.ones(T, J, device=device)
+            per_person_joints.append(joints)
+            per_person_confs.append(conf)
+
+        if per_person_joints:
+            body_joints_list.append(per_person_joints)
+            confidences_list.append(per_person_confs)
+
+    return body_joints_list, confidences_list
 
 
 def parse_args():
@@ -26,15 +83,13 @@ def parse_args():
     parser.add_argument("--slice", type=int, default=None, help="Only process the first N scenes")
 
     # Segmentation
-    parser.add_argument("--sam2_checkpoint", type=str, default="checkpoints/sam2.1_hiera_large.pt")
-    parser.add_argument("--model_cfg", type=str, default="configs/sam2.1/sam2.1_hiera_l.yaml")
-    parser.add_argument("--gdino_model_id", type=str, default="IDEA-Research/grounding-dino-tiny")
-    parser.add_argument("--detection_step", type=int, default=50)
-    parser.add_argument("--box_threshold", type=float, default=0.25)
-    parser.add_argument("--min_mask_area", type=int, default=500,
-                        help="Min foreground pixels for a tracked mask to be carried forward")
-    parser.add_argument("--max_no_detection_windows", type=int, default=2,
-                        help="Max consecutive GDINO windows without detection before dropping a track")
+    parser.add_argument("--sam3_checkpoint", type=str, default=None,
+                        help="Path to SAM3 checkpoint; None = auto-download from HuggingFace")
+    parser.add_argument("--text_prompt", type=str, default="person")
+    parser.add_argument("--redetect_interval", type=int, default=5,
+                        help="Add text prompt every N frames so late arrivals are detected")
+    parser.add_argument("--new_det_thresh", type=float, default=0.4)
+    parser.add_argument("--score_threshold_detection", type=float, default=0.3)
 
     # Body estimation
     parser.add_argument("--sam3d_hf_repo", type=str, default="facebook/sam-3d-body-dinov3")
@@ -59,14 +114,12 @@ def main(args):
 
     # Instatiate the segmenter to detect people
     segmenter = PersonSegmenter(
-        sam2_checkpoint=args.sam2_checkpoint,
-        model_cfg=args.model_cfg,
-        gdino_model_id=args.gdino_model_id,
+        checkpoint_path=args.sam3_checkpoint,
         device=args.device,
-        box_threshold=args.box_threshold,
-        detection_step=args.detection_step,
-        min_mask_area=args.min_mask_area,
-        max_no_detection_windows=args.max_no_detection_windows,
+        text_prompt=args.text_prompt,
+        redetect_interval=args.redetect_interval,
+        new_det_thresh=args.new_det_thresh,
+        score_threshold_detection=args.score_threshold_detection,
     )
 
     # Detect people in the dataset
