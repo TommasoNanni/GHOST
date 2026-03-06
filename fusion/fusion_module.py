@@ -49,7 +49,7 @@ class SSTEncoder(nn.Module):
             nn.Linear(2 * embedding_dim, embedding_dim),
         )
         self.camera_encoder = nn.Sequential(
-            nn.Linear(7, 2 * embedding_dim),
+            nn.Linear(8, 2 * embedding_dim),
             nn.ReLU(),
             nn.Linear(2 * embedding_dim, embedding_dim),
         )
@@ -494,7 +494,7 @@ class SSTOutputHeads(nn.Module):
         self.camera_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
-            nn.Linear(embedding_dim, 7),
+            nn.Linear(embedding_dim, 8),
         )
 
     def forward(
@@ -517,7 +517,7 @@ class SSTOutputHeads(nn.Module):
         shape_aggr = self.shape_head(shape_aggr_feat.reshape(B * T * P, D)).reshape(B, T, P, 10)
 
         camera = self.camera_norm(camera_stream)
-        camera = self.camera_head(camera.reshape(B * T * K, D)).reshape(B, T, K, 7)
+        camera = self.camera_head(camera.reshape(B * T * K, D)).reshape(B, T, K, 8)
 
         return pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam
 
@@ -595,14 +595,14 @@ class SSTNetwork(nn.Module):
         ----------
         pose       : [B, T, K, P, J, 6] or [T, K, P, J, 6]
         shape      : [B, T, K, P, betas] or [T, K, P, betas]
-        camera     : [B, T, K, 7] or [T, K, 7]
+        camera     : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
         joint_mask : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
 
         Returns
         -------
         pose   : [B, T, P, J, 6]
         shape  : [B, T, P, 10]
-        camera : [B, T, K, 7]
+        camera : [B, T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
         """
         # ensure batch dim 
         if pose.dim() == 5:
