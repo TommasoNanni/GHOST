@@ -7,7 +7,6 @@ body_models/
 .pixi/
 logs/
 bash_jobs/download_rich_train.sh
-human_body_prior/
 CLAUDE.md
 .pytest_cache/
 *.out

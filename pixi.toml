@@ -27,13 +27,11 @@ no-build-isolation = ["groundingdino", "SAM-2", "detectron2"]
 dependency-overrides = { iopath = ">=0.1.7" }
 
 [pypi-dependencies]
-# "SAM-2" = {path = "Grounded-SAM-2", editable = true}
-# groundingdino = {path = "Grounded-SAM-2/grounding_dino", editable = true}
-# mhr = { path = "MHR", editable = true }
-# sam-3d-body = { path = "sam-3d-body", editable = true }
-# sam3 = {path = "sam3", editable = true}
-# detectron2 = { git = "https://github.com/facebookresearch/detectron2.git", rev = "a1ce2f9" }
-# moge = { git = "https://github.com/microsoft/MoGe.git" }
+mhr = { path = "MHR", editable = true }
+sam-3d-body = { path = "sam-3d-body", editable = true }
+sam3 = {path = "sam3", editable = true}
+detectron2 = { git = "https://github.com/facebookresearch/detectron2.git", rev = "a1ce2f9" }
+moge = { git = "https://github.com/microsoft/MoGe.git" }
 transformers = ">=4.0"
 addict = "*"
 yapf = "*"
