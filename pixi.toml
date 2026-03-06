@@ -63,6 +63,7 @@ huggingface-hub = ">=1.4.1, <2"
 loguru = ">=0.7.3, <0.8"
 optree = "*"
 hatchling = ">=1.28.0, <2"
+rerun-sdk = ">=0.21.0"
 
 [tasks]
 # Replaces the conda CPU-only torch with a CUDA 12.6 build from PyTorch's index.
