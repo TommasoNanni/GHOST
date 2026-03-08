@@ -8,11 +8,24 @@ import numpy as np
 _smplx_cache: dict = {}
 
 
+def _smplx_create_kwargs(model_path: str) -> dict:
+    """Return model_path + ext kwargs for smplx.create, auto-detecting pkl vs npz.
+
+    smplx.create() treats a file path directly (bypassing its internal
+    model_type subdirectory logic), so we always pass the full file path.
+    """
+    from pathlib import Path as _Path
+    p = _Path(model_path)
+    if p.is_file():
+        return {"model_path": str(p), "ext": p.suffix.lstrip(".")}
+    return {"model_path": model_path, "ext": "pkl"}
+
+
 def _get_smplx_model(batch_size: int, device: torch.device, dtype: torch.dtype):
     key = (batch_size, str(device), dtype)
     if key not in _smplx_cache:
         _smplx_cache[key] = smplx.create(
-            model_path=CONFIG.data.smplx_model_path,
+            **_smplx_create_kwargs(CONFIG.data.smplx_model_path),
             model_type="smplx",
             gender="neutral",
             use_pca=False,

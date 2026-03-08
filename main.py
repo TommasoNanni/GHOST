@@ -63,7 +63,10 @@ def load_body_data(
                 continue
             joints = torch.from_numpy(kpts).float().to(device)  # (T, J, 3)
             T, J = joints.shape[:2]
-            conf = torch.ones(T, J, device=device)
+            if "pred_joint_confidence" in data:
+                conf = torch.from_numpy(data["pred_joint_confidence"]).float().to(device)  # (T, J)
+            else:
+                conf = torch.ones(T, J, device=device)
             per_person_joints.append(joints)
             per_person_confs.append(conf)
 

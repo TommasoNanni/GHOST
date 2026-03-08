@@ -7,36 +7,20 @@ import json
 import numpy as np
 
 from configuration import CONFIG
-from data.video_dataset import EgoExoSceneDataset, RichDataset
+from data.video_dataset import RichDataset
 from data.fusion_dataset import RICHFusionDataset
 from preprocessing.camera_alignment import CameraAlignment
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
 from utilities.visualize_segmented_reids import visualize_reid
 
-def main():
-    rich_data_root = CONFIG.data.rich_data_root
-    output_dir = CONFIG.data.output_directory
-    scenes_slice = CONFIG.data.slice
-
-    ds = RichDataset(
-        data_root=rich_data_root,
-        slice=scenes_slice,
-        max_side=getattr(CONFIG.data, "rich_max_side", None),
-    )
-    scene = ds[0]
+def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
+    """Run the full pipeline on a single scene."""
     print(f"\n=== Scene: {scene.scene_id} ({len(scene)} videos) ===")
     for v in scene:
         print(f"  {v}")
 
     # Step 1: Segment people in the scene
-    segmenter = PersonSegmenter(
-        checkpoint_path=CONFIG.segmentation.checkpoint_path,
-        text_prompt=CONFIG.segmentation.text_prompt,
-        redetect_interval=CONFIG.segmentation.redetect_interval,
-        new_det_thresh=CONFIG.segmentation.new_det_thresh,
-        score_threshold_detection=CONFIG.segmentation.score_threshold_detection,
-    )
     print(f"\n--- Running segmentation on scene '{scene.scene_id}' ---")
     video_dirs = segmenter.segment_scene(
         scene=scene,
@@ -48,21 +32,6 @@ def main():
         print(f"  {video_id}: {vdir}")
 
     # Step 2: Estimate body parameters from segmentation output
-    estimator = BodyParameterEstimator(
-        sam3d_hf_repo = CONFIG.parameters_extraction.sam3d_id,
-        sam3d_step = CONFIG.parameters_extraction.sam3d_step,
-        bbox_padding = CONFIG.parameters_extraction.bbox_padding,
-        smplx_model_path = CONFIG.data.smplx_model_path,
-        mhr_model_path  = CONFIG.data.mhr_model_path,
-        reid_threshold = CONFIG.parameters_extraction.reid_threshold,
-        gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
-        reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
-    )
-    reidentifier = CrossViewReidentifier(
-        threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
-        appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
-        shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
-    )
     print(f"\n--- Running body parameter estimation ---")
     estimator.estimate_scene(
         scene=scene,
@@ -128,24 +97,16 @@ def main():
         )
 
     # Step 6: FusionDataset compatibility check
-    # Instantiate EgoExoFusionDataset on the scene output directory and verify
-    # that the pipeline output is compatible with the SST fusion models' input.
     print(f"\n--- Step 6: FusionDataset compatibility check ---")
     try:
-        # ds = EgoExoFusionDataset(
-        #     scene_dir=scene_output_dir,
-        #     window_size=32,
-        #     window_stride=16,
-        # )
-        ds = RICHFusionDataset(
+        fusion_ds = RICHFusionDataset(
             scene_dir=scene_output_dir,
             window_size=32,
             window_stride=16,
         )
-        print(f"  Dataset: {ds}")
-        # Sample one batch and report tensor shapes
-        if len(ds) > 0:
-            inputs, targets = ds[0]
+        print(f"  Dataset: {fusion_ds}")
+        if len(fusion_ds) > 0:
+            inputs, targets = fusion_ds[0]
             print("  Inputs:")
             for k, v in inputs.items():
                 print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
@@ -227,6 +188,44 @@ def main():
             )
         except FileNotFoundError as e:
             print(f"  WARNING: skipping visualisation — {e}")
+
+
+def main():
+    rich_data_root = CONFIG.data.rich_data_root
+    output_dir = CONFIG.data.output_directory
+    scenes_slice = CONFIG.data.slice
+
+    ds = RichDataset(
+        data_root=rich_data_root,
+        slice=scenes_slice,
+        max_side=getattr(CONFIG.data, "rich_max_side", None),
+    )
+
+    segmenter = PersonSegmenter(
+        checkpoint_path=CONFIG.segmentation.checkpoint_path,
+        text_prompt=CONFIG.segmentation.text_prompt,
+        redetect_interval=CONFIG.segmentation.redetect_interval,
+        new_det_thresh=CONFIG.segmentation.new_det_thresh,
+        score_threshold_detection=CONFIG.segmentation.score_threshold_detection,
+    )
+    estimator = BodyParameterEstimator(
+        sam3d_hf_repo = CONFIG.parameters_extraction.sam3d_id,
+        sam3d_step = CONFIG.parameters_extraction.sam3d_step,
+        bbox_padding = CONFIG.parameters_extraction.bbox_padding,
+        smplx_model_path = CONFIG.data.smplx_model_path,
+        mhr_model_path  = CONFIG.data.mhr_model_path,
+        reid_threshold = CONFIG.parameters_extraction.reid_threshold,
+        gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
+        reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
+    )
+    reidentifier = CrossViewReidentifier(
+        threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
+        appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
+        shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
+    )
+
+    for scene in ds.scenes:
+        process_scene(scene, segmenter, estimator, reidentifier, output_dir)
 
 
 if __name__ == "__main__":

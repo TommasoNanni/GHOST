@@ -615,7 +615,7 @@ class RichDataset(Dataset):
         self,
         data_root: str | Path,
         resolution: tuple[int, int] | None = None,
-        image_extensions: tuple[str, ...] = (".jpg", ".jpeg", ".bmp"),
+        image_extensions: tuple[str, ...] = (".jpg", ".jpeg", ".bmp", ".png"),
         slice: int | None = None,
         max_side: int | None = None,
     ):

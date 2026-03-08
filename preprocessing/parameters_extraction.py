@@ -43,6 +43,7 @@ import smplx
 from data.video_dataset import Scene
 from mhr.mhr import MHR
 from conversion import Conversion
+from preprocessing.confidence import ConfidenceEstimator
 
 class BodyParameterEstimator:
     """Estimate 3D body parameters for tracked persons.
@@ -293,6 +294,7 @@ class BodyParameterEstimator:
         "pred_keypoints_2d",
         "pred_cam_t",
         "focal_length",
+        "pred_joint_confidence",
     )
 
     # SMPLX parameter keys produced by the Conversion class.
@@ -341,9 +343,20 @@ class BodyParameterEstimator:
             logging.warning(f"{gpu_label}{video_id}: no JSON data, skipping")
             return
 
+        # Open the SAM3 mask archive once for the whole video.
+        # The archive holds one uint16 frame per key (pixel value = person ID).
+        mask_npz_path = video_path / "mask_data.npz"
+        _mask_zip: zipfile.ZipFile | None = None
+        if mask_npz_path.exists():
+            _mask_zip = zipfile.ZipFile(str(mask_npz_path), "r")
+        else:
+            logging.warning(f"{gpu_label}{video_id}: mask_data.npz not found — confidence will be all-ones")
+
+        confidence_estimator = ConfidenceEstimator()
+
         tracks: dict[int, dict[int, dict]] = {}
 
-        # Phase 0 — pre-scan every JSON frame to find which SAM2 track IDs are
+        # Phase 0 — pre-scan every JSON frame to find which SAM3 track IDs are
         # ever SIMULTANEOUSLY visible.  ID pairs co-visible in >= N frames must
         # belong to different people and can never be merged by re-ID.
         # Using a threshold > 1 avoids blocking re-ID across detection-transition
@@ -366,14 +379,20 @@ class BodyParameterEstimator:
 
         # Gallery for visual re-identification across SAM2 track interruptions.
         # person_gallery: canonical_id → L2-normalised appearance descriptor (EMA).
-        # id_remap: raw SAM2 id → canonical_id for ids that were re-identified.
-        # pending_reid: new SAM2 ids that weren't matched on first sight —
+        # id_remap: raw SAM3 id → canonical_id for ids that were re-identified.
+        # pending_reid: new SAM3 ids that weren't matched on first sight —
         #   maps person_id → frames_remaining for retry attempts.
         # We employ DINOv3 backbone (given by SAM 3D) in order to match people across
         # frames using cosine similarity between visual features
         person_gallery: dict[int, np.ndarray] = {}
         id_remap: dict[int, int] = {}
         pending_reid: dict[int, int] = {}  # person_id → frames remaining
+
+        # Pass 2: batched MHR→SMPL-X conversion after the frame loop.
+        # Accumulate per-person SAM3D outputs during the frame loop, then
+        # convert the entire track at once (one optimizer run per person).
+        # canonical_id → list of (frame_idx, body_output, orig_person_id, mask_key, img_h, img_w)
+        pending_conversion: dict[int, list] = {}
 
         for json_path in tqdm(
             json_files, desc=f"{gpu_label}SAM3D {video_id}", leave=False
@@ -402,6 +421,14 @@ class BodyParameterEstimator:
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             img_h, img_w = frame_rgb.shape[:2]
 
+            # Load the full segmentation mask for this frame (uint16, pixel = person_id).
+            mask_key = json_path.stem + ".npy"
+            frame_mask: np.ndarray | None = None
+            if _mask_zip is not None:
+                if mask_key in _mask_zip.namelist():
+                    with _mask_zip.open(mask_key) as _mf:
+                        frame_mask = np.load(io.BytesIO(_mf.read()))
+
             # Collect all valid persons for this frame.
             # Each entry: (person_id, padded_x1, padded_y1, padded_x2, padded_y2,
             #               orig_x1, orig_y1, orig_x2, orig_y2)
@@ -410,6 +437,7 @@ class BodyParameterEstimator:
                 person_id = int(str_id)
                 x1, y1, x2, y2 = info["x1"], info["y1"], info["x2"], info["y2"]
 
+                # skip bboxes that are too small
                 bw, bh = x2 - x1, y2 - y1
                 if bw < 10 or bh < 10:
                     continue
@@ -426,7 +454,8 @@ class BodyParameterEstimator:
                         f"of {img_w}x{img_h}"
                     )
                     continue
-
+                
+                # pad the bboxes
                 pad_w = int(bw * bbox_padding)
                 pad_h = int(bh * bbox_padding)
                 px1 = max(0, x1 - pad_w)
@@ -474,18 +503,18 @@ class BodyParameterEstimator:
                     frame_rgb, bboxes=bboxes_arr
                 )
             except Exception as e:
-                logging.warning(
+                logging.error(
                     f"{gpu_label}SAM3D failed frame {frame_idx} in {video_id}: {e}, returning None"
                 )
                 outputs = None
             finally:
-                # FInally free the hook
+                # Finally free the hook
                 if _hook_handle is not None:
                     _hook_handle.remove()
 
             if not outputs:
                 if outputs is not None:
-                    logging.warning(
+                    logging.error(
                         f"{gpu_label}No outputs for frame {frame_idx} in {video_id}"
                     )
                 continue
@@ -493,47 +522,8 @@ class BodyParameterEstimator:
             # vis_feats[i] is the L2-normalised backbone descriptor for valid_persons[i].
             vis_feats: np.ndarray | None = _hook_feats[0] if _hook_feats else None
 
-            # Convert SAM3D (MHR) outputs to SMPLX parameters when a converter is
-            # available.  The converter accepts all non-None person outputs for this
-            # frame at once and returns per-person SMPLX parameters indexed by their
-            # position in the non-None subset.
-            smplx_params_by_out_idx: dict[int, dict[str, np.ndarray]] | None = None
-            if converter is not None and outputs:
-                # Map: position in `outputs` → position in the non-None subset.
-                valid_idx_map: dict[int, int] = {}
-                valid_outputs_list = []
-                for _oi, _o in enumerate(outputs):
-                    if _o is not None:
-                        valid_idx_map[_oi] = len(valid_outputs_list)
-                        valid_outputs_list.append(_o)
-
-                if valid_outputs_list:
-                    try:
-                        conv_result = converter.convert_sam3d_output_to_smpl(
-                            sam3d_outputs=valid_outputs_list,
-                            return_smpl_meshes=False,
-                            return_smpl_parameters=True,
-                            return_smpl_vertices=False,
-                            return_fitting_errors=False,
-                        )
-                        if conv_result.result_parameters is not None:
-                            smplx_params_by_out_idx = {}
-                            for _param_key, _param_val in conv_result.result_parameters.items():
-                                if isinstance(_param_val, torch.Tensor):
-                                    _param_np = _param_val.detach().cpu().numpy()
-                                else:
-                                    _param_np = np.asarray(_param_val, dtype=np.float32)
-                                for _out_idx, _v_idx in valid_idx_map.items():
-                                    smplx_params_by_out_idx.setdefault(_out_idx, {})[
-                                        f"smplx_{_param_key}"
-                                    ] = _param_np[_v_idx]
-                    except Exception as _e:
-                        logging.warning(
-                            f"{gpu_label}SMPLX conversion failed for frame "
-                            f"{frame_idx} in {video_id}: {_e}"
-                        )
-
             # outputs[i] corresponds to valid_persons[i] (same order as bboxes_arr).
+            # SMPL-X conversion is deferred to Pass 2 (batched per person track).
             for i, (person_id, _, _, _, _, x1, y1, x2, y2) in enumerate(
                 valid_persons
             ):
@@ -596,7 +586,7 @@ class BodyParameterEstimator:
                             canonical_id = best_id
                             pending_reid.pop(person_id, None)
                             logging.info(
-                                f"{gpu_label}Re-ID: SAM2 id {person_id} → "
+                                f"{gpu_label}Re-ID: SAM3 id {person_id} → "
                                 f"person {best_id} (sim={sims[best_id]:.3f}) "
                                 f"in {video_id} frame {frame_idx}"
                             )
@@ -633,15 +623,8 @@ class BodyParameterEstimator:
                             val = val.detach().cpu().numpy()
                         params[key] = np.asarray(val, dtype=np.float32)
 
-                # Prefer SMPLX params from conversion; fall back to raw MHR params.
-                if smplx_params_by_out_idx is not None and i in smplx_params_by_out_idx:
-                    for k, v in smplx_params_by_out_idx[i].items():
-                        params[k] = np.asarray(v, dtype=np.float32)
-                elif converter is None:
-                    # Only fall back to MHR-native keys when no converter was
-                    # configured at all.  If a converter exists but failed for
-                    # this frame we deliberately leave the params empty rather
-                    # than mixing MHR and SMPL-X outputs.
+                # When no converter, fall back to raw MHR params immediately.
+                if converter is None:
                     for key in param_keys:
                         if key in body and key not in BodyParameterEstimator._AGNOSTIC_KEYS:
                             val = body[key]
@@ -649,7 +632,169 @@ class BodyParameterEstimator:
                                 val = val.detach().cpu().numpy()
                             params[key] = np.asarray(val, dtype=np.float32)
 
+                # --- Per-joint confidence (MHR-based; overwritten by Pass 2 when converter present) ---
+                kp3d = params.get("pred_keypoints_3d")
+                kp2d = params.get("pred_keypoints_2d")
+                cam_t = params.get("pred_cam_t")
+                fl = params.get("focal_length")
+                fl_val = float(fl) if fl is not None and np.ndim(fl) == 0 else (float(fl[0]) if fl is not None else None)
+
+                verts_raw = body.get("pred_vertices")
+                if isinstance(verts_raw, torch.Tensor):
+                    verts_raw = verts_raw.detach().cpu().numpy()
+                if (
+                    kp3d is not None
+                    and kp2d is not None
+                    and cam_t is not None
+                    and fl_val is not None
+                    and verts_raw is not None
+                    and frame_mask is not None
+                ):
+                    person_mask = (frame_mask == person_id).astype(np.uint8)
+                    try:
+                        params["pred_joint_confidence"] = confidence_estimator.estimate(
+                            pred_vertices=np.asarray(verts_raw, dtype=np.float32),
+                            pred_keypoints_3d=kp3d,
+                            pred_keypoints_2d=kp2d,
+                            pred_cam_t=cam_t,
+                            focal_length=fl_val,
+                            person_mask=person_mask,
+                            img_h=img_h,
+                            img_w=img_w,
+                        )
+                    except Exception as _ce:
+                        logging.warning(
+                            f"{gpu_label}Confidence estimation failed frame "
+                            f"{frame_idx} person {person_id}: {_ce}"
+                        )
+                elif kp3d is not None:
+                    params["pred_joint_confidence"] = np.ones(
+                        kp3d.shape[0], dtype=np.float32
+                    )
+
                 tracks.setdefault(canonical_id, {})[frame_idx] = params
+
+                # Accumulate raw SAM3D output for batched SMPL-X conversion in Pass 2.
+                # Move tensors to CPU now to avoid holding GPU memory for the whole loop.
+                if converter is not None:
+                    body_cpu = {
+                        k: (v.detach().cpu() if isinstance(v, torch.Tensor) else v)
+                        for k, v in body.items()
+                    }
+                    pending_conversion.setdefault(canonical_id, []).append(
+                        (frame_idx, body_cpu, person_id, mask_key, img_h, img_w)
+                    )
+
+        # Pass 2: batched SMPL-X conversion + SMPL-X-based confidence override.
+        # One optimizer run per person track (all frames batched together).
+        if converter is not None and pending_conversion:
+            _smplx_device = next(converter._smpl_model.parameters()).device
+            for canonical_id, frame_list in pending_conversion.items():
+                frame_list.sort(key=lambda x: x[0])
+                sam3d_outputs = [entry[1] for entry in frame_list]
+                try:
+                    conv_result = converter.convert_sam3d_output_to_smpl(
+                        sam3d_outputs=sam3d_outputs,
+                        return_smpl_meshes=False,
+                        return_smpl_parameters=True,
+                        return_smpl_vertices=True,
+                        return_fitting_errors=False,
+                    )
+                except Exception as _e:
+                    logging.warning(
+                        f"{gpu_label}Batched SMPLX conversion failed person "
+                        f"{canonical_id} in {video_id}: {_e}"
+                    )
+                    continue
+
+                # Collect smplx params as numpy, indexed by position in frame_list.
+                smplx_np: dict[str, np.ndarray] = {}
+                if conv_result.result_parameters is not None:
+                    for _pk, _pv in conv_result.result_parameters.items():
+                        if isinstance(_pv, torch.Tensor):
+                            smplx_np[f"smplx_{_pk}"] = _pv.detach().cpu().numpy()
+                        else:
+                            smplx_np[f"smplx_{_pk}"] = np.asarray(_pv, dtype=np.float32)
+
+                # Batch SMPL-X forward for joints (one pass for all frames).
+                smplx_joints_batch: np.ndarray | None = None
+                if conv_result.result_parameters is not None and "smplx_betas" in smplx_np:
+                    try:
+                        with torch.no_grad():
+                            _betas = torch.from_numpy(smplx_np["smplx_betas"]).float().to(_smplx_device)
+                            _body_pose = torch.from_numpy(smplx_np["smplx_body_pose"]).float().to(_smplx_device)
+                            _global_orient = torch.from_numpy(smplx_np["smplx_global_orient"]).float().to(_smplx_device)
+                            _transl = torch.from_numpy(smplx_np["smplx_transl"]).float().to(_smplx_device)
+                            _smplx_out = converter._smpl_model(
+                                betas=_betas,
+                                body_pose=_body_pose,
+                                global_orient=_global_orient,
+                                transl=_transl,
+                            )
+                        # (N_frames, J_total, 3) → keep first 55
+                        smplx_joints_batch = _smplx_out.joints[:, :55].cpu().numpy().astype(np.float32)
+                    except Exception as _je:
+                        logging.warning(
+                            f"{gpu_label}Batched SMPLX joints failed person "
+                            f"{canonical_id} in {video_id}: {_je}"
+                        )
+
+                for j, (frame_idx, _body, orig_pid, f_mask_key, img_h, img_w) in enumerate(frame_list):
+                    frame_params = tracks.get(canonical_id, {}).get(frame_idx)
+                    if frame_params is None:
+                        continue
+
+                    # Store per-frame smplx params.
+                    for _pk, _pv_all in smplx_np.items():
+                        frame_params[_pk] = np.asarray(_pv_all[j], dtype=np.float32)
+
+                    # Override confidence with SMPL-X vertices + joints.
+                    if (
+                        conv_result.result_vertices is not None
+                        and smplx_joints_batch is not None
+                        and _mask_zip is not None
+                        and f_mask_key in _mask_zip.namelist()
+                    ):
+                        smplx_verts_cam = np.asarray(conv_result.result_vertices[j], dtype=np.float32)
+                        smplx_joints_cam = smplx_joints_batch[j]  # (55, 3) camera space
+
+                        kp3d = frame_params.get("pred_keypoints_3d")
+                        kp2d = frame_params.get("pred_keypoints_2d")
+                        cam_t = frame_params.get("pred_cam_t")
+                        fl = frame_params.get("focal_length")
+                        fl_val = (
+                            float(fl) if fl is not None and np.ndim(fl) == 0
+                            else (float(fl[0]) if fl is not None else None)
+                        )
+
+                        if kp3d is not None and cam_t is not None and kp2d is not None and fl_val is not None:
+                            mhr_kpts_cam = kp3d + cam_t
+                            cx, cy = ConfidenceEstimator._recover_principal_point(
+                                mhr_kpts_cam, kp2d, fl_val
+                            )
+                            try:
+                                with _mask_zip.open(f_mask_key) as _mf2:
+                                    f_frame_mask = np.load(io.BytesIO(_mf2.read()))
+                                person_mask = (f_frame_mask == orig_pid).astype(np.uint8)
+                                frame_params["pred_joint_confidence"] = confidence_estimator.estimate(
+                                    pred_vertices=smplx_verts_cam,
+                                    pred_keypoints_3d=smplx_joints_cam,
+                                    pred_keypoints_2d=None,
+                                    pred_cam_t=np.zeros(3, dtype=np.float32),
+                                    focal_length=fl_val,
+                                    person_mask=person_mask,
+                                    img_h=img_h,
+                                    img_w=img_w,
+                                    cx_cy=(cx, cy),
+                                )
+                            except Exception as _ce:
+                                logging.warning(
+                                    f"{gpu_label}SMPLX confidence failed person "
+                                    f"{canonical_id} frame {frame_idx}: {_ce}"
+                                )
+
+        if _mask_zip is not None:
+            _mask_zip.close()
 
         if not tracks:
             logging.warning(f"{gpu_label}{video_id}: no body detections")
@@ -1007,14 +1152,155 @@ class BodyParameterEstimator:
             if not conflict_found:
                 break
 
-        # ── 5. Assign global IDs ──────────────────────────────────────────
-        # Each connected component represents one physical person.  We use
-        # the smallest local ID within the component as the global ID, which
-        # keeps numbers stable across runs and preserves low IDs.
+        # ── 4.5. Consolidation pass with component centroids ──────────────
+        # After the strict pairwise matching, some persons may remain
+        # unlinked because their appearance differed enough (e.g. the same
+        # person goes from a solo shot to a crowded scene) that no single
+        # pairwise similarity exceeded the threshold.
+        #
+        # Fix: compute the L2-normalised *centroid* of each confirmed
+        # multi-view component (averaging out per-view noise) and try to
+        # attach isolated single-video persons to the best-matching
+        # component at a slightly relaxed threshold.
+        consolidation_threshold = max(0.15, cross_view_reid_threshold - 0.15)
         comps = _get_components()
+
+        multi_view_comps: dict[tuple, list[tuple]] = {
+            root: members
+            for root, members in comps.items()
+            if len({v for v, _ in members}) >= 2
+        }
+        isolated: list[tuple] = [
+            (vid, pid)
+            for root, members in comps.items()
+            if root not in multi_view_comps
+            for vid, pid in members
+        ]
+
+        # Compute L2-normalised centroid for each multi-view component.
+        comp_centroids: dict[tuple, np.ndarray] = {}
+        for root, members in multi_view_comps.items():
+            vecs = [
+                person_descs[vid][pid]
+                for vid, pid in members
+                if vid in person_descs and pid in person_descs.get(vid, {})
+            ]
+            if vecs:
+                mean_vec = np.mean(np.stack(vecs), axis=0).astype(np.float32)
+                norm = np.linalg.norm(mean_vec)
+                comp_centroids[root] = mean_vec / norm if norm > 0 else mean_vec
+
+        # Try to link each isolated person to its best-matching multi-view
+        # component, skipping components that already contain a member from
+        # the same video (one camera cannot show the same person twice).
+        consolidation_edges_added = False
+        for vid, pid in isolated:
+            if vid not in person_descs or pid not in person_descs.get(vid, {}):
+                continue
+            feat = person_descs[vid][pid]
+
+            best_root, best_sim = None, -1.0
+            for root, centroid in comp_centroids.items():
+                if any(v == vid for v, _ in multi_view_comps[root]):
+                    continue
+                sim = float(np.dot(feat, centroid))
+                if sim > best_sim:
+                    best_sim, best_root = sim, root
+
+            if best_root is not None and best_sim >= consolidation_threshold:
+                comp_member = multi_view_comps[best_root][0]
+                edges.append((best_sim, (vid, pid), comp_member))
+                _union((vid, pid), comp_member)
+                consolidation_edges_added = True
+                logging.info(
+                    f"Scene {scene_id}: consolidation linked "
+                    f"{vid}/P{pid} → component {best_root} "
+                    f"(centroid_sim={best_sim:.3f})"
+                )
+
+        # Re-run conflict resolution if the consolidation added new edges.
+        if consolidation_edges_added:
+            for _ in range(len(edges) + 1):
+                comps = _get_components()
+                conflict_found = False
+
+                for members in comps.values():
+                    vid_to_nodes: dict[str, list[tuple]] = {}
+                    for node in members:
+                        vid_to_nodes.setdefault(node[0], []).append(node)
+
+                    for vid_id, nodes in vid_to_nodes.items():
+                        if len(nodes) < 2:
+                            continue
+
+                        conflict_found = True
+                        conflict_nodes = set(nodes)
+                        worst_sim, worst_idx = float("inf"), -1
+                        for ei, (sim, na, nb) in enumerate(edges):
+                            if _find(na) == _find(nb):
+                                if na in conflict_nodes or nb in conflict_nodes:
+                                    if sim < worst_sim:
+                                        worst_sim, worst_idx = sim, ei
+
+                        if worst_idx >= 0:
+                            edges.pop(worst_idx)
+                            parent.clear()
+                            rank_uf.clear()
+                            for _vid in active_vids:
+                                for _pid in person_pids[_vid]:
+                                    _find((_vid, _pid))
+                            for _sim, _na, _nb in edges:
+                                _union(_na, _nb)
+                            logging.info(
+                                f"Scene {scene_id}: consolidation conflict "
+                                f"resolved — removed edge (sim={worst_sim:.3f})"
+                            )
+                        break
+
+                if not conflict_found:
+                    break
+
+        # ── 5. Assign global IDs ──────────────────────────────────────────
+        # Multi-view components (confirmed cross-camera persons) claim their
+        # preferred global ID (min local ID across the group) first.
+        # Single-video components (unmatched or new persons) get their
+        # preferred ID only if it doesn't collide; otherwise they receive a
+        # new ID beyond the current maximum.  This prevents a new person in
+        # a later video who happened to receive a low local SAM2 ID (e.g. 1)
+        # from silently overwriting an established cross-camera person with
+        # the same global ID during the file-rename step.
+        comps = _get_components()
+        used_global_ids: set[int] = set()
         global_remap: dict[str, dict[int, int]] = {v: {} for v in active_vids}
+
+        # First pass: multi-view components claim their global IDs.
+        pending_single: list[tuple[int, list[tuple]]] = []
         for members in comps.values():
-            global_id = min(pid for (_, pid) in members)
+            if len({v for v, _ in members}) >= 2:
+                global_id = min(pid for (_, pid) in members)
+                used_global_ids.add(global_id)
+                for vid_id, pid in members:
+                    if pid != global_id:
+                        global_remap[vid_id][pid] = global_id
+            else:
+                proposed_id = min(pid for (_, pid) in members)
+                pending_single.append((proposed_id, list(members)))
+
+        # Second pass: single-video components get their ID or a fresh one.
+        next_new_id = max(used_global_ids, default=0) + 1
+        for proposed_id, members in sorted(pending_single):
+            if proposed_id not in used_global_ids:
+                global_id = proposed_id
+            else:
+                while next_new_id in used_global_ids:
+                    next_new_id += 1
+                global_id = next_new_id
+                next_new_id += 1
+                logging.info(
+                    f"Scene {scene_id}: ID collision — single-video person "
+                    f"(proposed {proposed_id}) reassigned to {global_id}"
+                )
+            used_global_ids.add(global_id)
             for vid_id, pid in members:
                 if pid != global_id:
                     global_remap[vid_id][pid] = global_id
@@ -1196,8 +1482,14 @@ class BodyParameterEstimator:
         try:
             _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             mhr_model = MHR.from_files(folder=Path(mhr_model_path), lod=1, device=_device)
+            _sp = Path(smplx_model_path)
+            _smplx_kwargs = (
+                {"model_path": str(_sp), "ext": _sp.suffix.lstrip(".")}
+                if _sp.is_file() else
+                {"model_path": smplx_model_path, "ext": "pkl"}
+            )
             smplx_model = smplx.create(
-                model_path=smplx_model_path,
+                **_smplx_kwargs,
                 model_type='smplx',
                 gender='neutral',
                 use_pca=False,

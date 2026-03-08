@@ -74,6 +74,7 @@ class FusionDataset(Dataset, ABC):
         "smplx_left_hand_pose",
         "smplx_right_hand_pose",
         "smplx_expression",
+        "pred_joint_confidence",
         "bbox",
     )
 
@@ -371,8 +372,13 @@ class FusionDataset(Dataset, ABC):
                             sp[li, :n_betas] if sp.ndim > 1 else sp[:n_betas]
                         )
 
-                    # --- Joint mask ---
-                    joint_mask[t, k, p_slot, :] = 1.0
+                    # --- Joint mask (per-joint confidence from occlusion estimation) ---
+                    jc = pdata.get("pred_joint_confidence")
+                    if jc is not None:
+                        jc_frame = jc[li] if jc.ndim > 1 else jc
+                        joint_mask[t, k, p_slot, :min(J, len(jc_frame))] = jc_frame[:J]
+                    else:
+                        joint_mask[t, k, p_slot, :] = 1.0
 
                     # --- Camera ---
                     if not cam_camera_filled[t]:
