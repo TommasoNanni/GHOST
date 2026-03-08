@@ -346,6 +346,9 @@ class Video:
         max_s = self._max_side
         for name in tqdm.tqdm(src_frames, desc=f"  Resizing {self.video_id}", leave=False):
             img = cv2.imread(str(src_dir / name))
+            if img is None:
+                print(f"  WARNING: could not read {src_dir / name}, skipping.")
+                continue
             h, w = img.shape[:2]
             scale = max_s / max(h, w)
             img = cv2.resize(img, (round(w * scale), round(h * scale)))

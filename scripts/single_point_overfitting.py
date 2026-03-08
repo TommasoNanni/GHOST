@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 RICH_SCENE_DIR  = Path(
     "/cluster/project/cvg/students/tnanni/ghost/test_outputs"
-    "/rich1_sam3_segmentation_test/BBQ_001_guitar"
+    "/rich3_segmentation_test/BBQ_001_guitar"
 )
 WINDOW_SIZE     = 128
 TEMPORAL_WINDOW = 32   # each frame attends to 2*32+1 = 65 neighbours
@@ -134,11 +134,11 @@ def camera_mse_loss(preds, targets):
     """CameraMSELoss — geodesic + translation between predicted and target cameras."""
     _, _, camera_pred, _, _ = preds
     cam_gt = targets["camera"]
-    # camera: (B, T, K, 7) = [quat(4), trans(3)]
+    # camera: (B, T, K, 8) = [quat(4), trans(3), focal_raw(1)]
     R_pred = quaternion_to_matrix(camera_pred[..., :4])
-    t_pred = camera_pred[..., 4:]
+    t_pred = camera_pred[..., 4:7]
     R_gt   = quaternion_to_matrix(cam_gt[..., :4])
-    t_gt   = cam_gt[..., 4:]
+    t_gt   = cam_gt[..., 4:7]
     return _cam_mse(R_pred, t_pred, R_gt, t_gt)
 
 
@@ -193,7 +193,7 @@ def main():
         "camera":     (camera_loss,     1.0),
         "epipolar":   (epipolar_loss,   0.1),
         "temporal":   (temporal_loss,   0.1),
-        "bone":       (bone_loss,       0.1),
+        "bone":       (bone_loss,       0.0),
         "beta":       (beta_loss,       0.1),
         "camera_mse": (camera_mse_loss, 0.1),
         "vposer":     (vposer_loss,     0.01),
