@@ -1,7 +1,13 @@
+import logging
 import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent / 'MHR' / 'tools' / 'mhr_smpl_conversion'))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s  %(message)s",
+)
 
 import json
 import numpy as np
@@ -101,8 +107,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     try:
         fusion_ds = RICHFusionDataset(
             scene_dir=scene_output_dir,
-            window_size=32,
-            window_stride=16,
+            rich_data_root=CONFIG.data.rich_data_root,
         )
         print(f"  Dataset: {fusion_ds}")
         if len(fusion_ds) > 0:
@@ -200,6 +205,7 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
+    ds.scenes = [ds.scenes[1]]
 
     segmenter = PersonSegmenter(
         checkpoint_path=CONFIG.segmentation.checkpoint_path,

@@ -108,6 +108,15 @@ class BodyParameterEstimator:
         if self._estimator is not None:
             logging.warning("The estimator was already loaded, skipping the loading")
             return
+        # Safety: if a bf16 autocast context leaked from the SAM3 segmentation step
+        # (Sam3TrackerPredictor.__init__ enters one globally), operations in SAM3D Body
+        # will silently run in bfloat16 and fail with "Got unsupported ScalarType BFloat16".
+        if torch.is_autocast_enabled():
+            raise RuntimeError(
+                "bf16 autocast context is active before SAM3D loading — "
+                "this will cause 'Got unsupported ScalarType BFloat16' errors. "
+                "Check that _free_models() properly exited the SAM3 tracker's bf16_context."
+            )
         try:
             from notebook.utils import setup_sam_3d_body
         except ImportError as e:
@@ -591,6 +600,15 @@ class BodyParameterEstimator:
                                 f"in {video_id} frame {frame_idx}"
                             )
                         else:
+                            if best_id is not None and sims:
+                                covis_blocked = frozenset({person_id, best_id}) in covisible_ids
+                                logging.info(
+                                    f"[within-video reid] {gpu_label}{video_id} "
+                                    f"frame {frame_idx}  SAM3 id {person_id} → "
+                                    f"best match person {best_id}  "
+                                    f"sim={sims[best_id]:.3f}  "
+                                    f"({'covis-blocked' if covis_blocked else f'rejected (thr={reid_threshold:.2f})'})"
+                                )
                             # Decrement retry counter; finalise as new person
                             # when the window expires.
                             if person_id in pending_reid:
@@ -725,6 +743,12 @@ class BodyParameterEstimator:
                             _body_pose = torch.from_numpy(smplx_np["smplx_body_pose"]).float().to(_smplx_device)
                             _global_orient = torch.from_numpy(smplx_np["smplx_global_orient"]).float().to(_smplx_device)
                             _transl = torch.from_numpy(smplx_np["smplx_transl"]).float().to(_smplx_device)
+                            # betas may be (10,) or (1, 10) (one set per sequence)
+                            # while pose params are (N_frames, *) — expand to match.
+                            if _betas.dim() == 1:
+                                _betas = _betas.unsqueeze(0)
+                            if _betas.shape[0] == 1 and _body_pose.shape[0] > 1:
+                                _betas = _betas.expand(_body_pose.shape[0], -1)
                             _smplx_out = converter._smpl_model(
                                 betas=_betas,
                                 body_pose=_body_pose,
@@ -960,10 +984,14 @@ class BodyParameterEstimator:
             )
             return
 
-        # ── 1. Load per-person hybrid descriptors ─────────────────────────
-        # person_descs[video_id][person_id] = L2-normalised float32 vector
-        # person_pids[video_id]             = sorted list of person_ids
-        person_descs: dict[str, dict[int, np.ndarray]] = {}
+        # ── 1. Load per-person descriptors ────────────────────────────────
+        # person_descs[video_id][person_id] = (app_feat, shape_feat)
+        #   app_feat  : L2-normalised DINOv3 float32 vector, or None
+        #   shape_feat: L2-normalised median SMPL-X beta vector, or None
+        # Keeping modalities separate lets us compute cosine similarities
+        # independently and combine them with properly normalised weights,
+        # avoiding the dimension-imbalance distortion of concatenation.
+        person_descs: dict[str, dict[int, tuple[np.ndarray | None, np.ndarray | None]]] = {}
         person_pids: dict[str, list[int]] = {}
 
         for vid_id, vid_dir in video_dirs.items():
@@ -991,7 +1019,7 @@ class BodyParameterEstimator:
                 for k in gdata.files:
                     app_gallery[int(k)] = gdata[k]
 
-            descs: dict[int, np.ndarray] = {}
+            descs: dict[int, tuple[np.ndarray | None, np.ndarray | None]] = {}
             for pid in pids:
                 npz_path = body_dir / f"person_{pid}.npz"
                 if not npz_path.exists():
@@ -1013,18 +1041,10 @@ class BodyParameterEstimator:
 
                 app_feat: np.ndarray | None = app_gallery.get(pid)
 
-                # Build hybrid descriptor by concatenating weighted parts
-                parts: list[np.ndarray] = []
-                if app_feat is not None:
-                    parts.append(appearance_weight * app_feat)
-                if shape_feat is not None:
-                    parts.append(shape_weight * shape_feat)
-                if not parts:
+                if app_feat is None and shape_feat is None:
                     continue
 
-                hybrid = np.concatenate(parts)
-                norm = np.linalg.norm(hybrid)
-                descs[pid] = hybrid / norm if norm > 0 else hybrid
+                descs[pid] = (app_feat, shape_feat)
 
             if descs:
                 person_descs[vid_id] = descs
@@ -1067,26 +1087,81 @@ class BodyParameterEstimator:
                 _find((_vid, _pid))
 
         # ── 3. All-pairs Hungarian matching ───────────────────────────────
+        def _weighted_sim_mat(
+            pids_a: list[int],
+            pids_b: list[int],
+            descs_a: dict[int, tuple],
+            descs_b: dict[int, tuple],
+            w_app: float,
+            w_shape: float,
+        ) -> np.ndarray:
+            """Compute (Na, Nb) similarity matrix as a weighted sum of per-modality
+            cosine similarities.  Weights are re-normalised per cell so that a
+            missing modality on either side just falls back to the other one
+            (no information is silently discarded and no artificial inflation
+            occurs from the dimension-imbalance of concatenation)."""
+            Na, Nb = len(pids_a), len(pids_b)
+            sim_mat = np.zeros((Na, Nb), dtype=np.float32)
+            weight_mat = np.zeros((Na, Nb), dtype=np.float32)
+
+            # --- appearance ---
+            app_a = [descs_a[p][0] for p in pids_a]
+            app_b = [descs_b[p][0] for p in pids_b]
+            mask_a = np.array([f is not None for f in app_a], dtype=np.float32)
+            mask_b = np.array([f is not None for f in app_b], dtype=np.float32)
+            if mask_a.any() and mask_b.any():
+                dim = next(f for f in app_a if f is not None).shape[0]
+                zero = np.zeros(dim, dtype=np.float32)
+                mat_a = np.stack([f if f is not None else zero for f in app_a])
+                mat_b = np.stack([f if f is not None else zero for f in app_b])
+                app_sim = mat_a @ mat_b.T  # (Na, Nb)
+                app_w = np.outer(mask_a, mask_b) * w_app
+                sim_mat += app_w * app_sim
+                weight_mat += app_w
+
+            # --- shape ---
+            shape_a = [descs_a[p][1] for p in pids_a]
+            shape_b = [descs_b[p][1] for p in pids_b]
+            mask_a = np.array([f is not None for f in shape_a], dtype=np.float32)
+            mask_b = np.array([f is not None for f in shape_b], dtype=np.float32)
+            if mask_a.any() and mask_b.any():
+                dim = next(f for f in shape_a if f is not None).shape[0]
+                zero = np.zeros(dim, dtype=np.float32)
+                mat_a = np.stack([f if f is not None else zero for f in shape_a])
+                mat_b = np.stack([f if f is not None else zero for f in shape_b])
+                shape_sim = mat_a @ mat_b.T  # (Na, Nb)
+                shape_w = np.outer(mask_a, mask_b) * w_shape
+                sim_mat += shape_w * shape_sim
+                weight_mat += shape_w
+
+            # Normalise by the actual weight used per cell
+            sim_mat = np.where(weight_mat > 0, sim_mat / weight_mat, 0.0)
+            return sim_mat
+
         for ii, vid_a in enumerate(active_vids):
             for vid_b in active_vids[ii + 1:]:
                 pids_a = person_pids[vid_a]
                 pids_b = person_pids[vid_b]
 
-                mat_a = np.stack(
-                    [person_descs[vid_a][p] for p in pids_a]
-                )  # (Na, D)
-                mat_b = np.stack(
-                    [person_descs[vid_b][p] for p in pids_b]
-                )  # (Nb, D)
-
-                # Cosine similarity: dot product (vectors are L2-normalised)
-                sim_mat = mat_a @ mat_b.T  # (Na, Nb)
+                # Weighted sum of per-modality cosine similarities
+                sim_mat = _weighted_sim_mat(
+                    pids_a, pids_b,
+                    person_descs[vid_a], person_descs[vid_b],
+                    appearance_weight, shape_weight,
+                )
                 cost_mat = 1.0 - sim_mat
 
                 row_ind, col_ind = linear_sum_assignment(cost_mat)
                 for r, c in zip(row_ind, col_ind):
                     sim = float(sim_mat[r, c])
-                    if sim >= cross_view_reid_threshold:
+                    accepted = sim >= cross_view_reid_threshold
+                    logging.info(
+                        f"[cross-view reid] {scene_id}  "
+                        f"{vid_a}/P{pids_a[r]} ↔ {vid_b}/P{pids_b[c]}  "
+                        f"sim={sim:.3f}  "
+                        f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'})"
+                    )
+                    if accepted:
                         node_a = (vid_a, pids_a[r])
                         node_b = (vid_b, pids_b[c])
                         edges.append((sim, node_a, node_b))
@@ -1177,18 +1252,50 @@ class BodyParameterEstimator:
             for vid, pid in members
         ]
 
-        # Compute L2-normalised centroid for each multi-view component.
-        comp_centroids: dict[tuple, np.ndarray] = {}
+        # Compute per-modality L2-normalised centroids for each multi-view component.
+        # Storing (app_centroid, shape_centroid) mirrors the per-person descriptor
+        # structure so we can reuse the same weighted-similarity logic.
+        comp_centroids: dict[tuple, tuple[np.ndarray | None, np.ndarray | None]] = {}
         for root, members in multi_view_comps.items():
-            vecs = [
-                person_descs[vid][pid]
+            app_vecs = [
+                person_descs[vid][pid][0]
                 for vid, pid in members
                 if vid in person_descs and pid in person_descs.get(vid, {})
+                and person_descs[vid][pid][0] is not None
             ]
-            if vecs:
-                mean_vec = np.mean(np.stack(vecs), axis=0).astype(np.float32)
-                norm = np.linalg.norm(mean_vec)
-                comp_centroids[root] = mean_vec / norm if norm > 0 else mean_vec
+            shape_vecs = [
+                person_descs[vid][pid][1]
+                for vid, pid in members
+                if vid in person_descs and pid in person_descs.get(vid, {})
+                and person_descs[vid][pid][1] is not None
+            ]
+            app_c: np.ndarray | None = None
+            shape_c: np.ndarray | None = None
+            if app_vecs:
+                m = np.mean(np.stack(app_vecs), axis=0).astype(np.float32)
+                n = np.linalg.norm(m)
+                app_c = m / n if n > 0 else m
+            if shape_vecs:
+                m = np.mean(np.stack(shape_vecs), axis=0).astype(np.float32)
+                n = np.linalg.norm(m)
+                shape_c = m / n if n > 0 else m
+            if app_c is not None or shape_c is not None:
+                comp_centroids[root] = (app_c, shape_c)
+
+        def _weighted_sim_scalar(
+            feat: tuple[np.ndarray | None, np.ndarray | None],
+            centroid: tuple[np.ndarray | None, np.ndarray | None],
+            w_app: float,
+            w_shape: float,
+        ) -> float:
+            sim, weight = 0.0, 0.0
+            if feat[0] is not None and centroid[0] is not None:
+                sim += w_app * float(np.dot(feat[0], centroid[0]))
+                weight += w_app
+            if feat[1] is not None and centroid[1] is not None:
+                sim += w_shape * float(np.dot(feat[1], centroid[1]))
+                weight += w_shape
+            return sim / weight if weight > 0 else 0.0
 
         # Try to link each isolated person to its best-matching multi-view
         # component, skipping components that already contain a member from
@@ -1203,7 +1310,7 @@ class BodyParameterEstimator:
             for root, centroid in comp_centroids.items():
                 if any(v == vid for v, _ in multi_view_comps[root]):
                     continue
-                sim = float(np.dot(feat, centroid))
+                sim = _weighted_sim_scalar(feat, centroid, appearance_weight, shape_weight)
                 if sim > best_sim:
                     best_sim, best_root = sim, root
 
@@ -1335,7 +1442,18 @@ class BodyParameterEstimator:
                     src.rename(tmp)
                     tmp_renames.append((tmp, body_dir / f"person_{new_id}.npz"))
             for tmp, dst in tmp_renames:
-                tmp.rename(dst)
+                if dst.exists():
+                    # Another source file already claimed this global ID
+                    # (same-camera tracks merged via cross-view transitivity).
+                    # Keep the existing file (the original tracked person) and
+                    # discard the duplicate rather than overwriting good data.
+                    logging.warning(
+                        f"{vid_id}: cross-view remap — {dst.name} already exists, "
+                        f"discarding duplicate track from {tmp.name}"
+                    )
+                    tmp.unlink()
+                else:
+                    tmp.rename(dst)
 
             # Update body_params_summary.json with new IDs.
             summary_path = body_dir / "body_params_summary.json"

@@ -122,6 +122,26 @@ class PersonSegmenter:
     def _free_models(self) -> None:
         """Release GPU models so child processes can use the VRAM."""
         if self._predictor is not None:
+            # Exit the BFloat16 autocast context that Sam3TrackerPredictor.__init__
+            # enters globally (bf16_context.__enter__() is called in __init__ and never
+            # exited by shutdown).  In single-GPU mode the segmenter and body estimator
+            # share the same process, so leaving the context active causes SAM3D to
+            # receive BFloat16 tensors and fail with "Got unsupported ScalarType BFloat16".
+            #
+            # The context is NOT on self._predictor directly — it is nested at:
+            #   Sam3VideoPredictor.model  (Sam3VideoInferenceWithInstanceInteractivity)
+            #     .tracker               (Sam3TrackerPredictor)
+            #       .bf16_context        (torch.autocast handle)
+            bf16_ctx = getattr(self._predictor, "bf16_context", None)
+            if bf16_ctx is None:
+                model = getattr(self._predictor, "model", None)
+                tracker = getattr(model, "tracker", None) if model is not None else None
+                bf16_ctx = getattr(tracker, "bf16_context", None) if tracker is not None else None
+            if bf16_ctx is not None:
+                try:
+                    bf16_ctx.__exit__(None, None, None)
+                except Exception:
+                    pass
             self._predictor.shutdown()
         self._predictor = None
         self._models_ready = False
@@ -285,6 +305,10 @@ class PersonSegmenter:
             # --- compact per-frame .npy files into a single compressed .npz to save space---
             for video in scene.videos:
                 PersonSegmenter._compact_mask_data(scene_dir / video.video_id)
+
+            # Exit the BFloat16 autocast context before body estimation runs in
+            # the same process (single-GPU mode shares the main process).
+            self._free_models()
 
         if vis:
             # optionally save the segmented video as a .mp4 file

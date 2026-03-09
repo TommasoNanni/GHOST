@@ -175,7 +175,7 @@ class WindowedTemporalAttention(nn.Module):
         if confidence is not None:
             conf = confidence  # captured by closure; shape (N, T)
             def _score_mod(score, b, h, q_idx, kv_idx):  # noqa: E306
-                return score + torch.log(conf[b, q_idx] * conf[b, kv_idx] + 1e-6)
+                return score + torch.log(conf[b, q_idx] * conf[b, kv_idx])
             score_mod = _score_mod
 
         # flex_attention runs FlashAttention with the sparse block_mask.
@@ -396,15 +396,20 @@ class ShapeStreamLayer(nn.Module):
         B: int, T: int, K: int, P: int, D: int,
         pe: PositionalEncoding | None,
         dropout: nn.Dropout,
+        view_mask: torch.Tensor | None = None,
+        temporal_conf: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Parameters
         ----------
-        x : (B, T, K, P, D)
+        x            : (B, T, K, P, D)
+        view_mask    : (B*T*P*H, K, K) additive mask from person_cross_view_mask, or None.
+        temporal_conf: (B*K*P, T) binary presence scores, or None.
         """
         # Cross-view  (B*T*P, K, D)
         h = self.view_attn(
             x.permute(0, 1, 3, 2, 4).contiguous().reshape(B * T * P, K, D),
+            attn_mask=view_mask,
         )
         x = h.reshape(B, T, P, K, D).permute(0, 1, 3, 2, 4).contiguous()
 
@@ -413,7 +418,7 @@ class ShapeStreamLayer(nn.Module):
         h = h.permute(0, 2, 3, 1, 4).contiguous().reshape(B * K * P, T, D)
         if pe is not None:
             h = pe(h)
-        h = self.temporal_attn(h)
+        h = self.temporal_attn(h, confidence=temporal_conf)
         h = h.reshape(B, K, P, T, D).permute(0, 3, 1, 2, 4).contiguous()
         x = x + dropout(h)
 
@@ -437,17 +442,19 @@ class CameraStreamLayer(nn.Module):
         B: int, T: int, K: int, D: int,
         pe: PositionalEncoding | None,
         dropout: nn.Dropout,
+        temporal_conf: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Parameters
         ----------
-        x : (B, T, K, D)
+        x            : (B, T, K, D)
+        temporal_conf: (B*K, T) binary presence scores, or None.
         """
         h = self.temporal_norm(x)
         h = h.permute(0, 2, 1, 3).contiguous().reshape(B * K, T, D)
         if pe is not None:
             h = pe(h)
-        h = self.temporal_attn(h)
+        h = self.temporal_attn(h, confidence=temporal_conf)
         h = h.reshape(B, K, T, D).permute(0, 2, 1, 3).contiguous()
         x = x + dropout(h)
 
@@ -582,9 +589,13 @@ class SSTNetwork(nn.Module):
     def _build_confidence_mask(
         flat: torch.Tensor, num_heads: int,
     ) -> torch.Tensor:
-        """Build (N*H, S, S) additive soft mask from (N, S) confidence values."""
+        """Build (N*H, S, S) additive soft mask from (N, S) confidence values.
+
+        Entries where either token has zero confidence (absent) become -inf,
+        which hard-excludes them from softmax.
+        """
         outer = torch.einsum("bi, bj -> bij", flat, flat)
-        mask = torch.log(outer + 1e-6)
+        mask = torch.log(outer)
         return mask.unsqueeze(1).expand(-1, num_heads, -1, -1).reshape(
             flat.shape[0] * num_heads, flat.shape[1], flat.shape[1]
         )
@@ -595,14 +606,18 @@ class SSTNetwork(nn.Module):
         shape: torch.Tensor,
         camera: torch.Tensor,
         joint_mask: torch.Tensor,
+        person_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters
         ----------
-        pose       : [B, T, K, P, J, 6] or [T, K, P, J, 6]
-        shape      : [B, T, K, P, betas] or [T, K, P, betas]
-        camera     : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
-        joint_mask : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
+        pose        : [B, T, K, P, J, 6] or [T, K, P, J, 6]
+        shape       : [B, T, K, P, betas] or [T, K, P, betas]
+        camera      : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
+        joint_mask  : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
+        person_mask : [B, T, K, P] or [T, K, P]  bool — True when person p is
+                      detected in camera k at frame t.  Used to mask the shape
+                      and camera streams where no observation exists.
 
         Returns
         -------
@@ -610,7 +625,7 @@ class SSTNetwork(nn.Module):
         shape  : [B, T, P, 10]
         camera : [B, T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
         """
-        # ensure batch dim 
+        # ensure batch dim
         if pose.dim() == 5:
             pose = pose.unsqueeze(0)
         if shape.dim() == 4:
@@ -619,27 +634,54 @@ class SSTNetwork(nn.Module):
             camera = camera.unsqueeze(0)
         if joint_mask.dim() == 4:
             joint_mask = joint_mask.unsqueeze(0)
+        if person_mask.dim() == 3:
+            person_mask = person_mask.unsqueeze(0)
 
         assert pose.shape[:4] == shape.shape[:4]
         assert pose.shape[:3] == camera.shape[:3]
         assert pose.shape[:5] == joint_mask.shape
+        assert pose.shape[:4] == person_mask.shape
 
         # encode
         pose_emb, shape_emb, camera_emb = self.encoder(pose, shape, camera)
         B, T, K, P, J, D = pose_emb.shape
         H = self.num_heads
 
-        # build soft confidence masks
-        joint_mask_flat = joint_mask.reshape(B * T * K * P, J)
+        # person_visible: (B, T, K, P) float — 1 present, 0 absent.
+        person_visible = person_mask.float()
+
+        # --- Pose-stream masks ---
+        # Multiply joint confidence by binary presence so that absent slots are
+        # guaranteed zero even if joint_mask was somehow non-zero there.
+        joint_mask_masked = joint_mask * person_visible.unsqueeze(-1)  # (B, T, K, P, J)
+
+        joint_mask_flat = joint_mask_masked.reshape(B * T * K * P, J)
         pose_joint_mask = self._build_confidence_mask(joint_mask_flat, H)
 
-        view_mask_flat = joint_mask.permute(0, 1, 3, 4, 2).reshape(B * T * P * J, K)
+        view_mask_flat = joint_mask_masked.permute(0, 1, 3, 4, 2).reshape(B * T * P * J, K)
         pose_view_mask = self._build_confidence_mask(view_mask_flat, H)
 
         # For pose temporal attention: pass raw (B*K*P*J, T) confidence scores.
         # WindowedTemporalAttention converts these to a per-logit score_mod
         # inside the FlashAttention kernel — no T×T tensor is ever allocated.
-        pose_temporal_conf = joint_mask.permute(0, 2, 3, 4, 1).reshape(B * K * P * J, T)
+        pose_temporal_conf = joint_mask_masked.permute(0, 2, 3, 4, 1).reshape(B * K * P * J, T)
+
+        # Cross-view mask for the shape stream: for each (batch, time, person),
+        # which cameras can attend to each other.
+        # Flat shape (B*T*P, K) → additive (B*T*P*H, K, K) via log outer-product;
+        # pairs where either camera is missing the person get -inf.
+        person_cross_view_mask_flat = person_visible.permute(0, 1, 3, 2).reshape(B * T * P, K)
+        person_cross_view_mask = self._build_confidence_mask(person_cross_view_mask_flat, H)
+
+        # Temporal conf for the shape stream: for each (batch, camera, person),
+        # which frames are present.  Passed as (B*K*P, T) to WindowedTemporalAttention,
+        # which lazily computes log(conf_q * conf_k + eps) per logit inside FA.
+        person_temporal_conf = person_visible.permute(0, 2, 3, 1).reshape(B * K * P, T)
+
+        # Camera-level presence: camera k is "active" at frame t iff at least one
+        # person was detected in it.  Drives temporal masking in the camera stream.
+        camera_visible = person_visible.any(dim=-1).float()   # (B, T, K)
+        camera_temporal_conf = camera_visible.permute(0, 2, 1).reshape(B * K, T)
 
         # layer loop
         pose_stream = pose_emb
@@ -662,12 +704,15 @@ class SSTNetwork(nn.Module):
                 shape_stream, B, T, K, P, D,
                 pe=pe,
                 dropout=self.dropout,
+                view_mask=person_cross_view_mask,
+                temporal_conf=person_temporal_conf,
             )
 
             camera_stream = self.camera_layers[layer_idx](
                 camera_stream, B, T, K, D,
                 pe=pe,
                 dropout=self.dropout,
+                temporal_conf=camera_temporal_conf,
             )
 
             # Pose - Camera cross-attention every 2 layers

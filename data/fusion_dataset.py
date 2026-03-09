@@ -36,6 +36,7 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+import os
 
 import numpy as np
 import torch
@@ -81,34 +82,27 @@ class FusionDataset(Dataset, ABC):
     def __init__(
         self,
         scene_dir: str | Path,
-        window_size: int = 128,
-        window_stride: int = 64,
         num_joints: int = 55,
         **kwargs: Any,
     ) -> None:
         super().__init__()
         self.scene_dir = Path(scene_dir)
-        self.window_size = window_size
-        self.window_stride = window_stride
         self.num_joints = num_joints
 
-        # ---- Populated by subclass hooks --------------------------------
         # _cam_dirs[cam_idx] = Path to each camera directory
         self._cam_dirs: list[Path] = []
-        # _raw[cam_idx][person_id] = {field_name: np.ndarray, ...}
+        # _raw[cam_idx][person_id] = {field_name: np.ndarray, ...}, parameters per person per camera (in camera frame as of now)
         self._raw: list[dict[int, dict[str, np.ndarray]]] = []
         # _cameras[cam_idx] = {arbitrary calibration data}
         self._cameras: list[dict[str, Any]] = []
         # _gt[cam_idx][person_id] = {arbitrary GT data}
         self._gt: list[dict[int, dict[str, np.ndarray]]] = []
 
-        # ---- Call subclass hooks ----------------------------------------
-        self.load_body_data(**kwargs)
-        self.load_cameras(**kwargs)
-        self.load_ground_truth(**kwargs)
-        self._transform_to_world_frame()
+        self.load_body_data(**kwargs)       # fills the _raw and the _cam_dirs fields
+        self.load_cameras(**kwargs)         # fills the _cameras with predicted cameras
+        self.load_ground_truth(**kwargs)    # fills the _gt with GT data
+        self._transform_to_world_frame()    # Projects the 3D quantities in the "world" (=cam0) system
 
-        # ---- Derived book-keeping (dataset-agnostic) --------------------
         self.num_cameras: int = len(self._cam_dirs)
         if self.num_cameras == 0:
             raise FileNotFoundError(
@@ -127,20 +121,12 @@ class FusionDataset(Dataset, ABC):
         self._pid_order: list[list[int]] = []
         self._build_lookup()
 
-        self._windows: list[int] = []
-        self._build_windows()
-
         logger.info(
             f"{type(self).__name__}: {self.num_cameras} cameras, "
             f"{self.max_persons} max persons, "
             f"frames [{self._frame_start}, {self._frame_end}), "
-            f"{len(self._windows)} windows "
-            f"(T={window_size}, stride={window_stride})"
+            f"T={self._frame_end - self._frame_start}"
         )
-
-    # ------------------------------------------------------------------
-    # Abstract hooks -- every subclass must implement these
-    # ------------------------------------------------------------------
 
     @abstractmethod
     def load_body_data(self, **kwargs: Any) -> None:
@@ -188,9 +174,7 @@ class FusionDataset(Dataset, ABC):
         hooks complete.
         """
 
-    # ------------------------------------------------------------------
-    # Conversion hooks (override per-dataset if needed)
-    # ------------------------------------------------------------------
+    # Hooks to be overridden
 
     def convert_pose(
         self,
@@ -250,7 +234,6 @@ class FusionDataset(Dataset, ABC):
         camera_out : writable view into targets["camera"][t, cam_idx]
         kp3d_out   : writable view into targets["keypoints_3d"][t, cam_idx, person_slot]
         """
-        # Default: no-op -- targets will be set equal to inputs in __getitem__
 
     # ------------------------------------------------------------------
     # Internal book-keeping (not overridden)
@@ -281,41 +264,25 @@ class FusionDataset(Dataset, ABC):
                 cam_lookups.append({})
             self._lookup.append(cam_lookups)
 
-    def _build_windows(self) -> None:
-        """Create list of start-frame indices for overlapping windows."""
-        total = self._frame_end - self._frame_start
-        if total <= 0:
-            return
-        if total <= self.window_size:
-            self._windows.append(self._frame_start)
-            return
-        start = self._frame_start
-        while start + self.window_size <= self._frame_end:
-            self._windows.append(start)
-            start += self.window_stride
-        if (
-            not self._windows
-            or self._windows[-1] + self.window_size < self._frame_end
-        ):
-            self._windows.append(self._frame_end - self.window_size)
-
     def __len__(self) -> int:
-        return len(self._windows)
+        return self._frame_end - self._frame_start
 
     def __getitem__(
-        self, idx: int
+        self, idx: int = 0
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        start = self._windows[idx]
-        T = self.window_size
+        T = self._frame_end - self._frame_start
         K = self.num_cameras
         P = self.max_persons
         J = self.num_joints
-        frames = np.arange(start, start + T)
+        frames = np.arange(self._frame_start, self._frame_end)
 
         pose = np.zeros((T, K, P, J, 6), dtype=np.float32)
         shape = np.zeros((T, K, P, 10), dtype=np.float32)
         camera = np.zeros((T, K, 8), dtype=np.float32)
         joint_mask = np.zeros((T, K, P, J), dtype=np.float32)
+        # Binary presence mask: 1 when person p was detected in camera k at frame t.
+        # Stored as bool to save memory; shape (T, K, P).
+        person_mask = np.zeros((T, K, P), dtype=bool)
         kp3d = np.zeros((T, K, P, 70, 3), dtype=np.float32)
 
         # Target arrays (may be overwritten by build_gt_targets).
@@ -341,6 +308,7 @@ class FusionDataset(Dataset, ABC):
                     if gf_int not in lut:
                         continue
                     li = lut[gf_int]
+                    person_mask[t, k, p_slot] = True
 
                     # --- Pose ---
                     bpp = pdata.get("smplx_body_pose")
@@ -424,6 +392,7 @@ class FusionDataset(Dataset, ABC):
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),
+            "person_mask": torch.from_numpy(person_mask),  # (T, K, P) bool
         }
         targets = {
             "pose": torch.from_numpy(gt_pose),
@@ -438,7 +407,7 @@ class FusionDataset(Dataset, ABC):
             f"{type(self).__name__}(cameras={self.num_cameras}, "
             f"max_persons={self.max_persons}, "
             f"frames=[{self._frame_start}, {self._frame_end}), "
-            f"windows={len(self._windows)}, T={self.window_size})"
+            f"T={self._frame_end - self._frame_start})"
         )
 
 
@@ -676,12 +645,66 @@ class RICHFusionDataset(FusionDataset):
             else:
                 logger.warning(
                     f"No calibration found for {cam_dir.name} "
-                    f"(expected {xml_path})"
+                    f"(expected {os.path.abspath(xml_path)})"
                 )
                 self._cameras.append({})
                 self._gt_camera_vecs.append(
                     np.array([0., 0., 0., 1., 0., 0., 0., 1000.], dtype=np.float32)
                 )
+
+        # Re-express GT camera vectors relative to cam-0 so that they are in
+        # the same frame as the body predictions (which are mapped to cam-0 in
+        # _transform_to_world_frame).  The cam-0→cam-i relative transform is:
+        #   R_rel = R_i @ R_0^T
+        #   t_rel = t_i - R_rel @ t_0
+        # For i=0 this reduces to identity, as expected.
+        ext0 = self._cameras[0].get("extrinsics") if self._cameras else None
+        if ext0 is not None:
+            from scipy.spatial.transform import Rotation as SciR
+            R0 = ext0[:3, :3].astype(np.float64)
+            t0 = ext0[:3, 3].astype(np.float64)
+            for i, calib in enumerate(self._cameras):
+                ext_i = calib.get("extrinsics")
+                if ext_i is None:
+                    continue
+                R_i = ext_i[:3, :3].astype(np.float64)
+                t_i = ext_i[:3, 3].astype(np.float64)
+                R_rel = R_i @ R0.T
+                t_rel = t_i - R_rel @ t0
+                q_rel = SciR.from_matrix(R_rel).as_quat()  # [qx, qy, qz, qw]
+                self._gt_camera_vecs[i][:4] = q_rel.astype(np.float32)
+                self._gt_camera_vecs[i][4:7] = t_rel.astype(np.float32)
+
+        # Load estimated camera poses from camera_alignment.npz (produced by
+        # CameraAlignment.estimate in the preprocessing pipeline).
+        # These are pairwise Kabsch-estimated transforms x_b = R @ x_a + t,
+        # mapping joints in cam-a frame to joints in cam-b frame.
+        # We chain each pair to cam-0 to get one cam-0→cam-i transform per camera,
+        # stored in self._cameras[i]["estimated_extrinsics"] as a (3, 4) matrix.
+        align_path = self.scene_dir / "camera_alignment.npz"
+        if align_path.exists():
+            from preprocessing.camera_alignment import CameraAlignment
+            alignment = CameraAlignment.load(align_path)
+            cam0_name = self._cam_dirs[0].name if self._cam_dirs else None
+            for i, cam_dir in enumerate(self._cam_dirs):
+                cam_i_name = cam_dir.name
+                if i == 0:
+                    R_est, t_est = np.eye(3, dtype=np.float64), np.zeros(3, dtype=np.float64)
+                elif (cam0_name, cam_i_name) in alignment:
+                    R_est, t_est = alignment[(cam0_name, cam_i_name)]
+                elif (cam_i_name, cam0_name) in alignment:
+                    # Invert: x_0 = R @ x_i + t  →  x_i = R^T @ x_0 - R^T @ t
+                    R, t = alignment[(cam_i_name, cam0_name)]
+                    R_est, t_est = R.T, -R.T @ t
+                else:
+                    logger.warning(f"No alignment found for {cam_i_name} relative to {cam0_name}")
+                    continue
+                ext_est = np.zeros((3, 4), dtype=np.float32)
+                ext_est[:3, :3] = R_est
+                ext_est[:3, 3] = t_est
+                self._cameras[i]["estimated_extrinsics"] = ext_est
+        else:
+            logger.warning(f"camera_alignment.npz not found in {self.scene_dir} — input camera tokens will fall back to pred_cam_t")
 
     def load_ground_truth(self, **kwargs: Any) -> None:
         """Load per-frame SMPL-X GT params from train_body/.
@@ -855,10 +878,28 @@ class RICHFusionDataset(FusionDataset):
     # ------------------------------------------------------------------
     # Conversion overrides
     # ------------------------------------------------------------------
-    # NOTE: convert_camera is NOT overridden here.
-    # inputs["camera"] is always the *predicted* camera from SAM3D
-    # (pred_cam_t + global_rot from the ghost pipeline npz).  The GT
-    # calibrated camera goes into targets["camera"] via build_gt_targets.
+    def convert_camera(
+        self,
+        pred_cam_t: np.ndarray,
+        focal_length: float,
+        global_rot: np.ndarray,
+        cam_calib: dict | None = None,
+    ) -> np.ndarray:
+        """Use the Kabsch-estimated cam-0→cam-i extrinsic for inputs["camera"].
+
+        Falls back to the base implementation (identity rotation + pred_cam_t)
+        if no estimated extrinsics are available for this camera.
+        """
+        est = cam_calib.get("estimated_extrinsics") if cam_calib else None
+        if est is not None:
+            from scipy.spatial.transform import Rotation as SciR
+            q = SciR.from_matrix(est[:3, :3].astype(np.float64)).as_quat()  # [qx,qy,qz,qw]
+            cam = np.zeros(8, dtype=np.float32)
+            cam[:4] = q.astype(np.float32)
+            cam[4:7] = est[:3, 3]
+            cam[7] = float(np.log(np.exp(float(focal_length)) - 1.0 + 1e-6))
+            return cam
+        return super().convert_camera(pred_cam_t, focal_length, global_rot, cam_calib)
 
     def build_gt_targets(
         self,
@@ -942,11 +983,8 @@ class RICHFusionDataset(FusionDataset):
 def build_fusion_dataloader(
     dataset_type: str,
     scene_dir: str | Path,
-    window_size: int = 128,
-    window_stride: int = 64,
     num_joints: int = 55,
     batch_size: int = 1,
-    shuffle: bool = True,
     num_workers: int = 0,
     pin_memory: bool = True,
     **dataset_kwargs: Any,
@@ -973,15 +1011,12 @@ def build_fusion_dataloader(
         )
     ds = cls(
         scene_dir=scene_dir,
-        window_size=window_size,
-        window_stride=window_stride,
         num_joints=num_joints,
         **dataset_kwargs,
     )
     return DataLoader(
         ds,
         batch_size=batch_size,
-        shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
