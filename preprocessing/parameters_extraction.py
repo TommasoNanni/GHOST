@@ -1380,11 +1380,15 @@ class BodyParameterEstimator:
         used_global_ids: set[int] = set()
         global_remap: dict[str, dict[int, int]] = {v: {} for v in active_vids}
 
-        # First pass: multi-view components claim their global IDs.
+        # First pass: multi-view components get strictly sequential global IDs.
+        # Using min(local_pid) was buggy: multiple distinct components can all
+        # have min=1 (local IDs restart at 1 in every camera), causing collisions.
         pending_single: list[tuple[int, list[tuple]]] = []
+        global_counter = 1
         for members in comps.values():
             if len({v for v, _ in members}) >= 2:
-                global_id = min(pid for (_, pid) in members)
+                global_id = global_counter
+                global_counter += 1
                 used_global_ids.add(global_id)
                 for vid_id, pid in members:
                     if pid != global_id:
@@ -1393,20 +1397,11 @@ class BodyParameterEstimator:
                 proposed_id = min(pid for (_, pid) in members)
                 pending_single.append((proposed_id, list(members)))
 
-        # Second pass: single-video components get their ID or a fresh one.
-        next_new_id = max(used_global_ids, default=0) + 1
+        # Second pass: single-video components also get sequential IDs.
+        next_new_id = global_counter
         for proposed_id, members in sorted(pending_single):
-            if proposed_id not in used_global_ids:
-                global_id = proposed_id
-            else:
-                while next_new_id in used_global_ids:
-                    next_new_id += 1
-                global_id = next_new_id
-                next_new_id += 1
-                logging.info(
-                    f"Scene {scene_id}: ID collision — single-video person "
-                    f"(proposed {proposed_id}) reassigned to {global_id}"
-                )
+            global_id = next_new_id
+            next_new_id += 1
             used_global_ids.add(global_id)
             for vid_id, pid in members:
                 if pid != global_id:
