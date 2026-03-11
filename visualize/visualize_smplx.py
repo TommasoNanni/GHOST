@@ -280,7 +280,7 @@ def visualize_smplx(
     persons = _load_persons(body_dir, smplx_model_path)
     if not persons:
         print(f"  No person_*.npz files found in {body_dir}, skipping")
-        return video_dir / "smplx_video.mp4"
+        return video_dir / f"{video_dir.name}_smplx_video.mp4"
 
     has_mesh = any("_vertices" in d for d in persons.values())
     if not has_mesh:
@@ -314,7 +314,7 @@ def visualize_smplx(
     if H == 0:
         raise FileNotFoundError(f"No readable frames found in {frame_dir}")
 
-    out_path = video_dir / "smplx_video.mp4"
+    out_path = video_dir / f"{video_dir.name}_smplx_video.mp4"
     writer = cv2.VideoWriter(
         str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), float(fps), (W, H),
     )

@@ -120,7 +120,7 @@ def visualize_reid(
     if H == 0:
         raise FileNotFoundError(f"No readable frames found in {frame_dir}")
 
-    out_path = video_dir / "segmentation_reid.mp4"
+    out_path = video_dir / f"{video_dir.name}_segmentation_reid.mp4"
     writer = cv2.VideoWriter(
         str(out_path),
         cv2.VideoWriter_fourcc(*"mp4v"),

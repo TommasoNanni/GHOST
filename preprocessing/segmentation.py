@@ -970,7 +970,7 @@ class PersonSegmenter:
         height, width = first_frame.shape[:2]
 
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out_video = video_dir / "segmentation.mp4"
+        out_video = video_dir / f"{video_dir.name}_segmentation.mp4"
         writer = cv2.VideoWriter(
             str(out_video), fourcc, int(video.fps), (width, height)
         )
