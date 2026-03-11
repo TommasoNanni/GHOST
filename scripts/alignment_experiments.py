@@ -41,9 +41,8 @@ logger = logging.getLogger(__name__)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SCENE_DIR = Path("test_outputs/reid_logging_segmentation_test/BBQ_001_juggle")
 N_TRIALS  = 10     # number of random-shift trials
-MAX_SHIFT = 120     # maximum absolute shift (frames)
+MAX_SHIFT = 148     # maximum absolute shift (frames)
 SEED      = 42
-
 
 
 def load_scene(scene_dir: Path) -> dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]]:
@@ -107,48 +106,36 @@ def common_persons(cam_data: dict[str, dict[int, tuple]]) -> list[int]:
     return sorted(set.intersection(*sets))
 
 
-def embed_sequence(seq: torch.Tensor, shift: int, total_len: int) -> torch.Tensor:
-    """Place *seq* (T × ...) into a timeline of length *total_len* starting at *shift*.
-
-    Positions before/after the sequence are edge-replicated.
-    """
-    T = seq.shape[0]
-    out = torch.zeros(total_len, *seq.shape[1:])
-    start     = max(shift, 0)
-    end       = min(shift + T, total_len)
-    src_start = start - shift
-    src_end   = end   - shift
-    out[start:end] = seq[src_start:src_end]
-    if start > 0:
-        out[:start] = seq[0]
-    if end < total_len:
-        out[end:] = seq[src_end - 1]
-    return out
-
-
 def apply_shifts(
     cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]],
     shifts: dict[str, int],
     pids: list[int],
 ) -> tuple[list[list[torch.Tensor]], list[list[torch.Tensor]]]:
-    """Build shifted rotation sequences for the synchronizer."""
-    cam_ids   = list(shifts.keys())
-    T_base    = min(cam_data[c][p][0].shape[0] for c in cam_ids for p in pids)
-    max_shift = max(abs(s) for s in shifts.values())
-    total_len = T_base + max_shift + 10
+    """Give each camera all frames from its natural start position to end of recording.
+
+    The latest-starting camera (shift = max_s) gets s=0 and all T_base frames.
+    Every other camera starts at s = max_s - shift_i frames into the recording,
+    giving T_base - s frames.  For any pair (i, j) with pairwise offset d, the
+    shorter sequence is fully covered by genuine matching frames in the longer
+    one, so DTW has enough signal even for large offsets.
+    """
+    cam_ids = list(shifts.keys())
+    T_base  = min(cam_data[c][p][0].shape[0] for c in cam_ids for p in pids)
+    max_s   = max(shifts.values())
+    logger.info(f"  T_base={T_base}  shift_spread={max_s - min(shifts.values())}")
 
     joints_list: list[list[torch.Tensor]] = []
     confs_list:  list[list[torch.Tensor]] = []
 
     for cam_id in cam_ids:
-        shift = shifts[cam_id]
+        s = max_s - shifts[cam_id]   # latest camera → s=0 → all T_base frames
         per_person_joints, per_person_confs = [], []
         for pid in pids:
             rotations, conf = cam_data[cam_id][pid]
-            per_person_joints.append(embed_sequence(rotations, shift, total_len).to(DEVICE))
-            per_person_confs.append(embed_sequence(conf,      shift, total_len).to(DEVICE))
+            per_person_joints.append(rotations[s : T_base].to(DEVICE))
+            per_person_confs .append(conf     [s : T_base].to(DEVICE))
         joints_list.append(per_person_joints)
-        confs_list.append(per_person_confs)
+        confs_list .append(per_person_confs)
 
     return joints_list, confs_list
 
@@ -165,7 +152,8 @@ def run_trial(
     joints_list, confs_list = apply_shifts(cam_data, true_shifts, pids)
 
     offset_mat = sync.estimate_offset_matrix(joints_list, confs_list)
-    estimated  = sync.estimate_initial_times(offset_mat)  # K, normalised so min=0
+    weights    = sync.cycle_consistency_weights(offset_mat)
+    estimated  = sync.estimate_initial_times(offset_mat, weights)
 
     true_t = torch.tensor([true_shifts[c] for c in cam_ids], dtype=torch.float32)
     true_t = true_t - true_t.min()
@@ -178,11 +166,12 @@ def run_trial(
             est_pair  = offset_mat[i, j].item()
             true_pair = float(true_shifts[cam_ids[j]] - true_shifts[cam_ids[i]])
             err_pair  = abs(est_pair - true_pair)
+            w         = weights[i, j].item()
             flag = " <-- WRONG" if err_pair > 1.5 else ""
             logger.info(
                 f"    ({cam_ids[i]} → {cam_ids[j]}): "
                 f"estimated={est_pair:+.1f}  true={true_pair:+.0f}  "
-                f"pairwise_err={err_pair:.1f}{flag}"
+                f"pairwise_err={err_pair:.1f}  weight={w:.3f}{flag}"
             )
 
     errors = (estimated.cpu() - true_t).abs()
@@ -239,8 +228,15 @@ if __name__ == "__main__":
     all_within_1 = [r["within_1"] for r in results]
     all_within_2 = [r["within_2"] for r in results]
 
+    # Per-trial shift spreads (max_s - min_s across cameras)
+    all_spreads = [
+        max(r["true_shifts"].values()) - min(r["true_shifts"].values())
+        for r in results
+    ]
+
     logger.info("\n" + "=" * 60)
     logger.info(f"SUMMARY over {N_TRIALS} trials")
-    logger.info(f"  MAE        mean={np.mean(all_mae):.2f}  median={np.median(all_mae):.2f}  max={np.max(all_mae):.2f}")
-    logger.info(f"  Within 1fr {np.mean(all_within_1)*100:.1f}%")
-    logger.info(f"  Within 2fr {np.mean(all_within_2)*100:.1f}%")
+    logger.info(f"  Shift spread  mean={np.mean(all_spreads):.1f}  median={np.median(all_spreads):.1f}  max={np.max(all_spreads):.1f}")
+    logger.info(f"  MAE           mean={np.mean(all_mae):.2f}  median={np.median(all_mae):.2f}  max={np.max(all_mae):.2f}")
+    logger.info(f"  Within 1fr    {np.mean(all_within_1)*100:.1f}%")
+    logger.info(f"  Within 2fr    {np.mean(all_within_2)*100:.1f}%")

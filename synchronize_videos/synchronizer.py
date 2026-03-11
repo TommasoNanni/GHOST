@@ -63,8 +63,8 @@ class Synchronizer:
             # Cells on this anti-diagonal: i + j = d
             i_start = max(0, d - m + 1)
             i_end = min(d + 1, n)
-            i_idx = torch.arange(i_start, i_end, device=cost.device) # Rows covered by this ant-diagonal
-            j_idx = d - i_idx                                        # Corresponding columns
+            i_idx = torch.arange(i_start, i_end, device=cost.device)
+            j_idx = d - i_idx
 
             # Gather the three predecessor values (diagonal, vertical, horizontal)
             # All predecessors lie on anti-diagonals d-1 or d-2, already computed.
@@ -94,10 +94,10 @@ class Synchronizer:
     def _dtw_backtrace(dtw: torch.Tensor) -> torch.Tensor:
         """Backtrace the optimal DTW path. Returns Px2 tensor of (i, j) indices."""
         n, m = dtw.shape
+        dtw_cpu = dtw.detach().cpu()
         i, j = n - 1, m - 1
         path = [(i, j)]
-        # Pull values to CPU once for fast scalar access
-        dtw_cpu = dtw.detach().cpu()
+
         while i > 0 or j > 0:
             if i == 0:
                 j -= 1
@@ -118,7 +118,8 @@ class Synchronizer:
                 else:
                     j -= 1
             path.append((i, j))
-        return torch.tensor(path[::-1], device=dtw.device) # Reverse it so that it is useful for later
+
+        return torch.tensor(path[::-1], device=dtw.device)
 
     def _estimate_single_person_offset(
         self,
@@ -139,8 +140,8 @@ class Synchronizer:
         cost = self._compute_cost_matrix(
             body_joints_1, body_joints_2, confidences_1, confidences_2
         )
-        dtw = self._dtw_accumulate(cost)
-        path = self._dtw_backtrace(dtw)  # P x 2
+        dtw  = self._dtw_accumulate(cost)
+        path = self._dtw_backtrace(dtw)
 
         # Temporal offset = mode of (j - i) along the warping path.
         shifts = path[:, 1] - path[:, 0]  # integer shifts between the frames according to the best path
@@ -213,13 +214,41 @@ class Synchronizer:
 
         return offset_matrix
 
+    def cycle_consistency_weights(self, offset_matrix: torch.Tensor) -> torch.Tensor:
+        """
+        Per-edge weights derived from cycle consistency.
+
+        For each pair (i,j), the residual is the mean absolute cycle error
+        across all third cameras k:
+            residual(i,j) = mean_{k≠i,j} |offset(i,j) + offset(j,k) - offset(i,k)|
+
+        A perfectly consistent edge has residual=0 and weight=1.
+        An inconsistent edge has large residual and weight→0.
+        weight = 1 / (1 + residual)
+        """
+        K = offset_matrix.shape[0]
+        O = offset_matrix  # K×K
+
+        # residuals_3d[i,j,k] = O[i,j] + O[j,k] - O[i,k]  (should be 0 by cycle consistency)
+        residuals_3d = O.unsqueeze(2) + O.unsqueeze(0) - O.unsqueeze(1)
+
+        # Mask out k==i and k==j (those triangles are degenerate)
+        idx = torch.arange(K, device=self.device)
+        mask = (idx.view(1, 1, K) != idx.view(K, 1, 1)) & \
+               (idx.view(1, 1, K) != idx.view(1, K, 1))  # K×K×K
+
+        mean_residual = (residuals_3d.abs() * mask).sum(dim=2) / mask.sum(dim=2).clamp(min=1)
+        return 1.0 / (1.0 + mean_residual)  # K×K
+
     def estimate_initial_times(
         self,
-        offset_matrix: torch.Tensor,  # K x K  (antisymmetric)
+        offset_matrix: torch.Tensor,        # K x K  (antisymmetric)
+        weights: torch.Tensor | None = None, # K x K  per-edge weights, e.g. from cycle_consistency_weights
     ) -> torch.Tensor:
         """
-        Solve for start times t_0 … t_{K-1} from pairwise offsets via LSE.
+        Solve for start times t_0 … t_{K-1} from pairwise offsets via weighted LSE.
         Fixes t_0 = 0 and solves for the remaining K-1 variables.
+        Each pairwise equation is scaled by its weight so unreliable edges contribute less.
         """
         K = offset_matrix.shape[0]
         num_pairs = K * (K - 1) // 2
@@ -228,11 +257,12 @@ class Synchronizer:
         count = 0
         for i in range(K):
             for j in range(i + 1, K):
+                w = weights[i, j].item() if weights is not None else 1.0
                 if j >= 1:
-                    A[count, j - 1] = 1.0
+                    A[count, j - 1] = w
                 if i >= 1:
-                    A[count, i - 1] = -1.0
-                b[count] = offset_matrix[i, j]
+                    A[count, i - 1] = -w
+                b[count] = w * offset_matrix[i, j]
                 count += 1
 
         sol = torch.linalg.lstsq(A, b).solution  # K-1, use a LS approach to find initial times
