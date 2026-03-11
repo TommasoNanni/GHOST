@@ -23,7 +23,7 @@ echo ""
 
 
 # Run via pixi (activates the correct conda env automatically)
-CONDA_OVERRIDE_CUDA=12.6 pixi run python -m scripts.alignment_experiments
+CONDA_OVERRIDE_CUDA=12.6 pixi run python -m evaluation.alignment_experiments
 
 echo ""
 echo "Done: $(date)"
