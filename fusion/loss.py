@@ -8,7 +8,8 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from pytorch3d.transforms import matrix_to_quaternion
+import torch.nn.functional as F
+from pytorch3d.transforms import matrix_to_quaternion, rotation_6d_to_matrix, matrix_to_axis_angle, quaternion_to_matrix
 
 from utilities.smplx_utilities import get_smplx_vertices
 from utilities.camera_utilities import extract_cameras
@@ -58,27 +59,25 @@ class Loss(ABC):
 
 class EpipolarLoss(Loss):
     def __init__(
-        self, name: str = "Epipolar Loss", weight: float = 1.0
+        self, name: str = "Epipolar Loss", weight: float = 1.0, img_size: tuple[int, int] = (224, 224)
     ) -> None:
         super().__init__(name, weight)
+        self.img_size = img_size
 
     def forward(
-            self, 
-            pose_stream: torch.Tensor, 
-            shape_stream: torch.Tensor, 
-            camera_stream: torch.Tensor,
-            img_size: tuple[int, int] = (224, 224),
+            self,
+            preds: tuple,
+            targets: dict,
         ) -> torch.Tensor:
         """
-        computes the epipolar loss starting from body poses and shapes in 
-        RELATIVE camera coordinates, so each one wrt its camera
-        Input:
-            pose_stream: a stream of 3D poses (B, T, K, P, J, 6)
-            shape_stream: a stream of 3D shapes (B, T, K, P, S)
-            camera_stream: a stream of camera parameters (B, T, K, 8)
-        Output:
-            loss that checks the alignment of the 3D poses with the epipolar geometry defined by the camera parameters
+        Computes the epipolar loss from per-camera pose/shape/camera predictions.
+        Uses pose_per_cam and shape_per_cam so each body is in its own camera frame.
+
+        preds: (pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam)
         """
+        _, _, camera_stream, pose_stream, shape_stream = preds
+        if pose_stream.shape[2] < 2:
+            return pose_stream.new_zeros([])
         B, T, K, P, J, _ = pose_stream.shape
         num_pairs = 0
         total_loss = pose_stream.new_zeros([])
@@ -94,8 +93,8 @@ class EpipolarLoss(Loss):
                 vertices_i = get_smplx_vertices(pose_i, shape_i) # (B, T, P, V, 3) in camera i
                 vertices_j = get_smplx_vertices(pose_j, shape_j) # (B, T, P, V, 3) in camera j
 
-                R_i, t_i, K_i = extract_cameras(camera_stream[:, :, i], img_size)
-                R_j, t_j, K_j = extract_cameras(camera_stream[:, :, j], img_size)
+                R_i, t_i, K_i = extract_cameras(camera_stream[:, :, i], self.img_size)
+                R_j, t_j, K_j = extract_cameras(camera_stream[:, :, j], self.img_size)
 
                 F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
 
@@ -182,15 +181,22 @@ class EpipolarLoss(Loss):
 
         return error
 
-class MSELoss(Loss):
-    def __init__(
-        self, name: str = "MSE Loss", weight: float = 1.0
-    ) -> None:
+class PoseMSELoss(Loss):
+    def __init__(self, name: str = "Pose MSE Loss", weight: float = 1.0) -> None:
         super().__init__(name, weight)
 
-    def forward(self, pred, true):
-        loss_fn = nn.MSELoss()
-        return loss_fn(pred, true)
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        pose_aggr, _, _, _, _ = preds
+        return F.mse_loss(pose_aggr, targets["pose"])
+
+
+class ShapeMSELoss(Loss):
+    def __init__(self, name: str = "Shape MSE Loss", weight: float = 1.0) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        _, shape_aggr, _, _, _ = preds
+        return F.mse_loss(shape_aggr, targets["shape"])
 
 class TemporalSmoothnessLoss(Loss):
     def __init__(
@@ -198,27 +204,15 @@ class TemporalSmoothnessLoss(Loss):
     )-> None:
         super().__init__(name, weight)
 
-    def forward(
-        self,
-        current: torch.Tensor, 
-        previous1: torch.Tensor | None = None, 
-        previous2: torch.Tensor | None = None,
-    ):
-        if previous1 is None and previous2 is None:
-            if current is None:
-                raise ValueError("Temporal Smoothness needs the current parameters not to be None")
-            logging.warning("You called Temporal Smoothness loss with previous parameters None, returning norm of identity")
-            return torch.norm(current)**2
-        elif previous2 is None:
-            logging.warning("You called Temporal Smoothness loss with previous2 parameters None, returning velocity constraint")
-            return torch.norm(current - previous1)**2
-        elif previous1 is not None and previous2 is not None and current is not None:
-            return torch.norm(current - 2*previous1 + previous2)**2
-        else:
-            raise ValueError(
-                f"""Invalid parameters configuration. Is None? \n
-                 Current: {(current is None)}, Previous1 {(previous1 is None)}, Previous2 {(previous2 is None)}"""
-            )
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        """Acceleration smoothness on the aggregated pose stream (B, T, P, J, 6)."""
+        pose_aggr, _, _, _, _ = preds
+        if pose_aggr.shape[1] < 3:
+            return pose_aggr.new_zeros([])
+        current   = pose_aggr[:, 2:]
+        previous1 = pose_aggr[:, 1:-1]
+        previous2 = pose_aggr[:, :-2]
+        return torch.norm(current - 2 * previous1 + previous2) ** 2
 
 class VPoserLoss(Loss):
     def __init__(
@@ -239,21 +233,22 @@ class VPoserLoss(Loss):
         )
         self.vposer.eval()
 
-    def forward(self, pose: torch.Tensor) -> torch.Tensor:
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
         """
-        Compute the VPoser KL-divergence prior on body pose.
+        Compute the VPoser KL-divergence prior on the aggregated body pose.
 
-        Parameters
-        ----------
-        pose : ``(*, J, 3)`` — SMPLX pose in **axis-angle** format.
-            J must be 55.
-            The tensor is flattened to (N, 162) before encoding, where
-            162 = 54 joints × 3 axis-angle values.
+        Converts pose_aggr from 6D rotation to axis-angle, then encodes with VPoser.
 
         Returns
         -------
         Scalar KL loss: KL( q(z|x) ‖ N(0,I) )
         """
+        pose_aggr, _, _, _, _ = preds
+        # 6D rotation → rotation matrix → axis-angle
+        rot_mat    = rotation_6d_to_matrix(pose_aggr)                        # (B, T, P, J, 3, 3)
+        axis_angle = matrix_to_axis_angle(rot_mat.reshape(-1, 3, 3))         # (B*T*P*J, 3)
+        pose       = axis_angle.reshape(*pose_aggr.shape[:-1], 3)            # (B, T, P, J, 3)
+
         # slice body joints 1-55 (skip root), flatten to (N, 54*3)
         smpl_pose = pose[..., 1:, :].reshape(-1, 162)
 
@@ -276,34 +271,39 @@ class BoneLengthconsistencyLoss(Loss):
     )-> None:
         super().__init__(name, weight)
 
-    def forward(self, joints):
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
         """
-        Encodes the fact that all joints must have the same length across views
-        and over time
+        Penalises inconsistent bone lengths across time in the fused prediction.
 
-        Parameters
-        ----------
-        joints: (B, T, K, P, J, 3) — joints in axis-angle format
+        Runs one SMPL-X forward pass on (pose_aggr, shape_aggr) to get 3D joints,
+        then checks that each bone length is stable over T.
+
+        pose_aggr : (B, T, P, J, 6)
+        shape_aggr: (B, T, P, 10)
+        joints    : (B, T, P, J, 3)  — no K dimension (already fused)
 
         Returns
         -------
-        Scalar loss encouraging constant bone length across time and cameras.
+        Scalar loss encouraging constant bone length across time.
         """
+        pose_aggr, shape_aggr, _, _, _ = preds
+        joints = get_smplx_vertices(pose_aggr, shape_aggr)  # (B, T, P, J, 3)
+
         parent_mapping = torch.tensor(
-            PARENTS_TABLE, device = joints.device, dtype = joints.dtype
+            PARENTS_TABLE, device=joints.device, dtype=joints.dtype
         )
-
         parents = parent_mapping[0, :]
-        parent_joints = joints[:, :, :, :, parents, :] # Tensor of father joints
+        parent_joints = joints[..., parents, :]                       # (B, T, P, J, 3)
 
-        bone_lengths = torch.norm(joints - parent_joints, p = 2, dim = -1) # Bone lengths
-        indices = torch.arange(len(parents), device = joints.device)
+        bone_lengths = torch.norm(joints - parent_joints, p=2, dim=-1)  # (B, T, P, J)
+        indices = torch.arange(len(parents), device=joints.device)
         mask = parent_mapping != indices
-        valid_lengths = bone_lengths[..., mask] # (B, T, K, P, J_valid)
+        valid_lengths = bone_lengths[..., mask]                       # (B, T, P, J_valid)
 
-        lengths_to_persist = valid_lengths.permute(0, 3, 4, 1, 2).contiguous().flatten(start_dim = -2) #(B, P, J_valid, T*K)
-        bone_std = torch.std(lengths_to_persist, dim = -1) + 1e-6
-        return bone_std.mean()        
+        # check consistency across T only (no K dimension after fusion)
+        lengths_to_persist = valid_lengths.permute(0, 2, 3, 1).contiguous()  # (B, P, J_valid, T)
+        bone_std = torch.std(lengths_to_persist, dim=-1) + 1e-6
+        return bone_std.mean()
 
 
 class BetaConsistencyLoss(Loss):
@@ -314,59 +314,66 @@ class BetaConsistencyLoss(Loss):
     ) -> None:
         super().__init__(name, weight)
 
-    def forward(self, beta_stream: torch.Tensor) -> torch.Tensor:
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
         """
-        Compute the consistency loss on shape parameters across cameras.
+        Penalises inconsistent shape parameters across cameras.
 
-        Parameters
-        ----------
-        beta_stream : (B, T, K, P, S) — stream of shape parameters for each camera
+        Uses shape_per_cam (B, T, K, P, 10): for each person, betas should be
+        the same regardless of which camera observes them.
 
         Returns
         -------
         Scalar loss encouraging consistency of shape parameters across cameras.
         """
-
-        beta_mean = beta_stream.mean(dim=2, keepdim=True)  # (B, T, 1, P, S)
-        loss = torch.mean((beta_stream - beta_mean)**2)
-        return loss
+        _, _, _, _, shape_per_cam = preds
+        beta_mean = shape_per_cam.mean(dim=2, keepdim=True)  # (B, T, 1, P, 10)
+        return torch.mean((shape_per_cam - beta_mean) ** 2)
 
 
 class CameraMSELoss(Loss):
     def __init__(
         self,
         name: str = "Camera error (geodesic + MSE) loss",
-        weight: float = 1.0
+        weight: float = 1.0,
+        img_size: tuple[int, int] = (224, 224),
     )-> None:
         super().__init__(name, weight)
+        self.img_size = img_size
 
-    def forward(self, R, t, R_gt, t_gt):
+    def forward(
+        self,
+        preds: tuple,
+        targets: dict,
+    ) -> torch.Tensor:
         """
-        Computes the distance between the predicted and the ground truth cameras
-        Parameters
-        ----------
-        R : (B, T, K, 3, 3) — stream of rotation camera parameters
-        t : (B, T, K, 3) - stream of translation camera parameters
-        R_gt : (B, T, K, 3, 3) — stream of GT rotation camera parameters
-        t_gt : (B, T, K, 3) - stream of GT translation camera parameters
+        Computes geodesic rotation + MSE translation between predicted and GT cameras.
+
+        camera pred : (B, T, K, 8) — [quat(4), trans(3), focal_raw(1)]
+        camera GT   : (B, T, K, 8) — same layout
 
         Returns
         -------
-        Scalar loss encouraging adherence of camera parameters to the GT
+        Scalar loss encouraging adherence of camera parameters to the GT.
         """
-        R_flat = R.reshape(-1, 3, 3)
-        R_gt_flat = R_gt.reshape(-1, 3, 3)
+        _, _, camera_pred, _, _ = preds
+        cam_gt = targets["camera"]
 
-        q = matrix_to_quaternion(R_flat)
-        q_gt = matrix_to_quaternion(R_gt_flat)
+        R_pred = quaternion_to_matrix(camera_pred[..., :4].reshape(-1, 4)).reshape(*camera_pred.shape[:-1], 3, 3)
+        t_pred = camera_pred[..., 4:7]
+        focal_pred = camera_pred[..., 7]
+        R_gt   = quaternion_to_matrix(cam_gt[..., :4].reshape(-1, 4)).reshape(*cam_gt.shape[:-1], 3, 3)
+        t_gt   = cam_gt[..., 4:7]
+        focal_gt = cam_gt[..., 7]
 
-        dot_product = torch.sum(q * q_gt, dim=-1)
-        dot_product = torch.clamp(dot_product, -1.0 + 1e-7, 1.0 - 1e-7)
+        q      = matrix_to_quaternion(R_pred.reshape(-1, 3, 3))
+        q_gt   = matrix_to_quaternion(R_gt.reshape(-1, 3, 3))
 
-        quaternion_loss = 1 - torch.abs(dot_product)
-        quaternion_mean = quaternion_loss.mean()
+        dot    = torch.clamp(torch.sum(q * q_gt, dim=-1), -1.0 + 1e-7, 1.0 - 1e-7)
+        rot_loss   = (1 - torch.abs(dot)).mean()
+        trans_loss = torch.norm(t_pred - t_gt, dim=-1).pow(2).mean()
 
-        translation_loss = torch.norm(t - t_gt, dim=-1)**2
-        translation_mean = translation_loss.mean()
+        fov_pred = 2*torch.atan(self.img_size[1]/(2*focal_pred))
+        fov_gt   = 2*torch.atan(self.img_size[1]/(2*focal_gt))
+        fov_loss = F.mse_loss(fov_pred, fov_gt)
 
-        return translation_mean + quaternion_mean
+        return rot_loss + trans_loss + fov_loss
