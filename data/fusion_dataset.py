@@ -223,7 +223,8 @@ class FusionDatapoint(Dataset, ABC):
         cam[4:7] = pred_cam_t
         # Store softplus_inv(focal) so that extract_cameras can recover the
         # true focal length by applying softplus.  For f >> 1, softplus_inv(f) ≈ f.
-        cam[7] = float(np.log(np.exp(float(focal_length)) - 1.0 + 1e-6))
+        _f = float(focal_length)
+        cam[7] = _f if _f > 20.0 else float(np.log(np.expm1(_f) + 1e-6))
         return cam
 
     def build_gt_targets(
@@ -911,7 +912,8 @@ class RICHFusionDatapoint(FusionDatapoint):
             cam = np.zeros(8, dtype=np.float32)
             cam[:4] = q.astype(np.float32)
             cam[4:7] = est[:3, 3]
-            cam[7] = float(np.log(np.exp(float(focal_length)) - 1.0 + 1e-6))
+            _f = float(focal_length)
+            cam[7] = _f if _f > 20.0 else float(np.log(np.expm1(_f) + 1e-6))
             return cam
         return super().convert_camera(pred_cam_t, focal_length, global_rot, cam_calib)
 
