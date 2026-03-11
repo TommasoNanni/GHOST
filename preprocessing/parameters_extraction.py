@@ -79,6 +79,9 @@ class BodyParameterEstimator:
     _REID_THRESHOLD: float = 0.65
     _GALLERY_EMA_ALPHA: float = 0.9
     _REID_MATCH_WINDOW: int = 5
+    # For cross-view gallery: keep only the top-K highest-confidence frames
+    # when computing the saved appearance descriptor (ignores low-quality frames).
+    _GALLERY_TOP_K: int = 50
 
     def __init__(
         self,
@@ -90,6 +93,7 @@ class BodyParameterEstimator:
         reid_threshold: float | None = None,
         gallery_ema_alpha: float | None = None,
         reid_match_window: int | None = None,
+        gallery_top_k: int | None = None,
     ):
         self.sam3d_hf_repo = sam3d_hf_repo
         self.sam3d_step = sam3d_step
@@ -99,6 +103,7 @@ class BodyParameterEstimator:
         self.reid_threshold = reid_threshold if reid_threshold is not None else self._REID_THRESHOLD
         self.gallery_ema_alpha = gallery_ema_alpha if gallery_ema_alpha is not None else self._GALLERY_EMA_ALPHA
         self.reid_match_window = reid_match_window if reid_match_window is not None else self._REID_MATCH_WINDOW
+        self.gallery_top_k = gallery_top_k if gallery_top_k is not None else self._GALLERY_TOP_K
 
         self._estimator: object | None = None
         self._converter: object | None = None
@@ -175,6 +180,7 @@ class BodyParameterEstimator:
                     reid_threshold=self.reid_threshold,
                     gallery_ema_alpha=self.gallery_ema_alpha,
                     reid_match_window=self.reid_match_window,
+                    gallery_top_k=self.gallery_top_k,
                     converter=converter,
                 )
                 gc.collect()
@@ -219,6 +225,7 @@ class BodyParameterEstimator:
                     self.reid_match_window,
                     self.mhr_model_path,
                     self.smplx_model_path,
+                    self.gallery_top_k,
                 ),
             )
             p.start()
@@ -240,6 +247,7 @@ class BodyParameterEstimator:
         reid_match_window: int = 5,
         mhr_model_path: str | None = None,
         smplx_model_path: str | None = None,
+        gallery_top_k: int = 50,
     ) -> None:
         """Worker process: load SAM3D once, then consume videos from the queue.
 
@@ -284,6 +292,7 @@ class BodyParameterEstimator:
                     reid_threshold=reid_threshold,
                     gallery_ema_alpha=gallery_ema_alpha,
                     reid_match_window=reid_match_window,
+                    gallery_top_k=gallery_top_k,
                     converter=converter,
                 )
             except Exception as e:
@@ -330,6 +339,7 @@ class BodyParameterEstimator:
         reid_threshold: float = 0.65,
         gallery_ema_alpha: float = 0.9,
         reid_match_window: int = 5,
+        gallery_top_k: int = 50,
         converter=None,
     ) -> None:
         """Process all frames of one video with batched per-frame inference.
@@ -388,12 +398,18 @@ class BodyParameterEstimator:
 
         # Gallery for visual re-identification across SAM2 track interruptions.
         # person_gallery: canonical_id → L2-normalised appearance descriptor (EMA).
+        #   Used live during within-video track merging.
+        # person_feat_buffer: canonical_id → list of (frame_idx, feat) pairs.
+        #   Collects all confirmed appearance features; at save time the top-K
+        #   highest-confidence frames are used to build the cross-view gallery
+        #   (confidence-weighted mean), which is more robust than a flat EMA.
         # id_remap: raw SAM3 id → canonical_id for ids that were re-identified.
         # pending_reid: new SAM3 ids that weren't matched on first sight —
         #   maps person_id → frames_remaining for retry attempts.
         # We employ DINOv3 backbone (given by SAM 3D) in order to match people across
         # frames using cosine similarity between visual features
         person_gallery: dict[int, np.ndarray] = {}
+        person_feat_buffer: dict[int, list[tuple[int, np.ndarray]]] = {}
         id_remap: dict[int, int] = {}
         pending_reid: dict[int, int] = {}  # person_id → frames remaining
 
@@ -594,6 +610,12 @@ class BodyParameterEstimator:
                             id_remap[person_id] = best_id
                             canonical_id = best_id
                             pending_reid.pop(person_id, None)
+                            # Merge any buffered frames from the old track into
+                            # the canonical person's buffer.
+                            if person_id in person_feat_buffer:
+                                person_feat_buffer.setdefault(best_id, []).extend(
+                                    person_feat_buffer.pop(person_id)
+                                )
                             logging.info(
                                 f"{gpu_label}Re-ID: SAM3 id {person_id} → "
                                 f"person {best_id} (sim={sims[best_id]:.3f}) "
@@ -616,12 +638,15 @@ class BodyParameterEstimator:
                                 if pending_reid[person_id] <= 0:
                                     # Window expired — genuinely new person
                                     person_gallery[person_id] = feat_i.copy()
+                                    person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat_i.copy()))
                                     del pending_reid[person_id]
                             else:
                                 person_gallery[person_id] = feat_i.copy()
+                                person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat_i.copy()))
                     elif should_try_reid and not person_gallery:
                         # Very first person ever — no gallery to match against
                         person_gallery[person_id] = feat_i.copy()
+                        person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat_i.copy()))
                         pending_reid.pop(person_id, None)
 
                     # Update gallery descriptor with EMA for the canonical person.
@@ -630,6 +655,8 @@ class BodyParameterEstimator:
                         g = alpha * person_gallery[canonical_id] + (1 - alpha) * feat_i
                         norm = np.linalg.norm(g)
                         person_gallery[canonical_id] = g / norm if norm > 0 else g
+                        # Also buffer this frame for the confidence-weighted cross-view gallery.
+                        person_feat_buffer.setdefault(canonical_id, []).append((frame_idx, feat_i.copy()))
 
                 params = {"bbox": np.array([x1, y1, x2, y2], dtype=np.float32)}
 
@@ -858,10 +885,32 @@ class BodyParameterEstimator:
         )
 
         # Persist per-person appearance descriptors for cross-view re-ID.
-        # The gallery holds the final EMA-updated DINOv3 descriptor (1024-D,
-        # L2-normalised) for each canonical person after within-video re-ID.
-        if person_gallery:
-            gallery_arrays = {str(pid): feat for pid, feat in person_gallery.items()}
+        # For each person we take the top-K highest-confidence frames from the
+        # feature buffer, compute a confidence-weighted mean, and L2-normalise.
+        # This is more robust than the flat EMA (which weights all frames equally
+        # and is dominated by the many mediocre frames at the tail of a track).
+        if person_feat_buffer:
+            gallery_arrays: dict[str, np.ndarray] = {}
+            for pid, feat_list in person_feat_buffer.items():
+                # Pair each buffered feature with its per-frame mean joint confidence.
+                conf_feats: list[tuple[float, np.ndarray]] = []
+                pid_frames = tracks.get(pid, {})
+                for fi, feat in feat_list:
+                    conf = pid_frames.get(fi, {}).get("pred_joint_confidence")
+                    scalar_conf = float(np.mean(conf)) if conf is not None else 1.0
+                    conf_feats.append((scalar_conf, feat))
+
+                # Keep only the top-K frames by confidence.
+                conf_feats.sort(key=lambda x: x[0], reverse=True)
+                top_k = conf_feats[:gallery_top_k]
+
+                weights = np.array([c for c, _ in top_k], dtype=np.float32)
+                feats = np.stack([f for _, f in top_k])          # (K, D)
+                total_w = weights.sum()
+                weighted = (weights[:, None] * feats).sum(0) if total_w > 0 else feats.mean(0)
+                norm = np.linalg.norm(weighted)
+                gallery_arrays[str(pid)] = weighted / norm if norm > 0 else weighted
+
             gallery_path = body_dir / "appearance_gallery.npz"
             np.savez(str(gallery_path), **gallery_arrays)
 
@@ -1025,15 +1074,27 @@ class BodyParameterEstimator:
                 if not npz_path.exists():
                     continue
 
-                # Shape descriptor: median beta across frames, L2-normalised
+                # Shape descriptor: confidence-weighted mean of beta vectors,
+                # L2-normalised.  Using per-frame mean joint confidence as weights
+                # down-weights frames with poor body fits (occlusion, blur, bad
+                # pose estimate) that would otherwise corrupt the descriptor.
+                # Falls back to the plain median when confidence is unavailable.
                 shape_feat: np.ndarray | None = None
                 with np.load(str(npz_path)) as pdata:
                     if "shape_params" in pdata:
                         shape_vecs = pdata["shape_params"]  # (N, 10)
                         if len(shape_vecs) > 0:
-                            shape_med = np.median(shape_vecs, axis=0).astype(
-                                np.float32
-                            )
+                            conf = pdata.get("pred_joint_confidence")  # (N, J) or None
+                            if conf is not None and len(conf) == len(shape_vecs):
+                                # Mean confidence per frame → confidence-weighted mean of betas
+                                frame_conf = np.mean(conf, axis=-1).astype(np.float32)
+                                total_conf = frame_conf.sum()
+                                if total_conf > 0:
+                                    shape_med = (frame_conf[:, None] * shape_vecs).sum(0) / total_conf
+                                else:
+                                    shape_med = np.median(shape_vecs, axis=0).astype(np.float32)
+                            else:
+                                shape_med = np.median(shape_vecs, axis=0).astype(np.float32)
                             norm = np.linalg.norm(shape_med)
                             shape_feat = (
                                 shape_med / norm if norm > 0 else shape_med
