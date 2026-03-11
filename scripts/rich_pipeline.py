@@ -14,7 +14,7 @@ import numpy as np
 
 from configuration import CONFIG
 from data.video_dataset import RichDataset
-from data.fusion_dataset import RICHFusionDataset
+from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from preprocessing.camera_alignment import CameraAlignment
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
@@ -102,27 +102,24 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
             "Check that cross-view ReID found shared persons across videos."
         )
 
-    # Step 6: FusionDataset compatibility check
-    print(f"\n--- Step 6: FusionDataset compatibility check ---")
+    # Step 6: FusionDatapoint compatibility check
+    print(f"\n--- Step 6: FusionDatapoint compatibility check ---")
     try:
-        fusion_ds = RICHFusionDataset(
+        fusion_dp = RICHFusionDatapoint(
             scene_dir=scene_output_dir,
             rich_data_root=CONFIG.data.rich_data_root,
         )
-        print(f"  Dataset: {fusion_ds}")
-        if len(fusion_ds) > 0:
-            inputs, targets = fusion_ds[0]
-            print("  Inputs:")
-            for k, v in inputs.items():
-                print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
-            print("  Targets:")
-            for k, v in targets.items():
-                print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
-            print("  FusionDataset compatibility: OK")
-        else:
-            print("  WARNING: dataset is empty — check frame coverage.")
+        ds = RICHFusionDataset([fusion_dp])
+        inputs, targets = ds[0]
+        print("  Inputs:")
+        for k, v in inputs.items():
+            print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
+        print("  Targets:")
+        for k, v in targets.items():
+            print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
+        print("  FusionDatapoint compatibility: OK")
     except Exception as e:
-        print(f"  ERROR: FusionDataset failed to load: {e}")
+        print(f"  ERROR: FusionDatapoint failed to load: {e}")
 
     # Step 7: Inspect output format for each video
     print(f"\n=== Body parameter output format ===")
@@ -205,7 +202,6 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
-    ds.scenes = [ds.scenes[1]]
 
     segmenter = PersonSegmenter(
         checkpoint_path=CONFIG.segmentation.checkpoint_path,

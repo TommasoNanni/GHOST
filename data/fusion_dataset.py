@@ -1,6 +1,6 @@
 """Fusion dataset for the SST model.
 
-Provides a base class :class:`FusionDataset` that handles windowing, lookup
+ Provides a base class :class:`FusionDatapoint` that handles windowing, lookup
 tables, and the uniform ``(inputs, targets)`` contract expected by
 :class:`~fusion.fusion_module.SSTNetwork`, plus per-dataset subclasses that
 each implement three hooks:
@@ -45,7 +45,7 @@ from torch.utils.data import DataLoader, Dataset
 logger = logging.getLogger(__name__)
 
 
-class FusionDataset(Dataset, ABC):
+class FusionDatapoint(Dataset, ABC):
     """Abstract multi-view temporal-window dataset for SST fusion.
 
     Subclasses **must** implement:
@@ -120,6 +120,7 @@ class FusionDataset(Dataset, ABC):
         self._lookup: list[list[dict[int, int]]] = []
         self._pid_order: list[list[int]] = []
         self._build_lookup()
+        self._img_size: tuple[int, int] | None = None
 
         logger.info(
             f"{type(self).__name__}: {self.num_cameras} cameras, "
@@ -127,6 +128,22 @@ class FusionDataset(Dataset, ABC):
             f"frames [{self._frame_start}, {self._frame_end}), "
             f"T={self._frame_end - self._frame_start}"
         )
+
+    @property
+    def img_size(self) -> tuple[int, int]:
+        """(H, W) of the source images, read lazily from the first mask frame."""
+        if self._img_size is None:
+            for cam_dir in self._cam_dirs:
+                mask_path = cam_dir / "mask_data.npz"
+                if mask_path.exists():
+                    data = np.load(str(mask_path))
+                    first_key = next(iter(data))
+                    h, w = data[first_key].shape[:2]
+                    self._img_size = (h, w)
+                    break
+            if self._img_size is None:
+                self._img_size = (1080, 1920)  # safe fallback
+        return self._img_size
 
     @abstractmethod
     def load_body_data(self, **kwargs: Any) -> None:
@@ -264,11 +281,8 @@ class FusionDataset(Dataset, ABC):
                 cam_lookups.append({})
             self._lookup.append(cam_lookups)
 
-    def __len__(self) -> int:
-        return self._frame_end - self._frame_start
-
-    def __getitem__(
-        self, idx: int = 0
+    def _build_sample(
+        self,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         T = self._frame_end - self._frame_start
         K = self.num_cameras
@@ -415,7 +429,7 @@ class FusionDataset(Dataset, ABC):
 # EgoExo subclass (ghost pipeline output, no GT)
 # ======================================================================
 
-class EgoExoFusionDataset(FusionDataset):
+class EgoExoFusionDatapoint(FusionDatapoint):
     """Loads body data from the ghost segmentation pipeline output.
 
     Self-supervised -- no GT available, targets mirror predictions.
@@ -511,7 +525,7 @@ class EgoExoFusionDataset(FusionDataset):
 # RICH subclass (RICH dataset with GT SMPL-X params + calibrated cameras)
 # ======================================================================
 
-class RICHFusionDataset(FusionDataset):
+class RICHFusionDatapoint(FusionDatapoint):
     """Loads body data from ghost pipeline + GT from RICH annotations.
 
     Expected RICH data layout (all under ``rich_data_root``) ::
@@ -949,7 +963,7 @@ class RICHFusionDataset(FusionDataset):
             shape_out[:n] = gt["betas"][gt_idx, :n]
 
         # Pose: build full 55-joint axis-angle matching the same layout used
-        # by EgoExoFusionDataset.convert_pose:
+        # by EgoExoFusionDatapoint.convert_pose:
         #   [global(1), body(21), lhand(15), rhand(15), jaw+eyes(3)]
         if "body_pose" in gt and "global_orient" in gt:
             from scipy.spatial.transform import Rotation as SciR
@@ -977,6 +991,27 @@ class RICHFusionDataset(FusionDataset):
 
 
 # ======================================================================
+# Dataset (collection of datapoints)
+# ======================================================================
+
+class RICHFusionDataset(Dataset):
+    """A simple dataset holding a list of :class:`RICHFusionDatapoint` objects.
+
+    Each item is one scene; ``__getitem__`` builds the tensors lazily so only
+    the currently-accessed scene is materialised in memory.
+    """
+
+    def __init__(self, datapoints: list[FusionDatapoint]) -> None:
+        self._datapoints = datapoints
+
+    def __len__(self) -> int:
+        return len(self._datapoints)
+
+    def __getitem__(self, idx: int) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        return self._datapoints[idx]._build_sample()
+
+
+# ======================================================================
 # Helper
 # ======================================================================
 
@@ -999,9 +1034,9 @@ def build_fusion_dataloader(
         Extra kwargs forwarded to the subclass constructor.
         RICH requires ``rich_data_root`` (path to the RICH split root).
     """
-    _REGISTRY: dict[str, type[FusionDataset]] = {
-        "egoexo": EgoExoFusionDataset,
-        "rich": RICHFusionDataset,
+    _REGISTRY: dict[str, type[FusionDatapoint]] = {
+        "egoexo": EgoExoFusionDatapoint,
+        "rich": RICHFusionDatapoint,
     }
     cls = _REGISTRY.get(dataset_type.lower())
     if cls is None:
@@ -1009,11 +1044,12 @@ def build_fusion_dataloader(
             f"Unknown dataset_type={dataset_type!r}. "
             f"Available: {list(_REGISTRY.keys())}"
         )
-    ds = cls(
+    dp = cls(
         scene_dir=scene_dir,
         num_joints=num_joints,
         **dataset_kwargs,
     )
+    ds = RICHFusionDataset([dp])
     return DataLoader(
         ds,
         batch_size=batch_size,
