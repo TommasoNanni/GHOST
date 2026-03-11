@@ -1,4 +1,8 @@
+import logging
+
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 class Synchronizer:
@@ -141,6 +145,16 @@ class Synchronizer:
         # Temporal offset = mode of (j - i) along the warping path.
         shifts = path[:, 1] - path[:, 0]  # integer shifts between the frames according to the best path
         offset = torch.mode(shifts).values.item()
+
+        # Log the distribution of shifts to diagnose ambiguity
+        unique, counts = torch.unique(shifts, return_counts=True)
+        top_k = min(5, len(unique))
+        top_idx = counts.topk(top_k).indices
+        dist_str = "  ".join(
+            f"{unique[i].item():+d}×{counts[i].item()}" for i in top_idx
+        )
+        logger.debug(f"    shift distribution (top-{top_k}): {dist_str}  → chosen={offset:+.0f}")
+
         return offset
 
     def estimate_couple_offset(
@@ -168,10 +182,12 @@ class Synchronizer:
                 body_joints_1[p], body_joints_2[p],
                 confidences_1[p], confidences_2[p],
             )
+            logger.debug(f"    person {p}: raw DTW offset = {off:+.0f}")
             per_person_offsets.append(off)
 
         # Use median for robustness against outlier persons
         median_offset = torch.median(torch.tensor(per_person_offsets, dtype=torch.float32)).item()
+        logger.debug(f"    per-person offsets: {per_person_offsets}  → median = {median_offset:+.1f}")
         return median_offset
 
     def estimate_offset_matrix(
