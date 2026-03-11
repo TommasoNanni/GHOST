@@ -543,7 +543,7 @@ class SSTNetwork(nn.Module):
         * :class:`PoseStreamLayer` ×L        — joint + view + temporal + FFN
         * :class:`ShapeStreamLayer` ×L       — view + temporal + FFN
         * :class:`CameraStreamLayer` ×L      — temporal + FFN
-        * :class:`PoseCameraCrossAttention` ×(L//2) — bidirectional cross-attn (every 2 layers)
+        * :class:`PoseCameraCrossAttention` ×L      — bidirectional cross-attn (every layer)
         * :class:`SSTOutputHeads`            — final decoders
     """
 
@@ -581,7 +581,7 @@ class SSTNetwork(nn.Module):
         ])
         self.cross_attns = nn.ModuleList([
             PoseCameraCrossAttention(embedding_dim, num_heads, dropout)
-            for _ in range(num_layers // 2)
+            for _ in range(num_layers)
         ])
         self.output_heads = SSTOutputHeads(embedding_dim)
 
@@ -715,13 +715,11 @@ class SSTNetwork(nn.Module):
                 temporal_conf=camera_temporal_conf,
             )
 
-            # Pose - Camera cross-attention every 2 layers
-            if (layer_idx + 1) % 2 == 0:
-                cross_idx = (layer_idx + 1) // 2 - 1
-                pose_stream, camera_stream = self.cross_attns[cross_idx](
-                    pose_stream, camera_stream,
-                    B, T, K, P, J, D, self.dropout,
-                )
+            # Pose - Camera cross-attention every layer
+            pose_stream, camera_stream = self.cross_attns[layer_idx](
+                pose_stream, camera_stream,
+                B, T, K, P, J, D, self.dropout,
+            )
 
         # decode
         return self.output_heads(
