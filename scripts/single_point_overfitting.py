@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import torch
 from torch.utils.data import DataLoader
 
+from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from fusion.fusion_module import SSTNetwork
 from fusion.loss import (
@@ -42,18 +43,22 @@ logger = logging.getLogger(__name__)
 
 RICH_SCENE_DIR  = Path(
     "/cluster/project/cvg/students/tnanni/ghost/test_outputs"
-    "/rich3_segmentation_test/BBQ_001_guitar"
+    "/rich5_segmentation_test/BBQ_001_guitar"
 )
 TEMPORAL_WINDOW = 32   # each frame attends to 2*32+1 = 65 neighbours
 
 
 def main():
-    dp = RICHFusionDatapoint(scene_dir=RICH_SCENE_DIR)
+    # create the dataset
+    dp = RICHFusionDatapoint(scene_dir=RICH_SCENE_DIR, rich_data_root = CONFIG.data.rich_data_root)
     img_size = dp.img_size
     ds = RICHFusionDataset([dp])
     inputs, targets = ds[0]
+    # inputs:  dict ['pose', 'shape', 'camera', 'joint_mask', 'person_mask']
+    # targets: dict ['pose', 'shape', 'camera', 'keypoints_3d']
     T = inputs["pose"].shape[0]
     print({k: tuple(v.shape) for k, v in inputs.items()})
+    # 'pose': (382, 8, 1, 55, 6), 'shape': (382, 8, 1, 10), 'camera': (382, 8, 8), 'joint_mask': (382, 8, 1, 55), 'person_mask': (382, 8, 1)
     loader = DataLoader(ds, batch_size=1, shuffle=False)
 
     logger.info(
@@ -64,10 +69,10 @@ def main():
 
     model = SSTNetwork(
         embedding_dim=64,
-        num_heads=4,
-        num_layers=4,
-        max_temporal_len=T + 16,
-        dropout=0.0,
+        num_heads=8,
+        num_layers=8,
+        max_temporal_len=T,
+        dropout=0.1,
         temporal_window=TEMPORAL_WINDOW,
     )
 
