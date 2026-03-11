@@ -66,7 +66,18 @@ Two key modifications have to be done to the external repositories:
     ```bash
     cd sam-3d-body
     cat <<EOF > pyproject.toml
-    # PlaceHolder
+    [build-system]
+    requires = ["hatchling"]
+    build-backend = "hatchling.build"
+
+    [project]
+    name = "sam-3d-body"
+    version = "0.1.0"
+    requires-python = ">=3.11"
+
+    [tool.hatch.build.targets.wheel]
+    packages = ["notebook", "sam_3d_body", "tools"]
+
     EOF
     ```
 
@@ -118,7 +129,7 @@ output_dir/
 A reference SLURM script is provided:
 
 ```bash
-sbatch bash_jobs/test_run_sam3d.sh
+sbatch bash_jobs/rich_pipeline.sh
 ```
 
 Logs are written to `logs/<job_name>_<job_id>.{out,err}`.
