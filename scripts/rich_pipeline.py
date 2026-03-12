@@ -11,6 +11,7 @@ logging.basicConfig(
 
 import json
 import numpy as np
+import torch
 
 from configuration import CONFIG
 from data.video_dataset import RichDataset
@@ -18,7 +19,95 @@ from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from preprocessing.camera_alignment import CameraAlignment
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
+from synchronize_videos.synchronizer import Synchronizer
 from utilities.visualize_segmented_reids import visualize_reid
+
+# ── Temporal-sync evaluation constants (random-shift test) ─────────────────────
+SYNC_MAX_SHIFT = 148   # maximum absolute shift in frames
+SYNC_N_TRIALS  = 1     # random-shift trials per scene
+SYNC_SEED      = 42    # RNG seed
+SYNC_DEVICE    = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _load_body_data(
+    video_dirs: dict[str, str],
+) -> dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]]:
+    """Load smplx pose sequences for all cameras.
+
+    Mirrors ``load_scene`` in evaluation/alignment_experiments.py:
+    concatenates smplx_body_pose (T,63) + smplx_left_hand_pose (T,45) +
+    smplx_right_hand_pose (T,45) → (T,51,3), and extracts confidence
+    pred_joint_confidence[:,1:52] → (T,51).
+
+    Returns
+    -------
+    cam_data : {cam_id: {person_id: (rotations T×51×3, conf T×51)}}
+    """
+    cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]] = {}
+    for cam_id, video_dir in video_dirs.items():
+        body_dir = Path(video_dir) / "body_data"
+        if not body_dir.exists():
+            continue
+        persons: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
+        for npz_path in sorted(body_dir.glob("person_*.npz")):
+            pid = int(npz_path.stem.split("_")[1])
+            with np.load(str(npz_path)) as d:
+                required = {"smplx_body_pose", "smplx_left_hand_pose",
+                            "smplx_right_hand_pose", "pred_joint_confidence"}
+                if not required.issubset(d.files):
+                    print(f"  WARNING: {npz_path.name} missing pose keys, skipping")
+                    continue
+                pose = np.concatenate([
+                    d["smplx_body_pose"],        # (T, 63) — 21 joints
+                    d["smplx_left_hand_pose"],   # (T, 45) — 15 joints
+                    d["smplx_right_hand_pose"],  # (T, 45) — 15 joints
+                ], axis=1)                       # (T, 153)
+                rotations = torch.from_numpy(pose.astype(np.float32)).reshape(-1, 51, 3)
+                conf = torch.from_numpy(
+                    d["pred_joint_confidence"][:, 1:52].astype(np.float32)
+                )  # (T, 51)
+            persons[pid] = (rotations, conf)
+        if persons:
+            cam_data[cam_id] = persons
+    return cam_data
+
+
+def _common_persons(cam_data: dict[str, dict[int, tuple]]) -> list[int]:
+    """Return person IDs present in every camera (mirrors alignment_experiments.py)."""
+    sets = [set(persons.keys()) for persons in cam_data.values()]
+    return sorted(set.intersection(*sets))
+
+
+def _apply_shifts(
+    cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]],
+    shifts: dict[str, int],
+    pids: list[int],
+) -> tuple[list[list[torch.Tensor]], list[list[torch.Tensor]]]:
+    """Slice each camera's sequence to simulate temporal offsets.
+
+    Mirrors ``apply_shifts`` in evaluation/alignment_experiments.py exactly:
+    - T_base = min sequence length across all (cam, person) pairs
+    - max_s  = max(shifts)
+    - camera c gets frames [max_s - shifts[c] : T_base], so the latest-starting
+      camera (shift == max_s) gets s=0 and all T_base frames.
+    """
+    cam_ids = list(shifts.keys())
+    T_base  = min(cam_data[c][p][0].shape[0] for c in cam_ids for p in pids)
+    max_s   = max(shifts.values())
+    print(f"  T_base={T_base}  shift_spread={max_s - min(shifts.values())}")
+
+    joints_list: list[list[torch.Tensor]] = []
+    confs_list:  list[list[torch.Tensor]] = []
+    for cam_id in cam_ids:
+        s = max_s - shifts[cam_id]   # latest camera → s=0 → all T_base frames
+        per_person_joints, per_person_confs = [], []
+        for pid in pids:
+            rotations, conf = cam_data[cam_id][pid]
+            per_person_joints.append(rotations[s : T_base].to(SYNC_DEVICE))
+            per_person_confs .append(conf     [s : T_base].to(SYNC_DEVICE))
+        joints_list.append(per_person_joints)
+        confs_list .append(per_person_confs)
+    return joints_list, confs_list
 
 def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     """Run the full pipeline on a single scene."""
@@ -80,11 +169,65 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
             "Check that smplx_model_path and mhr_model_path are set in CONFIG."
         )
 
-    # Step 5: Camera alignment
+    # Step 5: Temporal synchronisation (optional — enabled via CONFIG.synchronization.enabled)
+    # Applies random shifts to each camera's pose sequence, runs the Synchronizer to
+    # recover those shifts via DTW, and logs an evaluation (MAE, within-1/2 frames).
+    sync_cfg = getattr(CONFIG, "synchronization", None)
+    if sync_cfg is not None and getattr(sync_cfg, "enabled", False):
+        print(f"\n--- Step 5: Temporal synchronisation (random-shift evaluation) ---")
+        cam_data = _load_body_data(video_dirs)
+        if len(cam_data) < 2:
+            print("  WARNING: fewer than 2 cameras with pose data — skipping sync eval")
+        else:
+            pids = _common_persons(cam_data)
+            if not pids:
+                print("  WARNING: no person ID common across all cameras — skipping sync eval")
+            else:
+                cam_ids = list(cam_data.keys())
+                print(f"  Cameras: {cam_ids}")
+                print(f"  Common persons: {pids}")
+                sync = Synchronizer(device=SYNC_DEVICE)
+                rng  = np.random.default_rng(SYNC_SEED)
+                results = []
+                for trial in range(SYNC_N_TRIALS):
+                    raw_shifts  = [0] + rng.integers(-SYNC_MAX_SHIFT, SYNC_MAX_SHIFT + 1,
+                                                      size=len(cam_ids) - 1).tolist()
+                    true_shifts = {c: int(s) for c, s in zip(cam_ids, raw_shifts)}
+                    print(f"  Trial {trial + 1}/{SYNC_N_TRIALS}  true shifts: {true_shifts}")
+
+                    joints_list, confs_list = _apply_shifts(cam_data, true_shifts, pids)
+                    offset_mat = sync.estimate_offset_matrix(joints_list, confs_list)
+                    weights    = sync.cycle_consistency_weights(offset_mat)
+                    estimated  = sync.estimate_initial_times(offset_mat, weights)
+
+                    true_t = torch.tensor([true_shifts[c] for c in cam_ids], dtype=torch.float32)
+                    true_t = true_t - true_t.min()
+                    errors = (estimated.cpu() - true_t).abs()
+                    mae    = errors.mean().item()
+
+                    for cam_id, tt, est, err in zip(cam_ids, true_t.tolist(),
+                                                    estimated.cpu().tolist(), errors.tolist()):
+                        print(f"    {cam_id}: true={tt:+.0f}  estimated={est:+.1f}  error={err:.1f}")
+                    print(f"  MAE={mae:.2f}  "
+                          f"within-1={((errors <= 1).float().mean().item()) * 100:.0f}%  "
+                          f"within-2={((errors <= 2).float().mean().item()) * 100:.0f}%")
+                    results.append({"mae": mae,
+                                    "within_1": (errors <= 1).float().mean().item(),
+                                    "within_2": (errors <= 2).float().mean().item()})
+
+                if len(results) > 1:
+                    all_mae = [r["mae"] for r in results]
+                    print(f"\n  SUMMARY over {SYNC_N_TRIALS} trials:")
+                    print(f"  MAE  mean={np.mean(all_mae):.2f}  "
+                          f"median={np.median(all_mae):.2f}  max={np.max(all_mae):.2f}")
+                    print(f"  Within 1fr  {np.mean([r['within_1'] for r in results]) * 100:.1f}%")
+                    print(f"  Within 2fr  {np.mean([r['within_2'] for r in results]) * 100:.1f}%")
+
+    # Step 6: Camera alignment
     # Estimate pairwise relative camera poses from the cross-view body
     # correspondences produced by the estimation + ReID steps, then persist
     # the result as camera_alignment.npz in the scene directory.
-    print(f"\n--- Step 5: Camera alignment ---")
+    print(f"\n--- Step 6: Camera alignment ---")
     alignment = CameraAlignment().estimate(video_dirs, min_correspondences=30)
     if alignment:
         align_path = CameraAlignment.save(alignment, scene_output_dir)
@@ -102,8 +245,8 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
             "Check that cross-view ReID found shared persons across videos."
         )
 
-    # Step 6: FusionDatapoint compatibility check
-    print(f"\n--- Step 6: FusionDatapoint compatibility check ---")
+    # Step 7: FusionDatapoint compatibility check
+    print(f"\n--- Step 7: FusionDatapoint compatibility check ---")
     try:
         fusion_dp = RICHFusionDatapoint(
             scene_dir=scene_output_dir,
@@ -121,7 +264,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     except Exception as e:
         print(f"  ERROR: FusionDatapoint failed to load: {e}")
 
-    # Step 7: Inspect output format for each video
+    # Step 8: Inspect output format for each video
     print(f"\n=== Body parameter output format ===")
     for video_id, video_dir in video_dirs.items():
         body_dir = Path(video_dir) / "body_data"
@@ -176,7 +319,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
         else:
             print(f"  WARNING: summary JSON not found at {summary_path}")
 
-    # Step 8: Visualise the re-ID corrected segmentation.
+    # Step 9: Visualise the re-ID corrected segmentation.
     print(f"\n--- Visualising re-ID corrected segmentation ---")
     for video in scene.videos:
         if video.video_id not in video_dirs:

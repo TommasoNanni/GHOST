@@ -420,6 +420,30 @@ class Scene:
             shifts[video.video_id] = (start, end)
         return shifts
 
+    def apply_random_start_shifts(self, max_shift: int = 30) -> dict[str, int]:
+        """Apply a random start offset to each video, leaving the end unchanged.
+
+        Unlike `shuffle`, this only moves the start boundary so that the
+        trimmed length stays close to the original.  Useful for testing the
+        temporal synchronizer: call this before the pipeline, then compare
+        the synchronizer's estimated offsets against the returned ground truth.
+
+        Parameters
+        ----------
+        max_shift : int
+            Maximum start offset in frames.
+
+        Returns
+        -------
+        dict mapping video_id -> start_offset (ground-truth shift in frames).
+        """
+        shifts = {}
+        for video in self.videos:
+            shift = random.randint(0, min(max_shift, video.num_frames - 1))
+            video.start = shift
+            shifts[video.video_id] = shift
+        return shifts
+
     def get_shifted_frame(self, video_key: int | str, t: int) -> torch.Tensor:
         """Get frame *t* from a video, remapped to its [start, end) range.
 

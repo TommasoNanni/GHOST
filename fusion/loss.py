@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch3d.transforms import matrix_to_quaternion, rotation_6d_to_matrix, matrix_to_axis_angle, quaternion_to_matrix
 
-from utilities.smplx_utilities import get_smplx_vertices
+from utilities.smplx_utilities import get_smplx_vertices, get_smplx_joints
 from utilities.camera_utilities import extract_cameras
 from utilities.geometry import project_to_2d, skew_symmetric
 from configuration import CONFIG
@@ -255,8 +255,8 @@ class VPoserLoss(Loss):
         axis_angle = matrix_to_axis_angle(rot_mat.reshape(-1, 3, 3))         # (B*T*P*J, 3)
         pose       = axis_angle.reshape(*pose_aggr.shape[:-1], 3)            # (B, T, P, J, 3)
 
-        # slice body joints 1-55 (skip root), flatten to (N, 54*3)
-        smpl_pose = pose[..., 1:, :].reshape(-1, 162)
+        # slice body joints 1-22 (skip root, skip hands/face), flatten to (N, 21*3=63)
+        smpl_pose = pose[..., 1:22, :].reshape(-1, 63)
 
         dist = self.vposer.encode(smpl_pose)
 
@@ -293,17 +293,17 @@ class BoneLengthconsistencyLoss(Loss):
         Scalar loss encouraging constant bone length across time.
         """
         pose_aggr, shape_aggr, _, _, _ = preds
-        joints = get_smplx_vertices(pose_aggr, shape_aggr)  # (B, T, P, J, 3)
+        joints = get_smplx_joints(pose_aggr, shape_aggr)[..., :55, :]  # (B, T, P, 55, 3)
 
         parent_mapping = torch.tensor(
-            PARENTS_TABLE, device=joints.device, dtype=joints.dtype
+            PARENTS_TABLE, device=joints.device, dtype=torch.long
         )
         parents = parent_mapping[0, :]
         parent_joints = joints[..., parents, :]                       # (B, T, P, J, 3)
 
         bone_lengths = torch.norm(joints - parent_joints, p=2, dim=-1)  # (B, T, P, J)
         indices = torch.arange(len(parents), device=joints.device)
-        mask = parent_mapping != indices
+        mask = parents != indices                                      # (55,) — False for root joints
         valid_lengths = bone_lengths[..., mask]                       # (B, T, P, J_valid)
 
         # check consistency across T only (no K dimension after fusion)

@@ -410,10 +410,10 @@ class FusionDatapoint(Dataset, ABC):
             "person_mask": torch.from_numpy(person_mask),  # (T, K, P) bool
         }
         targets = {
-            "pose": torch.from_numpy(gt_pose),
-            "shape": torch.from_numpy(gt_shape),
-            "camera": torch.from_numpy(gt_camera),
-            "keypoints_3d": torch.from_numpy(gt_kp3d),
+            "pose": torch.from_numpy(gt_pose[:, 0]),           # [T, P, J, 6]
+            "shape": torch.from_numpy(gt_shape[:, 0]),         # [T, P, 10]
+            "camera": torch.from_numpy(gt_camera),             # [T, K, 8]
+            "keypoints_3d": torch.from_numpy(gt_kp3d[:, 0]),  # [T, P, 70, 3]
         }
         return inputs, targets
 
@@ -935,7 +935,11 @@ class RICHFusionDatapoint(FusionDatapoint):
         array, then looks it up in the GT frame LUT.  If no GT exists for
         this frame / person slot, the arrays are left as zeros.
         """
-        # GT lives in world (cam-0) frame — only supervise the cam-0 slot.
+        # GT camera: static per-camera extrinsic — fill for every camera.
+        if cam_idx < len(self._gt_camera_vecs):
+            camera_out[:] = self._gt_camera_vecs[cam_idx]
+
+        # Pose/shape GT lives in world (cam-0) frame — only supervise cam-0.
         if cam_idx != 0:
             return
 
@@ -958,10 +962,6 @@ class RICHFusionDatapoint(FusionDatapoint):
             return   # No GT annotation for this frame
 
         gt = self._gt[cam_idx][pid]
-
-        # GT camera: static per-camera extrinsic, same for every frame.
-        if cam_idx < len(self._gt_camera_vecs):
-            camera_out[:] = self._gt_camera_vecs[cam_idx]
 
         # Shape: betas (10,)
         if "betas" in gt:

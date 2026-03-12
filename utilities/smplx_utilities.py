@@ -69,7 +69,12 @@ def get_smplx_vertices(pose: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
 
     output = _get_smplx_model(N*P, device, dtype)(
         global_orient=pose_aa[:, :3],
-        body_pose=pose_aa[:, 3:],
+        body_pose=pose_aa[:, 3:66],
+        left_hand_pose=pose_aa[:, 66:111],
+        right_hand_pose=pose_aa[:, 111:156],
+        jaw_pose=pose_aa[:, 156:159],
+        leye_pose=pose_aa[:, 159:162],
+        reye_pose=pose_aa[:, 162:165],
         betas=shape.reshape(N*P, 10),
         return_verts=True,
     )
@@ -79,6 +84,57 @@ def get_smplx_vertices(pose: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
         return output.vertices.reshape(B, T, K, P, V, 3)
     else:
         return output.vertices.reshape(B, T, P, V, 3)
+
+
+def get_smplx_joints(pose: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
+    """
+    Forward pass through SMPLX model to get joint positions.
+
+    Parameters
+    ----------
+    pose : (B, T, P, J, 6) or (B, T, K, P, J, 6) — 6D rotation representation.
+    shape : (B, T, P, 10) or (B, T, K, P, 10) — shape parameters.
+
+    Returns
+    -------
+    joints : (B, T, [K,] P, J, 3) — SMPLX joint positions.
+    """
+    device = pose.device
+    dtype = pose.dtype
+    has_camera_dim = (pose.ndim == 6)
+
+    if has_camera_dim:
+        B, T, K, P, J, _ = pose.shape
+        pose  = pose.reshape(B*T*K, P, J, 6)
+        shape = shape.reshape(B*T*K, P, 10)
+    else:
+        B, T, P, J, _ = pose.shape
+        pose  = pose.reshape(B*T, P, J, 6)
+        shape = shape.reshape(B*T, P, 10)
+
+    N = pose.shape[0]
+
+    pose_aa = matrix_to_axis_angle(
+        rotation_6d_to_matrix(pose.reshape(N*P*J, 6))
+    ).reshape(N*P, J*3)
+
+    output = _get_smplx_model(N*P, device, dtype)(
+        global_orient=pose_aa[:, :3],
+        body_pose=pose_aa[:, 3:66],
+        left_hand_pose=pose_aa[:, 66:111],
+        right_hand_pose=pose_aa[:, 111:156],
+        jaw_pose=pose_aa[:, 156:159],
+        leye_pose=pose_aa[:, 159:162],
+        reye_pose=pose_aa[:, 162:165],
+        betas=shape.reshape(N*P, 10),
+        return_verts=False,
+    )
+
+    Jout = output.joints.shape[1]
+    if has_camera_dim:
+        return output.joints.reshape(B, T, K, P, Jout, 3)
+    else:
+        return output.joints.reshape(B, T, P, Jout, 3)
 
 
 def get_joint_parent_mapping():

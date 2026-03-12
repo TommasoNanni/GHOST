@@ -27,8 +27,11 @@ parameters_extraction:
   cross_view_appearance_weight: 0.7 # Weight of DINOv3 appearance features
   cross_view_shape_weight: 0.3 # Weight of SMPL-X shape (beta) features
 
+synchronization:
+  enabled: false  # Set true to run temporal sync before camera alignment (uses random-shift evaluation)
+
 fusion:
-  use_wandb: true
+  use_wandb: false
   architecture:
     embedding_dimension: 16
     temporal_window: 32
@@ -46,6 +49,6 @@ fusion:
     camera_mse_weight: 0.1
     vposer_weight: 0.01
   training:
-    max_epochs: 1
+    max_epochs: 2
     lr: 0.001
     batch_size: 1

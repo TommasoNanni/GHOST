@@ -595,7 +595,7 @@ class SSTNetwork(nn.Module):
         which hard-excludes them from softmax.
         """
         outer = torch.einsum("bi, bj -> bij", flat, flat)
-        mask = torch.log(outer)
+        mask = torch.log(outer.clamp(min=1e-8))
         return mask.unsqueeze(1).expand(-1, num_heads, -1, -1).reshape(
             flat.shape[0] * num_heads, flat.shape[1], flat.shape[1]
         )
@@ -699,7 +699,7 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
             )
-
+        
             shape_stream = self.shape_layers[layer_idx](
                 shape_stream, B, T, K, P, D,
                 pe=pe,
@@ -720,6 +720,7 @@ class SSTNetwork(nn.Module):
                 pose_stream, camera_stream,
                 B, T, K, P, J, D, self.dropout,
             )
+
 
         # decode
         return self.output_heads(
