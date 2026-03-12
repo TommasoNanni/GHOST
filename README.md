@@ -28,14 +28,14 @@ Then make sure you have [pixi](https://github.com/prefix-dev/pixi) installed, si
 pixi install
 pixi run setup-cuda
 pixi run download-model # download sam3
-pip install --no-deps -e ./human_body_prior
+pici run install-hbp
 ```
 In case you are on a devicee without GPU available (or on a login node on a cluster)
 ```bash
 CONDA_OVERRIDE_CUDA=12.6 pixi install
 CONDA_OVERRIDE_CUDA=12.6 pixi run setup-cuda
 CONDA_OVERRIDE_CUDA=12.6 pixi run download-model
-pip install --no-deps -e ./human_body_prior
+CONDA_OVERRIDE_CUDA=12.6 pixi run install-hbp
 ```
 We built this project using python 3.12 and torch 2.7.1 with cuda 12.6 support.
 

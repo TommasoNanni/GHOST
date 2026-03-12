@@ -72,3 +72,4 @@ rerun-sdk = ">=0.21.0"
 # (currently 2.7.1). Same version = ABI-compatible, so pymomentum keeps working.
 setup-cuda = "python -m pip install --force-reinstall 'torch==2.7.1+cu128' 'torchvision==0.22.1+cu128' --index-url https://download.pytorch.org/whl/cu128 && python -m pip install --no-build-isolation 'git+https://github.com/facebookresearch/pytorch3d.git'"
 download-model = "python -c \"from huggingface_hub import snapshot_download; snapshot_download(repo_id='facebook/sam3', local_dir='checkpoints', local_dir_use_symlinks=False)\""
+install-hbp = "python -m pip install --no-deps -e ./human_body_prior"
