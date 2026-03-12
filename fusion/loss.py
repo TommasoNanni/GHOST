@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 import logging
+import sys
+import os
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+hbp_path = os.path.join(project_root, 'human_body_prior')
+if hbp_path not in sys.path:
+    sys.path.insert(0, hbp_path)
 
 from abc import ABC, abstractmethod
 from typing import Any
