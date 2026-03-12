@@ -935,6 +935,10 @@ class RICHFusionDatapoint(FusionDatapoint):
         array, then looks it up in the GT frame LUT.  If no GT exists for
         this frame / person slot, the arrays are left as zeros.
         """
+        # GT lives in world (cam-0) frame — only supervise the cam-0 slot.
+        if cam_idx != 0:
+            return
+
         if cam_idx >= len(self._gt) or pid not in self._gt[cam_idx]:
             return
 
