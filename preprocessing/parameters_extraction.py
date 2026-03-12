@@ -122,6 +122,17 @@ class BodyParameterEstimator:
                 "this will cause 'Got unsupported ScalarType BFloat16' errors. "
                 "Check that _free_models() properly exited the SAM3 tracker's bf16_context."
             )
+        # Force deterministic cuBLAS / cuDNN so that the DINOv3 backbone produces
+        # bit-identical features regardless of how many forward passes have run
+        # before this scene.  Without this, the cuBLAS workspace carries floating-
+        # point residuals from prior scenes, shifting backbone outputs by ~1e-3.
+        # Those shifts are enough to flip borderline within-video ReID decisions,
+        # cascade into wrong gallery descriptors, and ultimately cause cross-view
+        # mismatches (e.g. a cameraman stealing a foreground person's global ID).
+        import os
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
         try:
             from notebook.utils import setup_sam_3d_body
         except ImportError as e:
