@@ -45,10 +45,29 @@ RICH_SCENE_DIR  = Path(
     "/cluster/project/cvg/students/tnanni/ghost/test_outputs"
     "/rich5_segmentation_test/BBQ_001_guitar"
 )
-TEMPORAL_WINDOW = 32   # each frame attends to 2*32+1 = 65 neighbours
 
 
 def main():
+    # Architecture
+    embedding_dim           = CONFIG.fusion.architecture.embedding_dimension
+    temporal_window         = CONFIG.fusion.architecture.temporal_window
+    num_heads               = CONFIG.fusion.architecture.num_heads
+    num_layers              = CONFIG.fusion.architecture.num_layers
+    dropout                 = CONFIG.fusion.architecture.dropout
+    # Loss weights
+    pose_mse_weight         = CONFIG.fusion.loss.pose_mse_weight
+    shape_mse_weight        = CONFIG.fusion.loss.shape_mse_weight
+    epipolar_weight         = CONFIG.fusion.loss.epipolar_weight
+    temporal_weight         = CONFIG.fusion.loss.temporal_weight
+    bone_length_weight      = CONFIG.fusion.loss.bone_length_weight
+    beta_consistency_weight = CONFIG.fusion.loss.beta_consistency_weight
+    camera_mse_weight       = CONFIG.fusion.loss.camera_mse_weight
+    vposer_weight           = CONFIG.fusion.loss.vposer_weight
+    # Training params
+    lr                      = CONFIG.fusion.training.lr
+    max_epochs              = CONFIG.fusion.training.max_epochs
+    batch_size              = CONFIG.fusion.training.batch_size
+
     # create the dataset
     dp = RICHFusionDatapoint(scene_dir=RICH_SCENE_DIR, rich_data_root = CONFIG.data.rich_data_root)
     img_size = dp.img_size
@@ -59,42 +78,42 @@ def main():
     T = inputs["pose"].shape[0]
     print({k: tuple(v.shape) for k, v in inputs.items()})
     # 'pose': (382, 8, 1, 55, 6), 'shape': (382, 8, 1, 10), 'camera': (382, 8, 8), 'joint_mask': (382, 8, 1, 55), 'person_mask': (382, 8, 1)
-    loader = DataLoader(ds, batch_size=1, shuffle=False)
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False)
 
     logger.info(
         f"WindowedTemporalAttention — flex_attention + block_mask  "
-        f"(temporal_window={TEMPORAL_WINDOW}, T={T}  "
-        f"-> each frame attends to {min(2 * TEMPORAL_WINDOW + 1, T)} frames)"
+        f"(temporal_window={temporal_window}, T={T}  "
+        f"-> each frame attends to {min(2 * temporal_window + 1, T)} frames)"
     )
 
     model = SSTNetwork(
-        embedding_dim=64,
-        num_heads=8,
-        num_layers=8,
+        embedding_dim=embedding_dim,
+        num_heads=num_heads,
+        num_layers=num_layers,
         max_temporal_len=T,
-        dropout=0.1,
-        temporal_window=TEMPORAL_WINDOW,
+        dropout=dropout,
+        temporal_window=temporal_window,
     )
 
     logger.info("\n" + model.summary())
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     try:
-        vposer = VPoserLoss()
+        vposer_loss = VPoserLoss()
+        logging.info("VPoser successfully loaded")
     except Exception as e:
         logger.warning(f"VPoserLoss unavailable ({e}); skipping.")
-        vposer = None
-
+        vposer_loss = None
     losses = {
-        "pose":       (PoseMSELoss(),             1.0),
-        "shape":      (ShapeMSELoss(),            1.0),
-        "epipolar":   (EpipolarLoss(img_size=img_size),            0.1),
-        "temporal":   (TemporalSmoothnessLoss(),  0.1),
-        "bone":       (BoneLengthconsistencyLoss(), 0.0),
-        "beta":       (BetaConsistencyLoss(),     0.1),
-        "camera_mse": (CameraMSELoss(img_size=img_size), 0.1),
-        **({"vposer": (vposer, 0.01)} if vposer is not None else {}),
+        "pose":       (PoseMSELoss(),                    pose_mse_weight              ),
+        "shape":      (ShapeMSELoss(),                   shape_mse_weight             ),
+        "epipolar":   (EpipolarLoss(img_size=img_size),  epipolar_weight              ),
+        "temporal":   (TemporalSmoothnessLoss(),         temporal_weight              ),
+        "bone":       (BoneLengthconsistencyLoss(),      bone_length_weight           ),
+        "beta":       (BetaConsistencyLoss(),            beta_consistency_weight      ),
+        "camera_mse": (CameraMSELoss(img_size=img_size), camera_mse_weight            ),
+        **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
 
     trainer = Trainer(
@@ -102,13 +121,12 @@ def main():
         optimizer=optimizer,
         train_loader=loader,
         losses=losses,
-        max_epochs=500,
-        use_wandb=False,
+        max_epochs=max_epochs,
+        use_wandb=CONFIG.fusion.use_wandb,
     )
 
     trainer.train()
 
-    # ── Final check ────────────────────────────────────────────────────────
     trainer.model.eval()
     with torch.no_grad():
         batch = next(iter(loader))
