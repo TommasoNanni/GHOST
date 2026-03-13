@@ -346,31 +346,35 @@ def main():
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
 
-    segmenter = PersonSegmenter(
-        checkpoint_path=CONFIG.segmentation.checkpoint_path,
-        text_prompt=CONFIG.segmentation.text_prompt,
-        redetect_interval=CONFIG.segmentation.redetect_interval,
-        new_det_thresh=CONFIG.segmentation.new_det_thresh,
-        score_threshold_detection=CONFIG.segmentation.score_threshold_detection,
-    )
-    estimator = BodyParameterEstimator(
-        sam3d_hf_repo = CONFIG.parameters_extraction.sam3d_id,
-        sam3d_step = CONFIG.parameters_extraction.sam3d_step,
-        bbox_padding = CONFIG.parameters_extraction.bbox_padding,
-        smplx_model_path = CONFIG.data.smplx_model_path,
-        mhr_model_path  = CONFIG.data.mhr_model_path,
-        reid_threshold = CONFIG.parameters_extraction.reid_threshold,
-        gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
-        reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
-    )
-    reidentifier = CrossViewReidentifier(
-        threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
-        appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
-        shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
-    )
-
     for scene in ds.scenes:
+        # Re-instantiate per scene so no Python-level instance state (gallery
+        # EMA, cached model handles, etc.) leaks from one scene into the next.
+        segmenter = PersonSegmenter(
+            checkpoint_path=CONFIG.segmentation.checkpoint_path,
+            text_prompt=CONFIG.segmentation.text_prompt,
+            redetect_interval=CONFIG.segmentation.redetect_interval,
+            new_det_thresh=CONFIG.segmentation.new_det_thresh,
+            score_threshold_detection=CONFIG.segmentation.score_threshold_detection,
+        )
+        estimator = BodyParameterEstimator(
+            sam3d_hf_repo = CONFIG.parameters_extraction.sam3d_id,
+            sam3d_step = CONFIG.parameters_extraction.sam3d_step,
+            bbox_padding = CONFIG.parameters_extraction.bbox_padding,
+            smplx_model_path = CONFIG.data.smplx_model_path,
+            mhr_model_path  = CONFIG.data.mhr_model_path,
+            reid_threshold = CONFIG.parameters_extraction.reid_threshold,
+            gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
+            reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
+        )
+        reidentifier = CrossViewReidentifier(
+            threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
+            appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
+            shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
+        )
         process_scene(scene, segmenter, estimator, reidentifier, output_dir)
+        del segmenter, estimator, reidentifier
+        import gc as _gc; _gc.collect()
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
