@@ -10,3 +10,4 @@ bash_jobs/download_rich_train.sh
 CLAUDE.md
 .pytest_cache/
 *.out
+wandb/

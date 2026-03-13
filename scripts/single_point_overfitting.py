@@ -116,6 +116,18 @@ def main():
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
 
+    if CONFIG.fusion.use_wandb:
+        import wandb
+        wandb.init(
+            project="ghost-fusion",
+            name="single_point_overfitting",
+            config={
+                **vars(CONFIG.fusion.architecture),
+                **vars(CONFIG.fusion.loss),
+                **vars(CONFIG.fusion.training),
+            },
+        )
+
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
