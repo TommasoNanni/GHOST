@@ -28,6 +28,7 @@ import gc
 import io
 import json
 import logging
+import sys
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -39,6 +40,15 @@ import torch.multiprocessing as mp
 from scipy.optimize import linear_sum_assignment
 from tqdm import tqdm
 import smplx
+
+# sam-3d-body ships a `tools/` package that is not part of any installed
+# distribution — it must be on sys.path so that notebook/utils.py can do
+# `from tools.build_detector import HumanDetector`.  Previously this was
+# handled by a PYTHONPATH entry in ~/.bashrc; we inject it here instead so
+# the code is self-contained regardless of shell environment.
+_SAM3D_ROOT = Path(__file__).resolve().parents[1] / "sam-3d-body"
+if str(_SAM3D_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SAM3D_ROOT))
 
 from data.video_dataset import Scene
 from mhr.mhr import MHR
@@ -266,6 +276,16 @@ class BodyParameterEstimator:
         """
         torch.cuda.set_device(gpu_id)
         gpu_label = f"[GPU {gpu_id}] "
+
+        # Mirror the determinism settings from _init_sam3d() so that cuBLAS
+        # workspace residuals do not accumulate across videos processed
+        # sequentially by the same worker.  Without this, DINOv3 features
+        # for the N-th video in a worker differ by ~1e-3 from a fresh run,
+        # which can flip borderline within-video ReID merge decisions.
+        import os as _os
+        _os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
 
         logging.info(f"{gpu_label}Loading SAM3D...")
         try:
