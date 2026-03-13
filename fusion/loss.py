@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch3d.transforms import matrix_to_quaternion, rotation_6d_to_matrix, matrix_to_axis_angle, quaternion_to_matrix
 
-from utilities.smplx_utilities import get_smplx_vertices, get_smplx_joints
+from utilities.smplx_utilities import get_smplx_joints
 from utilities.camera_utilities import extract_cameras
 from utilities.geometry import project_to_2d, skew_symmetric
 from configuration import CONFIG
@@ -65,10 +65,15 @@ class Loss(ABC):
 
 class EpipolarLoss(Loss):
     def __init__(
-        self, name: str = "Epipolar Loss", weight: float = 1.0, img_size: tuple[int, int] = (224, 224)
+        self,
+        name: str = "Epipolar Loss",
+        weight: float = 1.0,
+        img_size: tuple[int, int] = (224, 224),
+        chunk_size: int = 32,
     ) -> None:
         super().__init__(name, weight)
         self.img_size = img_size
+        self.chunk_size = chunk_size
 
     def forward(
             self,
@@ -78,6 +83,9 @@ class EpipolarLoss(Loss):
         """
         Computes the epipolar loss from per-camera pose/shape/camera predictions.
         Uses pose_per_cam and shape_per_cam so each body is in its own camera frame.
+
+        Processes T in chunks of `chunk_size` to avoid OOM when running SMPL-X
+        on long sequences.
 
         preds: (pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam)
         """
@@ -89,32 +97,39 @@ class EpipolarLoss(Loss):
         total_loss = pose_stream.new_zeros([])
 
         for i in range(K):
-            for j in range(i+1,K):
-                pose_i = pose_stream[:, :, i] # (B, T, P, J, 6)
-                pose_j = pose_stream[:, :, j] # (B, T, P, J, 6)
-                        
-                shape_i = shape_stream[:, :, i] # (B, T, P, S)
-                shape_j = shape_stream[:, :, j] # (B, T, P, S)
-                
-                vertices_i = get_smplx_vertices(pose_i, shape_i) # (B, T, P, V, 3) in camera i
-                vertices_j = get_smplx_vertices(pose_j, shape_j) # (B, T, P, V, 3) in camera j
+            for j in range(i + 1, K):
+                pose_i  = pose_stream[:, :, i]   # (B, T, P, J, 6)
+                pose_j  = pose_stream[:, :, j]
+                shape_i = shape_stream[:, :, i]  # (B, T, P, S)
+                shape_j = shape_stream[:, :, j]
+                cam_i   = camera_stream[:, :, i]
+                cam_j   = camera_stream[:, :, j]
 
-                R_i, t_i, K_i = extract_cameras(camera_stream[:, :, i], self.img_size)
-                R_j, t_j, K_j = extract_cameras(camera_stream[:, :, j], self.img_size)
+                pair_numerator   = pose_i.new_zeros([])
+                pair_visible_sum = 0
 
-                F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
+                for t0 in range(0, T, self.chunk_size):
+                    t1 = min(t0 + self.chunk_size, T)
 
-                x_i = project_to_2d(vertices_i, K_i)
-                x_j = project_to_2d(vertices_j, K_j)
+                    vi = get_smplx_joints(pose_i[:, t0:t1], shape_i[:, t0:t1])
+                    vj = get_smplx_joints(pose_j[:, t0:t1], shape_j[:, t0:t1])
 
-                epipolar_errors = self.compute_epipolar_errors(x_i, x_j, F)
+                    R_i, t_i, K_i = extract_cameras(cam_i[:, t0:t1], self.img_size)
+                    R_j, t_j, K_j = extract_cameras(cam_j[:, t0:t1], self.img_size)
+                    F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
 
-                visible = (vertices_i[..., 2] > 0) & (vertices_j[..., 2] > 0)
+                    x_i = project_to_2d(vi, K_i)
+                    x_j = project_to_2d(vj, K_j)
 
-                loss_ij = (epipolar_errors**2)*visible.float()
-                total_loss += loss_ij.sum() / (visible.sum() + 1e-8)
+                    errors  = self.compute_epipolar_errors(x_i, x_j, F)
+                    visible = (vi[..., 2] > 0) & (vj[..., 2] > 0)  # joints with positive depth
+
+                    pair_numerator   = pair_numerator + (errors ** 2 * visible.float()).sum()
+                    pair_visible_sum = pair_visible_sum + visible.sum().item()
+
+                total_loss = total_loss + pair_numerator / (pair_visible_sum + 1e-8)
                 num_pairs += 1
-        
+
         return total_loss / num_pairs
 
 
@@ -250,6 +265,8 @@ class VPoserLoss(Loss):
         Scalar KL loss: KL( q(z|x) ‖ N(0,I) )
         """
         pose_aggr, _, _, _, _ = preds
+        if next(self.vposer.parameters()).device != pose_aggr.device:
+            self.vposer = self.vposer.to(pose_aggr.device)
         # 6D rotation → rotation matrix → axis-angle
         rot_mat    = rotation_6d_to_matrix(pose_aggr)                        # (B, T, P, J, 3, 3)
         axis_angle = matrix_to_axis_angle(rot_mat.reshape(-1, 3, 3))         # (B*T*P*J, 3)

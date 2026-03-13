@@ -699,7 +699,7 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
             )
-        
+
             shape_stream = self.shape_layers[layer_idx](
                 shape_stream, B, T, K, P, D,
                 pe=pe,
