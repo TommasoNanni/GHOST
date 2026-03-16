@@ -145,11 +145,21 @@ def main():
         t_mid = T // 2   # representative frame
 
         with torch.no_grad():
-            # Predicted 3D joints via SMPL-X: (B, T, P, J, 3)
+            # Predicted and GT 3D joints via SMPL-X: (B, T, P, Jout, 3)
+            # Both are computed in body-centric space so they are in the same
+            # coordinate frame. Using targets["keypoints_3d"] (pred_keypoints_3d
+            # from the npz) would be wrong: those are in camera space (with R, t
+            # applied), so Umeyama would trivially absorb the rigid transform and
+            # give PA-MPJPE = 0 regardless of prediction quality.
             pred_joints = get_smplx_joints(
                 pose_aggr.float(), shape_aggr.float()
             ).cpu().numpy()
-            gt_joints = targets["keypoints_3d"].float().cpu().numpy()
+            gt_joints = get_smplx_joints(
+                targets["pose"].float(), targets["shape"].float()
+            ).cpu().numpy()
+            # Keep only the first 55 SMPL-X joints.
+            pred_joints = pred_joints[..., :55, :]
+            gt_joints   = gt_joints  [..., :55, :]
 
             # Camera rotations (B, T, K, 3, 3) and translations (B, T, K, 3)
             R_pred = quaternion_to_matrix(

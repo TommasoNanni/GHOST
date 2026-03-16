@@ -345,7 +345,7 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
-
+    ds.scenes = [ds.scenes[1]]
     for scene in ds.scenes:
         # Re-instantiate per scene so no Python-level instance state (gallery
         # EMA, cached model handles, etc.) leaks from one scene into the next.
@@ -365,7 +365,6 @@ def main():
             reid_threshold = CONFIG.parameters_extraction.reid_threshold,
             gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
             reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
-            gallery_min_confidence = getattr(CONFIG.parameters_extraction, "gallery_min_confidence", 0.2),
         )
         reidentifier = CrossViewReidentifier(
             threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
