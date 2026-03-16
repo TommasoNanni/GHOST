@@ -118,13 +118,21 @@ class EpipolarLoss(Loss):
                     R_j, t_j, K_j = extract_cameras(cam_j[:, t0:t1], self.img_size)
                     F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
 
-                    x_i = project_to_2d(vi, K_i)
-                    x_j = project_to_2d(vj, K_j)
+                    # Translate joints from local body frame into each camera frame
+                    # by adding pred_cam_t (body root position in camera space).
+                    vi_cam = vi + t_i.reshape(B, t1 - t0, 1, 1, 3)
+                    vj_cam = vj + t_j.reshape(B, t1 - t0, 1, 1, 3)
+
+                    x_i = project_to_2d(vi_cam, K_i)
+                    x_j = project_to_2d(vj_cam, K_j)
 
                     errors  = self.compute_epipolar_errors(x_i, x_j, F)
-                    visible = (vi[..., 2] > 0) & (vj[..., 2] > 0)  # joints with positive depth
+                    visible = (vi_cam[..., 2] > 0) & (vj_cam[..., 2] > 0)  # depth in camera frame
 
-                    pair_numerator   = pair_numerator + (errors ** 2 * visible.float()).sum()
+                    # Normalize by image diagonal² to make loss dimensionless and
+                    # comparable in scale to other losses (pose/shape MSE on [-1,1]).
+                    img_diag2 = float(self.img_size[0] ** 2 + self.img_size[1] ** 2)
+                    pair_numerator   = pair_numerator + (errors / img_diag2 * visible.to(errors.dtype)).sum()
                     pair_visible_sum = pair_visible_sum + visible.sum().item()
 
                 total_loss = total_loss + pair_numerator / (pair_visible_sum + 1e-8)
@@ -164,8 +172,9 @@ class EpipolarLoss(Loss):
             R_rel.reshape(B*T,3,3)
         ).reshape(B,T,3,3)
 
-        K_i_inv = torch.inverse(K_i.reshape(B*T,3,3)).reshape(B,T,3,3)
-        K_j_inv_T = torch.inverse(K_j.reshape(B*T,3,3)).transpose(-2,-1).reshape(B,T,3,3)
+        # torch.inverse does not support low-precision dtypes — compute in float32
+        K_i_inv = torch.inverse(K_i.reshape(B*T,3,3).float()).to(K_i.dtype).reshape(B,T,3,3)
+        K_j_inv_T = torch.inverse(K_j.reshape(B*T,3,3).float()).to(K_j.dtype).transpose(-2,-1).reshape(B,T,3,3)
 
         F = torch.bmm(
             torch.bmm(
@@ -179,15 +188,21 @@ class EpipolarLoss(Loss):
 
     def compute_epipolar_errors(self, x_i, x_j, F):
         """
-        Computes the epipolar error between the two batches of corresponding points
+        Computes the Sampson distance between corresponding points under F.
+
+        The Sampson distance is a first-order approximation to the geometric
+        reprojection error and is self-normalised by the epipolar line norms,
+        so it does not blow up with large focal lengths the way the raw
+        algebraic error (x_j^T F x_i) does.
+
         Parameters
         ----------
         x_i, x_j : (B, T, P, V, 3) — homogeneous 2D points
         F : (B, T, 3, 3) — fundamental matrix
-        
+
         Returns
         -------
-        error : (B, T, P, V) — scalar error per point
+        error : (B, T, P, V) — Sampson distance per point (always >= 0)
         """
         B, T, P, V = x_i.shape[:4]
 
@@ -195,12 +210,21 @@ class EpipolarLoss(Loss):
         x_j_flat = x_j.reshape(B*T*P*V, 1, 3)
         F_expanded = F.reshape(B,T,1,1,3,3).expand(B,T,P,V,3,3).reshape(B*T*P*V, 3, 3)
 
-        error = torch.bmm(
+        # Algebraic error: scalar per point
+        algebraic = torch.bmm(
             torch.bmm(x_j_flat, F_expanded),
             x_i_flat,
-        ).reshape(B,T,P,V)
+        ).reshape(B*T*P*V)                              # (N,)
 
-        return error
+        # Epipolar lines: F x_i and F^T x_j
+        l_j = torch.bmm(F_expanded, x_i_flat).reshape(B*T*P*V, 3)   # (N, 3)
+        l_i = torch.bmm(F_expanded.transpose(-2,-1), x_j_flat.transpose(-2,-1)).reshape(B*T*P*V, 3)  # (N, 3)
+
+        # Sampson denominator: sum of squared norms of the first two coords of each line
+        denom = l_j[:, 0]**2 + l_j[:, 1]**2 + l_i[:, 0]**2 + l_i[:, 1]**2 + 1e-8
+
+        sampson = (algebraic ** 2) / denom              # (N,)
+        return sampson.reshape(B, T, P, V)
 
 class PoseMSELoss(Loss):
     def __init__(self, name: str = "Pose MSE Loss", weight: float = 1.0) -> None:
@@ -233,7 +257,8 @@ class TemporalSmoothnessLoss(Loss):
         current   = pose_aggr[:, 2:]
         previous1 = pose_aggr[:, 1:-1]
         previous2 = pose_aggr[:, :-2]
-        return torch.norm(current - 2 * previous1 + previous2) ** 2
+        accel = current - 2 * previous1 + previous2
+        return (accel ** 2).mean()
 
 class VPoserLoss(Loss):
     def __init__(
@@ -273,7 +298,7 @@ class VPoserLoss(Loss):
         pose       = axis_angle.reshape(*pose_aggr.shape[:-1], 3)            # (B, T, P, J, 3)
 
         # slice body joints 1-22 (skip root, skip hands/face), flatten to (N, 21*3=63)
-        smpl_pose = pose[..., 1:22, :].reshape(-1, 63)
+        smpl_pose = pose[..., 1:22, :].reshape(-1, 63).float()  # VPoser is float32
 
         dist = self.vposer.encode(smpl_pose)
 

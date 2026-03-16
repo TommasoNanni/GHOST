@@ -89,9 +89,14 @@ class Trainer:
         metrics: MetricCollection | None = None,
         metric_fn: Callable[[Any, Any, Any], None] | None = None,
         use_wandb: bool = False,
+        dtype: torch.dtype | None = None,
+        prediction_save_path: str | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.dtype = dtype
         self.model = model.to(self.device)
+        if dtype is not None:
+            self.model = self.model.to(dtype)
         self.optimizer = optimizer
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -104,12 +109,18 @@ class Trainer:
         self.metrics = metrics
         self.metric_fn = metric_fn
         self.use_wandb = use_wandb
+        self.prediction_save_path = Path(prediction_save_path) if prediction_save_path else None
 
         if self.metrics is not None and self.metric_fn is None:
             raise ValueError("metrics provided but metric_fn is None. "
                              "Provide a metric_fn(preds, targets, metrics) callable.")
 
-        self._scaler = torch.amp.GradScaler('cuda') if self.use_amp else None
+        # bfloat16 has the same dynamic range as float32 — no GradScaler needed
+        self._scaler = (
+            torch.amp.GradScaler('cuda')
+            if self.use_amp and dtype is not torch.bfloat16
+            else None
+        )
         self._epoch = 0
         self._step = 0
         self._best_val_loss: float | None = None
@@ -149,6 +160,7 @@ class Trainer:
             self._log_epoch(epoch, train_stats, val_stats, train_metrics, val_metrics)
 
             if self.use_wandb:
+                import wandb
                 self.log_losses_to_wandb(train_stats, phase="train", epoch=epoch)
                 if val_stats:
                     self.log_losses_to_wandb(val_stats, phase="val", epoch=epoch)
@@ -156,6 +168,7 @@ class Trainer:
                     self.log_metrics_to_wandb(train_metrics, phase="train", epoch=epoch)
                 if val_metrics:
                     self.log_metrics_to_wandb(val_metrics, phase="val", epoch=epoch)
+                wandb.log({"lr": self._lr()}, step=epoch)
 
             improved = self._checkpoint(val_stats or train_stats)
 
@@ -169,6 +182,9 @@ class Trainer:
                         logger.info(f"Early stopping at epoch {epoch} "
                                     f"(no improvement for {self._no_improve} epochs).")
                         break
+
+        if self.prediction_save_path is not None:
+            self.save_predictions(self.train_loader, self.prediction_save_path)
 
     @torch.no_grad()
     def validate(self) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
@@ -198,6 +214,57 @@ class Trainer:
         if self._scaler and "scaler" in state:
             self._scaler.load_state_dict(state["scaler"])
         logger.info(f"Resumed from {path} (epoch {state.get('epoch', '?')})")
+
+    @torch.no_grad()
+    def save_predictions(self, loader: DataLoader, path: str | Path) -> Path:
+        """Run the model in eval mode and save final predictions to a .npz file.
+
+        Saved arrays (all float32, batch dim squeezed when B=1):
+          pose      (T, P, J, 6)  – 6-D rotation in cam0 world space
+          shape     (T, P, 10)    – SMPL-X betas
+          camera    (T, K, 8)     – raw [quat(4), trans(3), focal_raw(1)] per camera
+          gt_pose   (T, P, J, 6)  – ground-truth pose   (when available in targets)
+          gt_shape  (T, P, 10)    – ground-truth shape  (when available in targets)
+          gt_camera (T, K, 8)     – ground-truth camera (when available in targets)
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        out_file = path / "predictions.npz"
+
+        self.model.eval()
+
+        all_pose, all_shape, all_camera = [], [], []
+        all_gt_pose, all_gt_shape, all_gt_camera = [], [], []
+
+        for batch in loader:
+            inputs, targets = self._unpack_batch(batch)
+            with torch.amp.autocast('cuda', enabled=self.use_amp):
+                preds = self._forward(inputs)
+            pose_aggr, shape_aggr, camera_pred, _, _ = preds
+            all_pose.append(pose_aggr.float().cpu())
+            all_shape.append(shape_aggr.float().cpu())
+            all_camera.append(camera_pred.float().cpu())
+            if isinstance(targets, dict):
+                if "pose"   in targets: all_gt_pose.append(targets["pose"].float().cpu())
+                if "shape"  in targets: all_gt_shape.append(targets["shape"].float().cpu())
+                if "camera" in targets: all_gt_camera.append(targets["camera"].float().cpu())
+
+        def _cat_squeeze(lst):
+            t = torch.cat(lst, dim=0)
+            return t.squeeze(0).numpy().astype(np.float32)
+
+        arrays: dict[str, np.ndarray] = {
+            "pose":   _cat_squeeze(all_pose),
+            "shape":  _cat_squeeze(all_shape),
+            "camera": _cat_squeeze(all_camera),
+        }
+        if all_gt_pose:   arrays["gt_pose"]   = _cat_squeeze(all_gt_pose)
+        if all_gt_shape:  arrays["gt_shape"]  = _cat_squeeze(all_gt_shape)
+        if all_gt_camera: arrays["gt_camera"] = _cat_squeeze(all_gt_camera)
+
+        np.savez_compressed(str(out_file), **arrays)
+        logger.info(f"Predictions saved → {out_file}  (keys: {list(arrays)})")
+        return out_file
 
     def log_losses_to_wandb(
         self,
@@ -338,7 +405,10 @@ class Trainer:
         Move to device the data
         """
         if isinstance(data, torch.Tensor):
-            return data.to(self.device, non_blocking=True)
+            t = data.to(self.device, non_blocking=True)
+            if self.dtype is not None and t.is_floating_point():
+                t = t.to(self.dtype)
+            return t
         if isinstance(data, (list, tuple)):
             return type(data)(self._to_device(x) for x in data)
         if isinstance(data, dict):

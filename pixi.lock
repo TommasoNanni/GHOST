@@ -251,7 +251,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/urdfdom-4.0.1-h8631160_4.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/urdfdom_headers-1.1.2-h84d6215_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/urllib3-2.5.0-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/wandb-0.25.0-py312h2dd4075_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/wandb-0.25.1-py312h2dd4075_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wheel-0.46.3-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxau-1.0.12-hb03c661_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxdmcp-1.1.5-hb03c661_1.conda
@@ -567,7 +567,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.44.35208-h818238b_34.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.44.35208-h818238b_34.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vs2015_runtime-14.44.35208-h38c0c73_34.conda
-      - conda: https://conda.anaconda.org/conda-forge/win-64/wandb-0.25.0-py312hb0142fd_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/win-64/wandb-0.25.1-py312hb0142fd_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wheel-0.46.3-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/win_inet_pton-1.1.0-pyh7428d3b_8.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/xorg-libxau-1.0.12-hba3369d_1.conda
@@ -8901,9 +8901,9 @@ packages:
   purls: []
   size: 19347
   timestamp: 1767320221943
-- conda: https://conda.anaconda.org/conda-forge/linux-64/wandb-0.25.0-py312h2dd4075_0.conda
-  sha256: e1b5c5885a74369e8ed9805427a7c8eb23363dd5908d69b2a94b55c67982f4ef
-  md5: 64601d47c0457e9da793c50c111d5c10
+- conda: https://conda.anaconda.org/conda-forge/linux-64/wandb-0.25.1-py312h2dd4075_0.conda
+  sha256: 5505e42120aceaadcd004a9f4d5798af78b6b40eaa885110cf213e46e8730679
+  md5: dfbdfed996490e2c1977eb83365c1537
   depends:
   - __glibc >=2.17
   - __glibc >=2.17,<3.0.a0
@@ -8915,7 +8915,7 @@ packages:
   - libgcc >=14
   - packaging
   - platformdirs
-  - protobuf >=3.19.0,!=4.21.0,!=5.28.0,<7
+  - protobuf >4.21.0,!=5.28.0,!=5.29.0,<7
   - psutil >=5.0.0
   - pydantic <3
   - python >=3.12,<3.13.0a0
@@ -8931,14 +8931,13 @@ packages:
   constrains:
   - __glibc >=2.17
   license: MIT
-  license_family: MIT
   purls:
-  - pkg:pypi/wandb?source=hash-mapping
-  size: 23065886
-  timestamp: 1771400787841
-- conda: https://conda.anaconda.org/conda-forge/win-64/wandb-0.25.0-py312hb0142fd_0.conda
-  sha256: c717cdbf249f01160d5192e135244637caa0cb36b5ed4c11ac77bdf8ecf53599
-  md5: 4f844869ae0c7c2cb34eb79115abac43
+  - pkg:pypi/wandb?source=compressed-mapping
+  size: 23244704
+  timestamp: 1773357544698
+- conda: https://conda.anaconda.org/conda-forge/win-64/wandb-0.25.1-py312hb0142fd_0.conda
+  sha256: 53bf524345adde56e553ba9b32279e0c4d5a0c2c5118b0697ed13e58fb9d1627
+  md5: 5bb9a333480616bf873340c37f33e09e
   depends:
   - appdirs >=1.4.3
   - click >=8.0.1
@@ -8947,7 +8946,7 @@ packages:
   - gitpython >=1.0.0,!=3.1.29
   - packaging
   - platformdirs
-  - protobuf >=3.19.0,!=4.21.0,!=5.28.0,<7
+  - protobuf >4.21.0,!=5.28.0,!=5.29.0,<7
   - psutil >=5.0.0
   - pydantic <3
   - python >=3.12,<3.13.0a0
@@ -8964,11 +8963,10 @@ packages:
   - vc >=14.3,<15
   - vc14_runtime >=14.44.35208
   license: MIT
-  license_family: MIT
   purls:
   - pkg:pypi/wandb?source=hash-mapping
-  size: 21570825
-  timestamp: 1771401251260
+  size: 21767231
+  timestamp: 1773358006529
 - pypi: https://files.pythonhosted.org/packages/68/5a/199c59e0a824a3db2b89c5d2dade7ab5f9624dbf6448dc291b46d5ec94d3/wcwidth-0.6.0-py3-none-any.whl
   name: wcwidth
   version: 0.6.0

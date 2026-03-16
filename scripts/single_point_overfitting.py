@@ -19,7 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import numpy as np
 import torch
+from pytorch3d.transforms import quaternion_to_matrix
 from torch.utils.data import DataLoader
 
 from configuration import CONFIG
@@ -35,7 +37,15 @@ from fusion.loss import (
     BetaConsistencyLoss,
     CameraMSELoss,
 )
+from fusion.metric import (
+    MetricCollection,
+    PAMPJPE,
+    GAMPJPE,
+    TranslationError,
+    AngleError,
+)
 from fusion.trainer import Trainer
+from utilities.smplx_utilities import get_smplx_joints
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -67,6 +77,7 @@ def main():
     lr                      = CONFIG.fusion.training.lr
     max_epochs              = CONFIG.fusion.training.max_epochs
     batch_size              = CONFIG.fusion.training.batch_size
+    grad_clip               = CONFIG.fusion.training.grad_clip
 
     # create the dataset
     dp = RICHFusionDatapoint(scene_dir=RICH_SCENE_DIR, rich_data_root = CONFIG.data.rich_data_root)
@@ -116,6 +127,54 @@ def main():
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
 
+    # ── Metrics ──────────────────────────────────────────────────────────────
+    # Evaluated on the training batch at the end of every epoch.
+    # We pick the middle frame of the window as the representative frame so
+    # we avoid averaging rotation matrices over T (which breaks SO(3)).
+    metrics = MetricCollection([
+        PAMPJPE(),
+        GAMPJPE(),
+        TranslationError(),
+        AngleError(),
+    ])
+
+    def metric_fn(preds, targets, mc):
+        pose_aggr, shape_aggr, camera_pred, _, _ = preds
+        B, T = pose_aggr.shape[:2]
+        K = camera_pred.shape[2]
+        t_mid = T // 2   # representative frame
+
+        with torch.no_grad():
+            # Predicted 3D joints via SMPL-X: (B, T, P, J, 3)
+            pred_joints = get_smplx_joints(
+                pose_aggr.float(), shape_aggr.float()
+            ).cpu().numpy()
+            gt_joints = targets["keypoints_3d"].float().cpu().numpy()
+
+            # Camera rotations (B, T, K, 3, 3) and translations (B, T, K, 3)
+            R_pred = quaternion_to_matrix(
+                camera_pred[..., :4].float().reshape(-1, 4)
+            ).reshape(B, T, K, 3, 3).cpu().numpy()
+            t_pred = camera_pred[..., 4:7].float().cpu().numpy()
+
+            R_gt = quaternion_to_matrix(
+                targets["camera"][..., :4].float().reshape(-1, 4)
+            ).reshape(B, T, K, 3, 3).cpu().numpy()
+            t_gt = targets["camera"][..., 4:7].float().cpu().numpy()
+
+        # Camera centres in world space: C = -R^T t
+        cam_centres_pred = -np.einsum("...ji,...j->...i", R_pred, t_pred)  # (B, T, K, 3)
+        cam_centres_gt   = -np.einsum("...ji,...j->...i", R_gt,   t_gt)
+
+        for b in range(B):
+            # Human metrics — middle frame, shape (P, J, 3)
+            mc["PA-MPJPE"].update(pred_joints[b, t_mid], gt_joints[b, t_mid])
+            mc["GA-MPJPE"].update(pred_joints[b, t_mid], gt_joints[b, t_mid])
+
+            # Camera metrics — middle frame, shape (K, 3) / (K, 3, 3)
+            mc["TE"].update(cam_centres_pred[b, t_mid], cam_centres_gt[b, t_mid])
+            mc["AE"].update(R_pred[b, t_mid], R_gt[b, t_mid])
+
     if CONFIG.fusion.use_wandb:
         import wandb
         wandb.init(
@@ -135,6 +194,11 @@ def main():
         losses=losses,
         max_epochs=max_epochs,
         use_wandb=CONFIG.fusion.use_wandb,
+        dtype=torch.bfloat16,
+        grad_clip=grad_clip,
+        metrics=metrics,
+        metric_fn=metric_fn,
+        prediction_save_path=CONFIG.data.fusion_output_dir,
     )
 
     trainer.train()

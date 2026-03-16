@@ -648,7 +648,7 @@ class SSTNetwork(nn.Module):
         H = self.num_heads
 
         # person_visible: (B, T, K, P) float — 1 present, 0 absent.
-        person_visible = person_mask.float()
+        person_visible = person_mask.to(pose_emb.dtype)
 
         # --- Pose-stream masks ---
         # Multiply joint confidence by binary presence so that absent slots are
@@ -680,7 +680,7 @@ class SSTNetwork(nn.Module):
 
         # Camera-level presence: camera k is "active" at frame t iff at least one
         # person was detected in it.  Drives temporal masking in the camera stream.
-        camera_visible = person_visible.any(dim=-1).float()   # (B, T, K)
+        camera_visible = person_visible.any(dim=-1).to(pose_emb.dtype)   # (B, T, K)
         camera_temporal_conf = camera_visible.permute(0, 2, 1).reshape(B * K, T)
 
         # layer loop
