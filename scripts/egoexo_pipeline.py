@@ -56,6 +56,7 @@ def main():
         reid_threshold = CONFIG.parameters_extraction.reid_threshold,
         gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
         reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
+        gallery_min_confidence = getattr(CONFIG.parameters_extraction, "gallery_min_confidence", 0.2),
     )
     reidentifier = CrossViewReidentifier(
         threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),

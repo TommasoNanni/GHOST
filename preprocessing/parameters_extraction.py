@@ -47,8 +47,13 @@ import smplx
 # handled by a PYTHONPATH entry in ~/.bashrc; we inject it here instead so
 # the code is self-contained regardless of shell environment.
 _SAM3D_ROOT = Path(__file__).resolve().parents[1] / "sam-3d-body"
-if str(_SAM3D_ROOT) not in sys.path:
-    sys.path.insert(0, str(_SAM3D_ROOT))
+# Always insert at position 0 so sam-3d-body/tools/ takes priority over
+# site-packages/tools/ (detectron2 installs a tools/ package there that
+# shadows ours when the .pth-file appends sam-3d-body/ after site-packages).
+_sam3d_root_str = str(_SAM3D_ROOT)
+if _sam3d_root_str in sys.path:
+    sys.path.remove(_sam3d_root_str)
+sys.path.insert(0, _sam3d_root_str)
 
 from data.video_dataset import Scene
 from mhr.mhr import MHR
@@ -89,9 +94,10 @@ class BodyParameterEstimator:
     _REID_THRESHOLD: float = 0.65
     _GALLERY_EMA_ALPHA: float = 0.9
     _REID_MATCH_WINDOW: int = 5
-    # For cross-view gallery: keep only the top-K highest-confidence frames
-    # when computing the saved appearance descriptor (ignores low-quality frames).
-    _GALLERY_TOP_K: int = 50
+    # For cross-view gallery: only frames with mean-joint confidence >= this
+    # value contribute to the confidence-weighted appearance descriptor.
+    # Falls back to all frames when nothing passes the threshold.
+    _GALLERY_MIN_CONFIDENCE: float = 0.2
 
     def __init__(
         self,
@@ -103,7 +109,7 @@ class BodyParameterEstimator:
         reid_threshold: float | None = None,
         gallery_ema_alpha: float | None = None,
         reid_match_window: int | None = None,
-        gallery_top_k: int | None = None,
+        gallery_min_confidence: float | None = None,
     ):
         self.sam3d_hf_repo = sam3d_hf_repo
         self.sam3d_step = sam3d_step
@@ -113,7 +119,7 @@ class BodyParameterEstimator:
         self.reid_threshold = reid_threshold if reid_threshold is not None else self._REID_THRESHOLD
         self.gallery_ema_alpha = gallery_ema_alpha if gallery_ema_alpha is not None else self._GALLERY_EMA_ALPHA
         self.reid_match_window = reid_match_window if reid_match_window is not None else self._REID_MATCH_WINDOW
-        self.gallery_top_k = gallery_top_k if gallery_top_k is not None else self._GALLERY_TOP_K
+        self.gallery_min_confidence = gallery_min_confidence if gallery_min_confidence is not None else self._GALLERY_MIN_CONFIDENCE
 
         self._estimator: object | None = None
         self._converter: object | None = None
@@ -201,7 +207,7 @@ class BodyParameterEstimator:
                     reid_threshold=self.reid_threshold,
                     gallery_ema_alpha=self.gallery_ema_alpha,
                     reid_match_window=self.reid_match_window,
-                    gallery_top_k=self.gallery_top_k,
+                    gallery_min_confidence=self.gallery_min_confidence,
                     converter=converter,
                 )
                 gc.collect()
@@ -246,7 +252,7 @@ class BodyParameterEstimator:
                     self.reid_match_window,
                     self.mhr_model_path,
                     self.smplx_model_path,
-                    self.gallery_top_k,
+                    self.gallery_min_confidence,
                 ),
             )
             p.start()
@@ -268,7 +274,7 @@ class BodyParameterEstimator:
         reid_match_window: int = 5,
         mhr_model_path: str | None = None,
         smplx_model_path: str | None = None,
-        gallery_top_k: int = 50,
+        gallery_min_confidence: float = 0.2,
     ) -> None:
         """Worker process: load SAM3D once, then consume videos from the queue.
 
@@ -276,6 +282,16 @@ class BodyParameterEstimator:
         """
         torch.cuda.set_device(gpu_id)
         gpu_label = f"[GPU {gpu_id}] "
+
+        # With mp.set_start_method("spawn") the child process starts fresh.
+        # The editable-install .pth file appends sam-3d-body/ AFTER
+        # site-packages/, where detectron2 installs its own tools/ package.
+        # We must insert sam-3d-body/ at position 0 so our tools/ wins.
+        import sys as _sys
+        _sam3d_root = str(Path(__file__).resolve().parents[1] / "sam-3d-body")
+        if _sam3d_root in _sys.path:
+            _sys.path.remove(_sam3d_root)
+        _sys.path.insert(0, _sam3d_root)
 
         # Mirror the determinism settings from _init_sam3d() so that cuBLAS
         # workspace residuals do not accumulate across videos processed
@@ -323,7 +339,7 @@ class BodyParameterEstimator:
                     reid_threshold=reid_threshold,
                     gallery_ema_alpha=gallery_ema_alpha,
                     reid_match_window=reid_match_window,
-                    gallery_top_k=gallery_top_k,
+                    gallery_min_confidence=gallery_min_confidence,
                     converter=converter,
                 )
             except Exception as e:
@@ -370,7 +386,7 @@ class BodyParameterEstimator:
         reid_threshold: float = 0.65,
         gallery_ema_alpha: float = 0.9,
         reid_match_window: int = 5,
-        gallery_top_k: int = 50,
+        gallery_min_confidence: float = 0.2,
         converter=None,
     ) -> None:
         """Process all frames of one video with batched per-frame inference.
@@ -915,32 +931,36 @@ class BodyParameterEstimator:
             tracks, body_dir, video_id, param_keys
         )
 
-        # Persist per-person appearance descriptors for cross-view re-ID.
-        # For each person we take the top-K highest-confidence frames from the
-        # feature buffer, compute a confidence-weighted mean, and L2-normalise.
-        # This is more robust than the flat EMA (which weights all frames equally
-        # and is dominated by the many mediocre frames at the tail of a track).
+        # Persist per-person appearance feature matrices for cross-view re-ID.
+        # Each person gets a (N, D) matrix of L2-normalised DINOv3 features,
+        # one row per frame that passes the minimum confidence threshold.
+        # Keeping individual frames (instead of collapsing to a mean vector)
+        # lets the matcher use Chamfer similarity, which is robust to occlusion:
+        # even if most frames of a tracklet are partially occluded, the best
+        # matching pair across two cameras still produces a reliable score.
         if person_feat_buffer:
             gallery_arrays: dict[str, np.ndarray] = {}
             for pid, feat_list in person_feat_buffer.items():
-                # Pair each buffered feature with its per-frame mean joint confidence.
-                conf_feats: list[tuple[float, np.ndarray]] = []
                 pid_frames = tracks.get(pid, {})
+                filtered_feats: list[np.ndarray] = []
+                filtered_confs: list[float] = []
                 for fi, feat in feat_list:
                     conf = pid_frames.get(fi, {}).get("pred_joint_confidence")
                     scalar_conf = float(np.mean(conf)) if conf is not None else 1.0
-                    conf_feats.append((scalar_conf, feat))
+                    if scalar_conf >= gallery_min_confidence:
+                        filtered_feats.append(feat)
+                        filtered_confs.append(scalar_conf)
 
-                # Keep only the top-K frames by confidence.
-                conf_feats.sort(key=lambda x: x[0], reverse=True)
-                top_k = conf_feats[:gallery_top_k]
+                # Fall back to all frames if none pass the threshold.
+                if not filtered_feats:
+                    filtered_feats = [f for _, f in feat_list]
+                    filtered_confs = [1.0] * len(filtered_feats)
 
-                weights = np.array([c for c, _ in top_k], dtype=np.float32)
-                feats = np.stack([f for _, f in top_k])          # (K, D)
-                total_w = weights.sum()
-                weighted = (weights[:, None] * feats).sum(0) if total_w > 0 else feats.mean(0)
-                norm = np.linalg.norm(weighted)
-                gallery_arrays[str(pid)] = weighted / norm if norm > 0 else weighted
+                # Store feature matrix (N, D) and per-frame confidence weights (N,).
+                # The matcher uses confidence-weighted Chamfer similarity so that
+                # clearly-visible frames contribute more than occluded ones.
+                gallery_arrays[str(pid)] = np.stack(filtered_feats)                    # (N, D)
+                gallery_arrays[f"{pid}_conf"] = np.array(filtered_confs, dtype=np.float32)  # (N,)
 
             gallery_path = body_dir / "appearance_gallery.npz"
             np.savez(str(gallery_path), **gallery_arrays)
@@ -1092,12 +1112,17 @@ class BodyParameterEstimator:
             if not pids:
                 continue
 
-            # Load appearance gallery (DINOv3, 1024-D, L2-normalised)
-            app_gallery: dict[int, np.ndarray] = {}
+            # Load appearance gallery: pid → (feat_matrix (N,D), conf_weights (N,))
+            app_gallery: dict[int, tuple[np.ndarray, np.ndarray]] = {}
             if gallery_path.exists():
                 gdata = np.load(str(gallery_path))
-                for k in gdata.files:
-                    app_gallery[int(k)] = gdata[k]
+                feat_keys = [k for k in gdata.files if not k.endswith("_conf")]
+                for k in feat_keys:
+                    pid_key = int(k)
+                    conf_key = f"{k}_conf"
+                    feats = gdata[k]                                          # (N, D)
+                    confs = gdata[conf_key] if conf_key in gdata.files else np.ones(len(feats), dtype=np.float32)
+                    app_gallery[pid_key] = (feats, confs)
 
             descs: dict[int, tuple[np.ndarray | None, np.ndarray | None]] = {}
             for pid in pids:
@@ -1131,7 +1156,8 @@ class BodyParameterEstimator:
                                 shape_med / norm if norm > 0 else shape_med
                             )
 
-                app_feat: np.ndarray | None = app_gallery.get(pid)
+                # app_feat is (feat_matrix (N,D), conf_weights (N,)) or None
+                app_feat: tuple[np.ndarray, np.ndarray] | None = app_gallery.get(pid)
 
                 if app_feat is None and shape_feat is None:
                     continue
@@ -1179,6 +1205,27 @@ class BodyParameterEstimator:
                 _find((_vid, _pid))
 
         # ── 3. All-pairs Hungarian matching ───────────────────────────────
+        def _chamfer_sim(
+            feats_a: np.ndarray,   # (N, D) L2-normalised
+            confs_a: np.ndarray,   # (N,)  per-frame confidence weights
+            feats_b: np.ndarray,   # (M, D) L2-normalised
+            confs_b: np.ndarray,   # (M,)  per-frame confidence weights
+        ) -> float:
+            """Confidence-weighted symmetric Chamfer similarity.
+
+            For each frame in A find its nearest neighbour in B (max cosine
+            similarity), then take the confidence-weighted mean of those scores,
+            and vice-versa.  Averaging both directions gives a symmetric score.
+
+            High-confidence frames (person clearly visible) drive the score;
+            occluded frames contribute little even when they land a spurious
+            high similarity, because their weight is low.
+            """
+            S = feats_a @ feats_b.T                 # (N, M) cosine similarities
+            score_a2b = np.average(S.max(axis=1), weights=confs_a)
+            score_b2a = np.average(S.max(axis=0), weights=confs_b)
+            return float(0.5 * (score_a2b + score_b2a))
+
         def _weighted_sim_mat(
             pids_a: list[int],
             pids_b: list[int],
@@ -1188,30 +1235,33 @@ class BodyParameterEstimator:
             w_shape: float,
         ) -> np.ndarray:
             """Compute (Na, Nb) similarity matrix as a weighted sum of per-modality
-            cosine similarities.  Weights are re-normalised per cell so that a
-            missing modality on either side just falls back to the other one
-            (no information is silently discarded and no artificial inflation
-            occurs from the dimension-imbalance of concatenation)."""
+            similarities.  Weights are re-normalised per cell so that a missing
+            modality on either side just falls back to the other one.
+
+            Appearance uses confidence-weighted Chamfer similarity between the
+            full per-tracklet feature matrices.  Shape uses a plain cosine
+            similarity between confidence-weighted mean beta vectors (shape is
+            already a stable summary statistic, no multi-shot needed).
+            """
             Na, Nb = len(pids_a), len(pids_b)
             sim_mat = np.zeros((Na, Nb), dtype=np.float32)
             weight_mat = np.zeros((Na, Nb), dtype=np.float32)
 
-            # --- appearance ---
-            app_a = [descs_a[p][0] for p in pids_a]
-            app_b = [descs_b[p][0] for p in pids_b]
-            mask_a = np.array([f is not None for f in app_a], dtype=np.float32)
-            mask_b = np.array([f is not None for f in app_b], dtype=np.float32)
-            if mask_a.any() and mask_b.any():
-                dim = next(f for f in app_a if f is not None).shape[0]
-                zero = np.zeros(dim, dtype=np.float32)
-                mat_a = np.stack([f if f is not None else zero for f in app_a])
-                mat_b = np.stack([f if f is not None else zero for f in app_b])
-                app_sim = mat_a @ mat_b.T  # (Na, Nb)
-                app_w = np.outer(mask_a, mask_b) * w_app
-                sim_mat += app_w * app_sim
-                weight_mat += app_w
+            # --- appearance (confidence-weighted Chamfer) ---
+            for i, pa in enumerate(pids_a):
+                app_a = descs_a[pa][0]   # (N, D), (N,) or None
+                if app_a is None:
+                    continue
+                feats_a, confs_a = app_a
+                for j, pb in enumerate(pids_b):
+                    app_b = descs_b[pb][0]
+                    if app_b is None:
+                        continue
+                    feats_b, confs_b = app_b
+                    sim_mat[i, j] += w_app * _chamfer_sim(feats_a, confs_a, feats_b, confs_b)
+                    weight_mat[i, j] += w_app
 
-            # --- shape ---
+            # --- shape (cosine similarity between mean beta vectors) ---
             shape_a = [descs_a[p][1] for p in pids_a]
             shape_b = [descs_b[p][1] for p in pids_b]
             mask_a = np.array([f is not None for f in shape_a], dtype=np.float32)
@@ -1221,7 +1271,7 @@ class BodyParameterEstimator:
                 zero = np.zeros(dim, dtype=np.float32)
                 mat_a = np.stack([f if f is not None else zero for f in shape_a])
                 mat_b = np.stack([f if f is not None else zero for f in shape_b])
-                shape_sim = mat_a @ mat_b.T  # (Na, Nb)
+                shape_sim = mat_a @ mat_b.T   # (Na, Nb)
                 shape_w = np.outer(mask_a, mask_b) * w_shape
                 sim_mat += shape_w * shape_sim
                 weight_mat += shape_w
@@ -1364,9 +1414,14 @@ class BodyParameterEstimator:
             app_c: np.ndarray | None = None
             shape_c: np.ndarray | None = None
             if app_vecs:
-                m = np.mean(np.stack(app_vecs), axis=0).astype(np.float32)
+                # Each entry is (feats (N,D), confs (N,)) — concatenate across members
+                all_feats = np.concatenate([f for f, _ in app_vecs], axis=0)
+                all_confs = np.concatenate([c for _, c in app_vecs], axis=0)
+                total_w = all_confs.sum()
+                m = ((all_confs[:, None] * all_feats).sum(0) / total_w
+                     if total_w > 0 else all_feats.mean(0))
                 n = np.linalg.norm(m)
-                app_c = m / n if n > 0 else m
+                app_c = (m / n if n > 0 else m).astype(np.float32)
             if shape_vecs:
                 m = np.mean(np.stack(shape_vecs), axis=0).astype(np.float32)
                 n = np.linalg.norm(m)
@@ -1382,7 +1437,11 @@ class BodyParameterEstimator:
         ) -> float:
             sim, weight = 0.0, 0.0
             if feat[0] is not None and centroid[0] is not None:
-                sim += w_app * float(np.dot(feat[0], centroid[0]))
+                feats, confs = feat[0]
+                total_w = confs.sum()
+                mean_feat = ((confs[:, None] * feats).sum(0) / total_w
+                             if total_w > 0 else feats.mean(0))
+                sim += w_app * float(np.dot(mean_feat, centroid[0]))
                 weight += w_app
             if feat[1] is not None and centroid[1] is not None:
                 sim += w_shape * float(np.dot(feat[1], centroid[1]))
@@ -1555,13 +1614,19 @@ class BodyParameterEstimator:
                     json.dump(summary, _f, indent=2)
 
             # Update appearance_gallery.npz with new IDs.
+            # Keys are either "{pid}" (feature matrix) or "{pid}_conf" (weights).
             gallery_path = body_dir / "appearance_gallery.npz"
             if gallery_path.exists():
                 gdata = np.load(str(gallery_path))
-                new_gallery = {
-                    str(remap.get(int(k), int(k))): gdata[k]
-                    for k in gdata.files
-                }
+                new_gallery = {}
+                for k in gdata.files:
+                    if k.endswith("_conf"):
+                        old_pid = int(k[:-5])
+                        new_key = f"{remap.get(old_pid, old_pid)}_conf"
+                    else:
+                        old_pid = int(k)
+                        new_key = str(remap.get(old_pid, old_pid))
+                    new_gallery[new_key] = gdata[k]
                 np.savez(str(gallery_path), **new_gallery)
 
             # Save cross-view mapping for provenance / downstream consumers.
