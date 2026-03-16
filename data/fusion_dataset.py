@@ -219,7 +219,7 @@ class FusionDatapoint(Dataset, ABC):
         Default: identity rotation + pred_cam_t + softplus(focal_raw)=focal_length.
         """
         cam = np.zeros(8, dtype=np.float32)
-        cam[3] = 1.0  # qw = 1 -> identity rotation
+        cam[0] = 1.0  # pytorch3d [w,x,y,z]: w=1 -> identity rotation
         cam[4:7] = pred_cam_t
         # Store softplus_inv(focal) so that extract_cameras can recover the
         # true focal length by applying softplus.  For f >> 1, softplus_inv(f) ≈ f.
@@ -645,14 +645,14 @@ class RICHFusionDatapoint(FusionDatapoint):
                 ext = calib.get("extrinsics")  # (3, 4)
                 if ext is not None:
                     from scipy.spatial.transform import Rotation as R
-                    q = R.from_matrix(ext[:3, :3]).as_quat()  # [qx,qy,qz,qw]
+                    q_xyzw = R.from_matrix(ext[:3, :3]).as_quat()  # scipy [qx,qy,qz,qw]
                     vec = np.zeros(8, dtype=np.float32)
-                    vec[:4] = q
+                    vec[:4] = q_xyzw[[3, 0, 1, 2]]  # → pytorch3d [qw,qx,qy,qz]
                     vec[4:7] = ext[:3, 3]
                     intr = calib.get("intrinsics")
                     vec[7] = float(intr[0, 0]) if intr is not None else 1000.0
                 else:
-                    vec = np.array([0., 0., 0., 1., 0., 0., 0., 1000.], dtype=np.float32)
+                    vec = np.array([1., 0., 0., 0., 0., 0., 0., 1000.], dtype=np.float32)  # pytorch3d identity [w,x,y,z]
                 self._gt_camera_vecs.append(vec)
                 logger.debug(
                     f"  {cam_dir.name}: loaded calibration from {xml_path.name}"
@@ -664,7 +664,7 @@ class RICHFusionDatapoint(FusionDatapoint):
                 )
                 self._cameras.append({})
                 self._gt_camera_vecs.append(
-                    np.array([0., 0., 0., 1., 0., 0., 0., 1000.], dtype=np.float32)
+                    np.array([1., 0., 0., 0., 0., 0., 0., 1000.], dtype=np.float32)  # pytorch3d identity [w,x,y,z]
                 )
 
         # Re-express GT camera vectors relative to cam-0 so that they are in
@@ -686,8 +686,8 @@ class RICHFusionDatapoint(FusionDatapoint):
                 t_i = ext_i[:3, 3].astype(np.float64)
                 R_rel = R_i @ R0.T
                 t_rel = t_i - R_rel @ t0
-                q_rel = SciR.from_matrix(R_rel).as_quat()  # [qx, qy, qz, qw]
-                self._gt_camera_vecs[i][:4] = q_rel.astype(np.float32)
+                q_rel_xyzw = SciR.from_matrix(R_rel).as_quat()  # scipy [qx, qy, qz, qw]
+                self._gt_camera_vecs[i][:4] = q_rel_xyzw[[3, 0, 1, 2]].astype(np.float32)  # → pytorch3d [qw,qx,qy,qz]
                 self._gt_camera_vecs[i][4:7] = t_rel.astype(np.float32)
 
         # Load estimated camera poses from camera_alignment.npz (produced by
@@ -908,9 +908,9 @@ class RICHFusionDatapoint(FusionDatapoint):
         est = cam_calib.get("estimated_extrinsics") if cam_calib else None
         if est is not None:
             from scipy.spatial.transform import Rotation as SciR
-            q = SciR.from_matrix(est[:3, :3].astype(np.float64)).as_quat()  # [qx,qy,qz,qw]
+            q_xyzw = SciR.from_matrix(est[:3, :3].astype(np.float64)).as_quat()  # scipy [qx,qy,qz,qw]
             cam = np.zeros(8, dtype=np.float32)
-            cam[:4] = q.astype(np.float32)
+            cam[:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)  # → pytorch3d [qw,qx,qy,qz]
             cam[4:7] = est[:3, 3]
             _f = float(focal_length)
             cam[7] = _f if _f > 20.0 else float(np.log(np.expm1(_f) + 1e-6))
