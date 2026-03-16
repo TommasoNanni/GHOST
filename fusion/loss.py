@@ -418,7 +418,12 @@ class CameraMSELoss(Loss):
 
         dot    = torch.clamp(torch.sum(q * q_gt, dim=-1), -1.0 + 1e-7, 1.0 - 1e-7)
         rot_loss   = (1 - torch.abs(dot)).mean()
-        trans_loss = torch.norm(t_pred - t_gt, dim=-1).pow(2).mean()
+
+        # Normalise by squared scene scale so trans_loss lives in [0, 1] like rot_loss.
+        cam_centres_gt = -torch.einsum("...ji,...j->...i", R_gt, t_gt)  # (..., K, 3)
+        diff = cam_centres_gt.unsqueeze(-2) - cam_centres_gt.unsqueeze(-3)  # (..., K, K, 3)
+        scene_scale = diff.norm(dim=-1).mean().clamp(min=1e-3)
+        trans_loss = torch.norm(t_pred - t_gt, dim=-1).pow(2).mean() / (scene_scale ** 2)
 
         fov_pred = 2*torch.atan(self.img_size[1]/(2*focal_pred))
         fov_gt   = 2*torch.atan(self.img_size[1]/(2*focal_gt))
