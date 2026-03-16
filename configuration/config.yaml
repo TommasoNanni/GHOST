@@ -2,7 +2,7 @@ data:
   egoexo_data_root: "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
   rich_data_root: "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"
   rich_max_side: 1440  # resize RICH frames so longest side <= this before SAM3; null to skip
-  output_directory: "/cluster/project/cvg/students/tnanni/ghost/test_outputs/rich9_segmentation_test"
+  output_directory: "/cluster/project/cvg/students/tnanni/ghost/test_outputs/onevideo_segmentation_test"
   slice: null # Number of scenes to load (set for testing)
   exclude_egocentric: true # Exclude egocentric videos for simplicity
   smplx_model_path: "body_models/SMPLX_NEUTRAL.pkl"
@@ -24,7 +24,6 @@ parameters_extraction:
   sam3d_step: 1 # Predict using sam3d every sam3d_step frames
   bbox_padding: 0.2 # Padding added to the bounding box before cropping the image for SAM3D.
   # Cross-view re-identification (run once per scene after all per-video estimation)
-  gallery_min_confidence: 0.5 # Min mean-joint confidence for a frame to contribute to the cross-view appearance gallery
   cross_view_reid_threshold: 0.7 # Min hybrid similarity to accept a cross-view match
   cross_view_appearance_weight: 0.7 # Weight of DINOv3 appearance features
   cross_view_shape_weight: 0.3 # Weight of SMPL-X shape (beta) features
@@ -44,8 +43,8 @@ fusion:
     VPoser_path: "/cluster/project/cvg/students/tnanni/ghost/checkpoints/V02_05/"
     pose_mse_weight: 1.0
     shape_mse_weight: 1.0
-    epipolar_weight: 0.0
-    temporal_weight: 0.0
+    epipolar_weight: 0.0001
+    temporal_weight: 0.01
     bone_length_weight: 0.1
     beta_consistency_weight: 0.1
     camera_mse_weight: 1.0

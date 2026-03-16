@@ -94,10 +94,6 @@ class BodyParameterEstimator:
     _REID_THRESHOLD: float = 0.65
     _GALLERY_EMA_ALPHA: float = 0.9
     _REID_MATCH_WINDOW: int = 5
-    # For cross-view gallery: only frames with mean-joint confidence >= this
-    # value contribute to the confidence-weighted appearance descriptor.
-    # Falls back to all frames when nothing passes the threshold.
-    _GALLERY_MIN_CONFIDENCE: float = 0.2
 
     def __init__(
         self,
@@ -109,7 +105,6 @@ class BodyParameterEstimator:
         reid_threshold: float | None = None,
         gallery_ema_alpha: float | None = None,
         reid_match_window: int | None = None,
-        gallery_min_confidence: float | None = None,
     ):
         self.sam3d_hf_repo = sam3d_hf_repo
         self.sam3d_step = sam3d_step
@@ -119,7 +114,6 @@ class BodyParameterEstimator:
         self.reid_threshold = reid_threshold if reid_threshold is not None else self._REID_THRESHOLD
         self.gallery_ema_alpha = gallery_ema_alpha if gallery_ema_alpha is not None else self._GALLERY_EMA_ALPHA
         self.reid_match_window = reid_match_window if reid_match_window is not None else self._REID_MATCH_WINDOW
-        self.gallery_min_confidence = gallery_min_confidence if gallery_min_confidence is not None else self._GALLERY_MIN_CONFIDENCE
 
         self._estimator: object | None = None
         self._converter: object | None = None
@@ -207,7 +201,6 @@ class BodyParameterEstimator:
                     reid_threshold=self.reid_threshold,
                     gallery_ema_alpha=self.gallery_ema_alpha,
                     reid_match_window=self.reid_match_window,
-                    gallery_min_confidence=self.gallery_min_confidence,
                     converter=converter,
                 )
                 gc.collect()
@@ -252,7 +245,6 @@ class BodyParameterEstimator:
                     self.reid_match_window,
                     self.mhr_model_path,
                     self.smplx_model_path,
-                    self.gallery_min_confidence,
                 ),
             )
             p.start()
@@ -274,7 +266,6 @@ class BodyParameterEstimator:
         reid_match_window: int = 5,
         mhr_model_path: str | None = None,
         smplx_model_path: str | None = None,
-        gallery_min_confidence: float = 0.2,
     ) -> None:
         """Worker process: load SAM3D once, then consume videos from the queue.
 
@@ -339,7 +330,6 @@ class BodyParameterEstimator:
                     reid_threshold=reid_threshold,
                     gallery_ema_alpha=gallery_ema_alpha,
                     reid_match_window=reid_match_window,
-                    gallery_min_confidence=gallery_min_confidence,
                     converter=converter,
                 )
             except Exception as e:
@@ -386,7 +376,6 @@ class BodyParameterEstimator:
         reid_threshold: float = 0.65,
         gallery_ema_alpha: float = 0.9,
         reid_match_window: int = 5,
-        gallery_min_confidence: float = 0.2,
         converter=None,
     ) -> None:
         """Process all frames of one video with batched per-frame inference.
@@ -933,7 +922,7 @@ class BodyParameterEstimator:
 
         # Persist per-person appearance feature matrices for cross-view re-ID.
         # Each person gets a (N, D) matrix of L2-normalised DINOv3 features,
-        # one row per frame that passes the minimum confidence threshold.
+        # one row per frame that passes an adaptive per-track confidence threshold.
         # Keeping individual frames (instead of collapsing to a mean vector)
         # lets the matcher use Chamfer similarity, which is robust to occlusion:
         # even if most frames of a tracklet are partially occluded, the best
@@ -942,19 +931,42 @@ class BodyParameterEstimator:
             gallery_arrays: dict[str, np.ndarray] = {}
             for pid, feat_list in person_feat_buffer.items():
                 pid_frames = tracks.get(pid, {})
-                filtered_feats: list[np.ndarray] = []
-                filtered_confs: list[float] = []
+
+                # Collect (feat, scalar_conf) pairs for all frames.
+                all_feats: list[np.ndarray] = []
+                all_confs: list[float] = []
                 for fi, feat in feat_list:
                     conf = pid_frames.get(fi, {}).get("pred_joint_confidence")
                     scalar_conf = float(np.mean(conf)) if conf is not None else 1.0
-                    if scalar_conf >= gallery_min_confidence:
-                        filtered_feats.append(feat)
-                        filtered_confs.append(scalar_conf)
+                    all_feats.append(feat)
+                    all_confs.append(scalar_conf)
 
-                # Fall back to all frames if none pass the threshold.
+                # Adaptive threshold: anchor each track to its own peak confidence
+                # so that background people (whose Z-buffer confidence is capped low
+                # due to vertex crowding at small image scales) are not starved of
+                # gallery frames by a global absolute threshold.
+                # The 0.15 floor prevents degenerate near-zero peaks from setting a
+                # negative threshold.
+                peak_conf = max(all_confs)
+                dynamic_threshold = max(0.15, peak_conf - 0.20)
+
+                filtered_feats = [f for f, c in zip(all_feats, all_confs) if c >= dynamic_threshold]
+                filtered_confs = [c for c in all_confs if c >= dynamic_threshold]
+
+                # If the gallery has fewer than 3 frames (e.g. one lucky high-conf
+                # outlier sets a strict threshold), relax by 0.05 steps until we
+                # collect at least 3 frames or exhaust the buffer.
+                _MIN_GALLERY = 3
+                relaxed_threshold = dynamic_threshold
+                while len(filtered_feats) < _MIN_GALLERY and relaxed_threshold > 0.05:
+                    relaxed_threshold -= 0.05
+                    filtered_feats = [f for f, c in zip(all_feats, all_confs) if c >= relaxed_threshold]
+                    filtered_confs = [c for c in all_confs if c >= relaxed_threshold]
+
+                # Last resort: use all frames (can happen for very short tracks).
                 if not filtered_feats:
-                    filtered_feats = [f for _, f in feat_list]
-                    filtered_confs = [1.0] * len(filtered_feats)
+                    filtered_feats = all_feats
+                    filtered_confs = all_confs
 
                 # Store feature matrix (N, D) and per-frame confidence weights (N,).
                 # The matcher uses confidence-weighted Chamfer similarity so that
