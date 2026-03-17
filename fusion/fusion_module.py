@@ -504,23 +504,31 @@ class SSTOutputHeads(nn.Module):
             nn.Linear(embedding_dim, 10),
         )
         self.camera_norm = nn.LayerNorm(embedding_dim)
-        self.camera_head = nn.Sequential(
+        # Split into two independent heads so that fov gradients cannot flow
+        # into the rotation/translation path through a shared hidden layer.
+        self.camera_rot_trans_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
-            nn.Linear(embedding_dim, 8),
+            nn.Linear(embedding_dim, 7),   # [quat(4), trans(3)]
         )
-        # Initialise focal_raw bias so softplus(bias) ≈ 1000 px at the start
-        # of training (softplus_inv(1000) ≈ 1000 since 1000 >> 1).
-        import math as _math
-        _softplus_inv_1000 = _math.log(_math.exp(1000.0) - 1.0) if 1000.0 <= 20 else 1000.0
+        self.camera_focal_head = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim // 4),
+            nn.ReLU(),
+            nn.Linear(embedding_dim // 4, 1),   # [focal_raw(1)]
+        )
+        # Zero-init last layers: delta ≈ 0 at start → output ≈ SAM3D input.
         with torch.no_grad():
-            self.camera_head[-1].bias[7] = _softplus_inv_1000
+            self.camera_rot_trans_head[-1].weight.zero_()
+            self.camera_rot_trans_head[-1].bias.zero_()
+            self.camera_focal_head[-1].weight.zero_()
+            self.camera_focal_head[-1].bias.zero_()
 
     def forward(
         self,
         pose_stream: torch.Tensor,
         shape_stream: torch.Tensor,
         camera_stream: torch.Tensor,
+        camera_input: torch.Tensor,
         B: int, T: int, K: int, P: int, J: int, D: int,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         pose = self.pose_norm(pose_stream)
@@ -536,7 +544,13 @@ class SSTOutputHeads(nn.Module):
         shape_aggr = self.shape_head(shape_aggr_feat.reshape(B * T * P, D)).reshape(B, T, P, 10)
 
         camera = self.camera_norm(camera_stream)
-        camera = self.camera_head(camera.reshape(B * T * K, D)).reshape(B, T, K, 8)
+        camera_flat = camera.reshape(B * T * K, D)
+        rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
+        focal_delta     = self.camera_focal_head(camera_flat).reshape(B, T, K, 1)
+        camera_delta = torch.cat([rot_trans_delta, focal_delta], dim=-1)
+        # Residual: predict a correction on top of the raw input cameras.
+        # At init (zero-init last layers) delta ≈ 0, so output ≈ SAM3D input.
+        camera = camera_input + camera_delta
 
         return pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam
 
@@ -741,7 +755,7 @@ class SSTNetwork(nn.Module):
 
         # decode
         return self.output_heads(
-            pose_stream, shape_stream, camera_stream,
+            pose_stream, shape_stream, camera_stream, camera,
             B, T, K, P, J, D,
         )
 

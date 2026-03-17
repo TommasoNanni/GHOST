@@ -425,8 +425,13 @@ class CameraMSELoss(Loss):
         scene_scale = diff.norm(dim=-1).mean().clamp(min=1e-3)
         trans_loss = torch.norm(t_pred - t_gt, dim=-1).pow(2).mean() / (scene_scale ** 2)
 
-        fov_pred = 2*torch.atan(self.img_size[1]/(2*focal_pred))
-        fov_gt   = 2*torch.atan(self.img_size[1]/(2*focal_gt))
-        fov_loss = F.mse_loss(fov_pred, fov_gt)
+        # Log-scale focal MSE: penalises relative focal error uniformly across
+        # all focal lengths.  MSE on log(f) gives gradient 2*log(f_p/f_g)/f_p,
+        # which is ~2.5× stronger than the atan gradient and avoids the near-flat
+        # region that kills learning when focal >> img_size.
+        log_focal_loss = F.mse_loss(
+            torch.log(focal_pred.clamp(min=1.0)),
+            torch.log(focal_gt.clamp(min=1.0)),
+        )
 
-        return rot_loss + trans_loss + fov_loss
+        return rot_loss + trans_loss + log_focal_loss
