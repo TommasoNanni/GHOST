@@ -41,16 +41,17 @@ fusion:
     dropout: 0.1
   loss:
     VPoser_path: "/cluster/project/cvg/students/tnanni/ghost/checkpoints/V02_05/"
-    pose_mse_weight: 0.0
-    shape_mse_weight: 0.0
-    epipolar_weight: 0.0
-    temporal_weight: 0.0
-    bone_length_weight: 0.0
-    beta_consistency_weight: 0.0
+    pose_mse_weight: 1.0
+    shape_mse_weight: 1.0
+    epipolar_weight: 0.0001
+    temporal_weight: 0.001
+    bone_length_weight: 0.01
+    beta_consistency_weight: 0.01
     camera_mse_weight: 1.0
-    vposer_weight: 0.0
+    vposer_weight: 0.00001
   training:
     max_epochs: 100
-    lr: 0.001
+    lr: 0.0001
     batch_size: 1
     grad_clip: 1.0
+    scheduler: null  # cosine | plateau | null

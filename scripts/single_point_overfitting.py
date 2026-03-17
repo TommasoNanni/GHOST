@@ -78,6 +78,7 @@ def main():
     max_epochs              = CONFIG.fusion.training.max_epochs
     batch_size              = CONFIG.fusion.training.batch_size
     grad_clip               = CONFIG.fusion.training.grad_clip
+    scheduler_name          = getattr(CONFIG.fusion.training, "scheduler", None)
 
     # create the dataset
     dp = RICHFusionDatapoint(scene_dir=RICH_SCENE_DIR, rich_data_root = CONFIG.data.rich_data_root)
@@ -109,6 +110,15 @@ def main():
     logger.info("\n" + model.summary())
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    if scheduler_name == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max_epochs, eta_min=lr * 0.1
+        )
+    elif scheduler_name == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10)
+    else:
+        scheduler = None
 
     try:
         vposer_loss = VPoserLoss()
@@ -206,6 +216,7 @@ def main():
         use_wandb=CONFIG.fusion.use_wandb,
         dtype=torch.bfloat16,
         grad_clip=grad_clip,
+        scheduler=scheduler,
         metrics=metrics,
         metric_fn=metric_fn,
         prediction_save_path=CONFIG.data.fusion_output_dir,
