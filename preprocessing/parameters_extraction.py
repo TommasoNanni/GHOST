@@ -1219,24 +1219,19 @@ class BodyParameterEstimator:
         # ── 3. All-pairs Hungarian matching ───────────────────────────────
         def _chamfer_sim(
             feats_a: np.ndarray,   # (N, D) L2-normalised
-            confs_a: np.ndarray,   # (N,)  per-frame confidence weights
+            confs_a: np.ndarray,   # (N,)  unused
             feats_b: np.ndarray,   # (M, D) L2-normalised
-            confs_b: np.ndarray,   # (M,)  per-frame confidence weights
+            confs_b: np.ndarray,   # (M,)  unused
         ) -> float:
-            """Confidence-weighted symmetric Chamfer similarity.
+            """Symmetric Chamfer similarity.
 
             For each frame in A find its nearest neighbour in B (max cosine
-            similarity), then take the confidence-weighted mean of those scores,
-            and vice-versa.  Averaging both directions gives a symmetric score.
-
-            High-confidence frames (person clearly visible) drive the score;
-            occluded frames contribute little even when they land a spurious
-            high similarity, because their weight is low.
+            similarity), take the plain mean, and vice-versa.
             """
             S = feats_a @ feats_b.T                 # (N, M) cosine similarities
-            score_a2b = np.average(S.max(axis=1), weights=confs_a)
-            score_b2a = np.average(S.max(axis=0), weights=confs_b)
-            return float(0.5 * (score_a2b + score_b2a))
+            score_a2b = float(S.max(axis=1).mean())
+            score_b2a = float(S.max(axis=0).mean())
+            return 0.5 * (score_a2b + score_b2a)
 
         def _weighted_sim_mat(
             pids_a: list[int],
