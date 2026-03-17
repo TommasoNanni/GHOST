@@ -292,6 +292,7 @@ class FusionDatapoint(Dataset, ABC):
         frames = np.arange(self._frame_start, self._frame_end)
 
         pose = np.zeros((T, K, P, J, 6), dtype=np.float32)
+        pose_cam = np.zeros((T, K, P, J, 6), dtype=np.float32)
         shape = np.zeros((T, K, P, 10), dtype=np.float32)
         camera = np.zeros((T, K, 8), dtype=np.float32)
         joint_mask = np.zeros((T, K, P, J), dtype=np.float32)
@@ -345,6 +346,13 @@ class FusionDatapoint(Dataset, ABC):
                             hpp_li = None
                         pose[t, k, p_slot] = self.convert_pose(
                             bpp[li], hpp_li, gr[li]
+                        )
+                        # Camera-frame pose: same body/hand joints, but global
+                        # orient in the camera's own frame (before world transform).
+                        gr_cam_arr = pdata.get("smplx_global_orient_cam")
+                        gr_cam_li = gr_cam_arr[li] if gr_cam_arr is not None else gr[li]
+                        pose_cam[t, k, p_slot] = self.convert_pose(
+                            bpp[li], hpp_li, gr_cam_li
                         )
 
                     # --- Shape ---
@@ -404,6 +412,7 @@ class FusionDatapoint(Dataset, ABC):
 
         inputs = {
             "pose": torch.from_numpy(pose),
+            "pose_cam": torch.from_numpy(pose_cam),
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),
@@ -835,6 +844,10 @@ class RICHFusionDatapoint(FusionDatapoint):
                 # smplx_global_orient: (N, 3) axis-angle
                 go = pdata.get("smplx_global_orient")
                 if go is not None:
+                    # Snapshot camera-frame orient before overwriting with world frame.
+                    # Used as frozen KV in cam→pose cross-attention.
+                    pdata["smplx_global_orient_cam"] = go.copy()
+
                     R_body = SciR.from_rotvec(
                         go.astype(np.float64)
                     ).as_matrix()                              # (N, 3, 3)

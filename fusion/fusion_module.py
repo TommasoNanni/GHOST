@@ -270,20 +270,24 @@ class PoseCameraCrossAttention(nn.Module):
         self,
         pose_stream: torch.Tensor,
         camera_stream: torch.Tensor,
+        pose_cam_kv: torch.Tensor,
         B: int, T: int, K: int, P: int, J: int, D: int,
         dropout: nn.Dropout,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Parameters
         ----------
-        pose_stream   : (B, T, K, P, J, D)
+        pose_stream   : (B, T, K, P, J, D)  — world-frame pose, updated state
         camera_stream : (B, T, K, D)
+        pose_cam_kv   : (B, T, K, P, J, D)  — camera-frame pose, frozen input
+                        used as KV in cam→pose direction so each camera attends
+                        to its own view of the body (distinct per camera).
 
         Returns
         -------
         pose_stream, camera_stream (same shapes, updated)
         """
-        # Pose - Camera
+        # Pose → Camera: each joint queries all K camera tokens
         x = self.pose_to_cam_norm(pose_stream)
         x = x.permute(0, 1, 3, 4, 2, 5).contiguous().reshape(B * T * P * J, K, D)
         cam_kv = (
@@ -296,11 +300,13 @@ class PoseCameraCrossAttention(nn.Module):
         x = x.reshape(B, T, P, J, K, D).permute(0, 1, 4, 2, 3, 5).contiguous()
         pose_stream = pose_stream + dropout(x)
 
-        # Camera - Pose
+        # Camera → Pose: each camera queries its own camera-frame pose tokens.
+        # Using camera-frame KV (distinct per camera) instead of world-frame pose
+        # (identical across cameras) so each camera gets a unique update.
         x = self.cam_to_pose_norm(camera_stream)
         x = x.reshape(B * T * K, 1, D)
-        pose_kv = pose_stream.reshape(B * T * K, P * J, D)
-        x, _ = self.cam_to_pose_attn(x, pose_kv, pose_kv)
+        pose_cam_kv_flat = pose_cam_kv.reshape(B * T * K, P * J, D)
+        x, _ = self.cam_to_pose_attn(x, pose_cam_kv_flat, pose_cam_kv_flat)
         camera_stream = camera_stream + dropout(x.reshape(B, T, K, D))
 
         return pose_stream, camera_stream
@@ -607,17 +613,21 @@ class SSTNetwork(nn.Module):
         camera: torch.Tensor,
         joint_mask: torch.Tensor,
         person_mask: torch.Tensor,
+        pose_cam: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters
         ----------
-        pose        : [B, T, K, P, J, 6] or [T, K, P, J, 6]
+        pose        : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — world-frame (cam-0)
         shape       : [B, T, K, P, betas] or [T, K, P, betas]
         camera      : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
         joint_mask  : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
         person_mask : [B, T, K, P] or [T, K, P]  bool — True when person p is
                       detected in camera k at frame t.  Used to mask the shape
                       and camera streams where no observation exists.
+        pose_cam    : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — camera-frame pose,
+                      used as frozen KV in cam→pose cross-attention.  Falls back
+                      to ``pose`` (world-frame) when None.
 
         Returns
         -------
@@ -636,6 +646,10 @@ class SSTNetwork(nn.Module):
             joint_mask = joint_mask.unsqueeze(0)
         if person_mask.dim() == 3:
             person_mask = person_mask.unsqueeze(0)
+        if pose_cam is None:
+            pose_cam = pose  # fallback: no distinction (world == camera frame)
+        elif pose_cam.dim() == 5:
+            pose_cam = pose_cam.unsqueeze(0)
 
         assert pose.shape[:4] == shape.shape[:4]
         assert pose.shape[:3] == camera.shape[:3]
@@ -644,6 +658,9 @@ class SSTNetwork(nn.Module):
 
         # encode
         pose_emb, shape_emb, camera_emb = self.encoder(pose, shape, camera)
+        # Encode camera-frame poses with the same pose encoder (shared weights).
+        # Result is used as frozen KV in cam→pose cross-attention.
+        pose_cam_emb = self.encoder.pose_encoder(pose_cam)
         B, T, K, P, J, D = pose_emb.shape
         H = self.num_heads
 
@@ -717,7 +734,7 @@ class SSTNetwork(nn.Module):
 
             # Pose - Camera cross-attention every layer
             pose_stream, camera_stream = self.cross_attns[layer_idx](
-                pose_stream, camera_stream,
+                pose_stream, camera_stream, pose_cam_emb,
                 B, T, K, P, J, D, self.dropout,
             )
 
