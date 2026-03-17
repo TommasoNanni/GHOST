@@ -541,10 +541,6 @@ class ScaledCCA(Metric):
         return self._aggregate()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Collection
-# ═══════════════════════════════════════════════════════════════════════════
-
 class MetricCollection:
     """Groups several :class:`Metric` instances.
 

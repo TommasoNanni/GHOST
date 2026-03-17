@@ -11,3 +11,4 @@ CLAUDE.md
 .pytest_cache/
 *.out
 wandb/
+fusion_outputs/
