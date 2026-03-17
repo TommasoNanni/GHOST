@@ -43,7 +43,7 @@ fusion:
     VPoser_path: "/cluster/project/cvg/students/tnanni/ghost/checkpoints/V02_05/"
     pose_mse_weight: 1.0
     shape_mse_weight: 1.0
-    epipolar_weight: 0.0001
+    epipolar_weight: 0.1
     temporal_weight: 0.001
     bone_length_weight: 0.01
     beta_consistency_weight: 0.01
@@ -55,3 +55,4 @@ fusion:
     batch_size: 1
     grad_clip: 1.0
     scheduler: null  # cosine | plateau | null
+    patience: 20  # early stopping patience (null to disable)

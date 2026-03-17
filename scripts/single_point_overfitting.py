@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import torch
-from pytorch3d.transforms import quaternion_to_matrix
+from pytorch3d.transforms import quaternion_to_matrix, rotation_6d_to_matrix
 from torch.utils.data import DataLoader
 
 from configuration import CONFIG
@@ -39,10 +39,11 @@ from fusion.loss import (
 )
 from fusion.metric import (
     MetricCollection,
-    PAMPJPE,
-    GAMPJPE,
-    TranslationError,
-    AngleError,
+    WMPJPE, GAMPJPE, PAMPJPE,
+    WMPJRE, GAMPJRE, PAMPJRE,
+    TranslationError, ScaledTranslationError,
+    AngleError, FocalError,
+    RRA, CCA, ScaledCCA,
 )
 from fusion.trainer import Trainer
 from utilities.smplx_utilities import get_smplx_joints
@@ -53,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 RICH_SCENE_DIR  = Path(
     "/cluster/project/cvg/students/tnanni/ghost/test_outputs"
-    "/rich5_segmentation_test/BBQ_001_guitar"
+    "/rich10_segmentation_test/BBQ_001_guitar"
 )
 
 
@@ -79,6 +80,7 @@ def main():
     batch_size              = CONFIG.fusion.training.batch_size
     grad_clip               = CONFIG.fusion.training.grad_clip
     scheduler_name          = getattr(CONFIG.fusion.training, "scheduler", None)
+    patience                = getattr(CONFIG.fusion.training, "patience", None)
 
     # create the dataset
     dp = RICHFusionDatapoint(scene_dir=RICH_SCENE_DIR, rich_data_root = CONFIG.data.rich_data_root)
@@ -142,10 +144,11 @@ def main():
     # We pick the middle frame of the window as the representative frame so
     # we avoid averaging rotation matrices over T (which breaks SO(3)).
     metrics = MetricCollection([
-        PAMPJPE(),
-        GAMPJPE(),
-        TranslationError(),
-        AngleError(),
+        WMPJPE(), GAMPJPE(), PAMPJPE(),
+        WMPJRE(), GAMPJRE(), PAMPJRE(),
+        TranslationError(), ScaledTranslationError(),
+        AngleError(), FocalError(),
+        RRA(threshold=15.0), CCA(threshold=15.0), ScaledCCA(threshold=15.0),
     ])
 
     def metric_fn(preds, targets, mc):
@@ -155,45 +158,71 @@ def main():
         t_mid = T // 2   # representative frame
 
         with torch.no_grad():
-            # Predicted and GT 3D joints via SMPL-X: (B, T, P, Jout, 3)
-            # Both are computed in body-centric space so they are in the same
-            # coordinate frame. Using targets["keypoints_3d"] (pred_keypoints_3d
-            # from the npz) would be wrong: those are in camera space (with R, t
-            # applied), so Umeyama would trivially absorb the rigid transform and
-            # give PA-MPJPE = 0 regardless of prediction quality.
+            # 3D joints via SMPL-X: (B, T, P, Jout, 3)
             pred_joints = get_smplx_joints(
                 pose_aggr.float(), shape_aggr.float()
-            ).cpu().numpy()
+            ).cpu().numpy()[..., :55, :]
             gt_joints = get_smplx_joints(
                 targets["pose"].float(), targets["shape"].float()
-            ).cpu().numpy()
-            # Keep only the first 55 SMPL-X joints.
-            pred_joints = pred_joints[..., :55, :]
-            gt_joints   = gt_joints  [..., :55, :]
+            ).cpu().numpy()[..., :55, :]
 
-            # Camera rotations (B, T, K, 3, 3) and translations (B, T, K, 3)
+            # Per-joint rotation matrices from 6D pose: (B, T, P, J, 3, 3)
+            pred_rotmats = rotation_6d_to_matrix(
+                pose_aggr.float()
+            ).cpu().numpy()
+            gt_rotmats = rotation_6d_to_matrix(
+                targets["pose"].float()
+            ).cpu().numpy()
+
+            # Camera rotations (B, T, K, 3, 3), translations (B, T, K, 3)
             R_pred = quaternion_to_matrix(
                 camera_pred[..., :4].float().reshape(-1, 4)
             ).reshape(B, T, K, 3, 3).cpu().numpy()
             t_pred = camera_pred[..., 4:7].float().cpu().numpy()
+            f_pred = camera_pred[..., 7].float().cpu().numpy()   # (B, T, K)
 
             R_gt = quaternion_to_matrix(
                 targets["camera"][..., :4].float().reshape(-1, 4)
             ).reshape(B, T, K, 3, 3).cpu().numpy()
-            t_gt = targets["camera"][..., 4:7].float().cpu().numpy()
+            t_gt   = targets["camera"][..., 4:7].float().cpu().numpy()
+            f_gt   = targets["camera"][..., 7].float().cpu().numpy()
 
-        # Camera centres in world space: C = -R^T t
+        # Camera centres: C = -R^T t
         cam_centres_pred = -np.einsum("...ji,...j->...i", R_pred, t_pred)  # (B, T, K, 3)
         cam_centres_gt   = -np.einsum("...ji,...j->...i", R_gt,   t_gt)
 
         for b in range(B):
-            # Human metrics — middle frame, shape (P, J, 3)
-            mc["PA-MPJPE"].update(pred_joints[b, t_mid], gt_joints[b, t_mid])
-            mc["GA-MPJPE"].update(pred_joints[b, t_mid], gt_joints[b, t_mid])
+            pj  = pred_joints[b, t_mid]          # (P, J, 3)
+            gj  = gt_joints[b, t_mid]
+            pr  = pred_rotmats[b, t_mid]         # (P, J, 3, 3)
+            gr  = gt_rotmats[b, t_mid]
+            Cp  = cam_centres_pred[b, t_mid]     # (K, 3)
+            Cg  = cam_centres_gt[b, t_mid]
+            Rp  = R_pred[b, t_mid]               # (K, 3, 3)
+            Rg  = R_gt[b, t_mid]
 
-            # Camera metrics — middle frame, shape (K, 3) / (K, 3, 3)
-            mc["TE"].update(cam_centres_pred[b, t_mid], cam_centres_gt[b, t_mid])
-            mc["AE"].update(R_pred[b, t_mid], R_gt[b, t_mid])
+            # Human position metrics
+            mc["W-MPJPE"].update(pj, gj, Cp, Cg)
+            mc["GA-MPJPE"].update(pj, gj)
+            mc["PA-MPJPE"].update(pj, gj)
+
+            # Human rotation metrics
+            mc["W-MPJRE"].update(pr, gr, Cp, Cg)
+            mc["GA-MPJRE"].update(pr, gr)
+            mc["PA-MPJRE"].update(pr, gr)
+
+            # Camera position metrics
+            mc["TE"].update(Cp, Cg)
+            mc["s-TE"].update(Cp, Cg)
+            mc[f"CCA@15"].update(Cp, Cg)
+            mc[f"s-CCA@15"].update(Cp, Cg)
+
+            # Camera rotation metrics
+            mc["AE"].update(Rp, Rg)
+            mc["RRA@15"].update(Rp, Rg)
+
+            # Focal length
+            mc["FocalMAE"].update(f_pred[b, t_mid], f_gt[b, t_mid])
 
     if CONFIG.fusion.use_wandb:
         import wandb
@@ -217,6 +246,7 @@ def main():
         dtype=torch.bfloat16,
         grad_clip=grad_clip,
         scheduler=scheduler,
+        early_stopping_patience=patience,
         metrics=metrics,
         metric_fn=metric_fn,
         prediction_save_path=CONFIG.data.fusion_output_dir,

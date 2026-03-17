@@ -416,6 +416,35 @@ class AngleError(Metric):
         return self._aggregate()
 
 
+class FocalError(Metric):
+    """Mean Absolute Error of focal length predictions (pixels).
+
+    Measures how well the model recovers the camera focal length.
+
+    Parameters
+    ----------
+    pred_focal, gt_focal : ``(C,)`` focal lengths in pixels.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(name="FocalMAE", higher_is_better=False)
+
+    def update(
+        self,
+        pred_focal: np.ndarray,
+        gt_focal: np.ndarray,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        pred_focal, gt_focal : (C,) focal lengths in pixels.
+        """
+        self._record(float(np.abs(pred_focal - gt_focal).mean()))
+
+    def compute(self) -> Dict[str, float]:
+        return self._aggregate()
+
+
 class RRA(Metric):
     """Relative Rotation Accuracy (**RRA@τ**).
 
