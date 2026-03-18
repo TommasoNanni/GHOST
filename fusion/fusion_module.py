@@ -39,18 +39,19 @@ class SSTEncoder(nn.Module):
     def __init__(self, embedding_dim: int = 128):
         super().__init__()
         self.pose_encoder = nn.Sequential(
-            nn.Linear(6, 2 * embedding_dim),
-            nn.ReLU(),
+            nn.Linear(6, 2 * embedding_dim), nn.ReLU(),
             nn.Linear(2 * embedding_dim, embedding_dim),
         )
         self.shape_encoder = nn.Sequential(
-            nn.Linear(10, 2 * embedding_dim),
-            nn.Tanh(),
+            nn.Linear(10, 2 * embedding_dim), nn.Tanh(),
             nn.Linear(2 * embedding_dim, embedding_dim),
         )
         self.camera_encoder = nn.Sequential(
-            nn.Linear(8, 2 * embedding_dim),
-            nn.ReLU(),
+            nn.Linear(8, 2 * embedding_dim), nn.ReLU(),
+            nn.Linear(2 * embedding_dim, embedding_dim),
+        )
+        self.translation_encoder = nn.Sequential(
+            nn.Linear(3, 2 * embedding_dim), nn.ReLU(),
             nn.Linear(2 * embedding_dim, embedding_dim),
         )
 
@@ -59,15 +60,22 @@ class SSTEncoder(nn.Module):
         pose: torch.Tensor,
         shape: torch.Tensor,
         camera: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        translation: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Returns
         -------
-        pose_emb   : (B, T, K, P, J, D)
+        pose_emb   : (B, T, K, P, J, D)   all 55 joints — split by caller
         shape_emb  : (B, T, K, P, D)
         camera_emb : (B, T, K, D)
+        trans_emb  : (B, T, K, P, D)
         """
-        return self.pose_encoder(pose), self.shape_encoder(shape), self.camera_encoder(camera)
+        return (
+            self.pose_encoder(pose),
+            self.shape_encoder(shape),
+            self.camera_encoder(camera),
+            self.translation_encoder(translation),
+        )
 
 
 class WindowedTemporalAttention(nn.Module):
@@ -516,6 +524,35 @@ class CameraWeightedPooling(nn.Module):
         return torch.sum(x * weights, dim=k_dim)
 
 
+class KinToSpatialAttention(nn.Module):
+    """One-directional cross-attention: spatial tokens (Q) read from kinematic tokens (KV).
+
+    Kinematic stream is not modified — joints influence root/translation, not the reverse.
+    Operates per (camera, person, frame): (B*T*K*P, 2, D) × (B*T*K*P, 54, D).
+    """
+
+    def __init__(self, embedding_dim: int, num_heads: int, dropout: float = 0.0):
+        super().__init__()
+        self.norm_q  = nn.LayerNorm(embedding_dim)
+        self.norm_kv = nn.LayerNorm(embedding_dim)
+        self.attn = nn.MultiheadAttention(
+            embedding_dim, num_heads, dropout=dropout, batch_first=True,
+        )
+
+    def forward(
+        self,
+        spatial: torch.Tensor,    # (B, T, K, P, 2, D)
+        kinematic: torch.Tensor,  # (B, T, K, P, 54, D)
+    ) -> torch.Tensor:
+        B, T, K, P, J_sp, D = spatial.shape
+        J_kin = kinematic.shape[4]
+        N = B * T * K * P
+        q  = self.norm_q(spatial).reshape(N, J_sp, D)
+        kv = self.norm_kv(kinematic).reshape(N, J_kin, D)
+        out, _ = self.attn(q, kv, kv)
+        return spatial + out.reshape(B, T, K, P, J_sp, D)
+
+
 class SSTOutputHeads(nn.Module):
     """Final norm + linear decoders for pose, shape, camera."""
 
@@ -560,35 +597,42 @@ class SSTOutputHeads(nn.Module):
         # (small weights × activations ≈ 0), but gradients flow to inner layers
         # from epoch 0 — unlike zero-init which freezes W1/b1 and causes
         # step-wise loss curves.
+        self.trans_head = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim), nn.ReLU(), nn.Linear(embedding_dim, 3),
+        )
         with torch.no_grad():
-            nn.init.normal_(self.pose_head_per_cam[-1].weight, std=1e-3)
-            nn.init.zeros_(self.pose_head_per_cam[-1].bias)
-            nn.init.normal_(self.pose_head_aggr[-1].weight, std=1e-3)
-            nn.init.zeros_(self.pose_head_aggr[-1].bias)
-            nn.init.normal_(self.camera_rot_trans_head[-1].weight, std=1e-3)
-            nn.init.zeros_(self.camera_rot_trans_head[-1].bias)
-            nn.init.normal_(self.camera_focal_head[-1].weight, std=1e-3)
-            nn.init.zeros_(self.camera_focal_head[-1].bias)
+            for head in [self.pose_head_per_cam, self.pose_head_aggr,
+                         self.trans_head,
+                         self.camera_rot_trans_head, self.camera_focal_head]:
+                nn.init.normal_(head[-1].weight, std=1e-3)
+                nn.init.zeros_(head[-1].bias)
 
     def forward(
         self,
-        pose_stream: torch.Tensor,
+        spatial_stream: torch.Tensor,    # (B, T, K, P, 2, D)
+        kin_stream: torch.Tensor,        # (B, T, K, P, 54, D)
         shape_stream: torch.Tensor,
         camera_stream: torch.Tensor,
+        pose_input: torch.Tensor,        # (B, T, K, P, 55, 6) for residual
+        translation_input: torch.Tensor, # (B, T, K, P, 3) for residual
         camera_input: torch.Tensor,
-        pose_input: torch.Tensor,
         B: int, T: int, K: int, P: int, J: int, D: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Reconstruct full pose stream (B,T,K,P,55,D) for existing pose heads.
+        pose_stream = torch.cat([spatial_stream[:, :, :, :, :1, :], kin_stream], dim=4)
         pose = self.pose_norm(pose_stream)
 
-        # Residual: predict delta on top of SAM3D input so the model starts at
-        # SAM3D quality (delta≈0 at init) and only needs to learn corrections.
         pose_delta_per_cam = self.pose_head_per_cam(pose.reshape(B * T * K * P * J, D)).reshape(B, T, K, P, J, 6)
         pose_per_cam = pose_input + pose_delta_per_cam
 
         pose_aggr_feat = self.pose_pool(pose, k_dim=2)  # (B, T, P, J, D)
         pose_delta_aggr = self.pose_head_aggr(pose_aggr_feat.reshape(B * T * P * J, D)).reshape(B, T, P, J, 6)
-        pose_aggr = pose_input.mean(dim=2) + pose_delta_aggr  # mean across K as baseline
+        pose_aggr = pose_input.mean(dim=2) + pose_delta_aggr
+
+        # Translation from the second spatial token — aggregate across cameras only.
+        trans_feat = spatial_stream[:, :, :, :, 1, :]   # (B, T, K, P, D)
+        trans_aggr_feat = self.pose_pool(trans_feat.unsqueeze(4), k_dim=2).squeeze(3)  # (B, T, P, D)
+        trans_aggr = translation_input.mean(dim=2) + self.trans_head(trans_aggr_feat.reshape(B * T * P, D)).reshape(B, T, P, 3)
 
         shape = self.shape_norm(shape_stream)
 
@@ -612,7 +656,7 @@ class SSTOutputHeads(nn.Module):
             focal_pred,
         ], dim=-1)
 
-        return pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam
+        return pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam, trans_aggr
 
 class SSTNetwork(nn.Module):
     """Spatio-Spatio-Temporal attention module that fuses parameters across
@@ -647,15 +691,27 @@ class SSTNetwork(nn.Module):
         self.temporal_pe = PositionalEncoding(max_temporal_len, embedding_dim)
 
         self.encoder = SSTEncoder(embedding_dim)
-        # Learnable joint identity embedding: gives each of the J joints a unique
-        # fingerprint that persists through all attention layers via residual
-        # connections.  Without this, JointSelfAttention averages all joint tokens
-        # together (over-smoothing) so the pose head sees J identical embeddings
-        # and outputs J identical rotations.
-        self.joint_id_embedding = nn.Embedding(num_joints, embedding_dim)
+        # Joint IDs for the 54 kinematic joints only.
+        self.joint_id_embedding = nn.Embedding(num_joints - 1, embedding_dim)
 
-        self.pose_layers = nn.ModuleList([
+        # Kinematic stream: joint self-attn + cross-view + temporal (no camera cross-attn).
+        self.kin_layers = nn.ModuleList([
             PoseStreamLayer(embedding_dim, num_heads, temporal_window, dropout)
+            for _ in range(num_layers)
+        ])
+        # Spatial stream: root orient + translation tokens, same layer type (J=2).
+        self.spatial_layers = nn.ModuleList([
+            PoseStreamLayer(embedding_dim, num_heads, temporal_window, dropout)
+            for _ in range(num_layers)
+        ])
+        # Camera cross-attention only for the spatial stream.
+        self.spatial_cam_attns = nn.ModuleList([
+            PoseCameraCrossAttention(embedding_dim, num_heads, dropout)
+            for _ in range(num_layers)
+        ])
+        # One-directional: kinematic joints → spatial tokens (root + trans).
+        self.kin_to_spatial_attns = nn.ModuleList([
+            KinToSpatialAttention(embedding_dim, num_heads, dropout)
             for _ in range(num_layers)
         ])
         self.shape_layers = nn.ModuleList([
@@ -664,10 +720,6 @@ class SSTNetwork(nn.Module):
         ])
         self.camera_layers = nn.ModuleList([
             CameraStreamLayer(embedding_dim, num_heads, temporal_window, dropout)
-            for _ in range(num_layers)
-        ])
-        self.cross_attns = nn.ModuleList([
-            PoseCameraCrossAttention(embedding_dim, num_heads, dropout)
             for _ in range(num_layers)
         ])
         self.output_heads = SSTOutputHeads(embedding_dim)
@@ -694,8 +746,10 @@ class SSTNetwork(nn.Module):
         camera: torch.Tensor,
         joint_mask: torch.Tensor,
         person_mask: torch.Tensor,
+        translation: torch.Tensor,
         pose_cam: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        translation_cam: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters
         ----------
@@ -703,18 +757,19 @@ class SSTNetwork(nn.Module):
         shape       : [B, T, K, P, betas] or [T, K, P, betas]
         camera      : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
         joint_mask  : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
-        person_mask : [B, T, K, P] or [T, K, P]  bool — True when person p is
-                      detected in camera k at frame t.  Used to mask the shape
-                      and camera streams where no observation exists.
+        person_mask : [B, T, K, P] or [T, K, P]  bool
+        translation : [B, T, K, P, 3] or [T, K, P, 3]  — world-frame body translation
         pose_cam    : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — camera-frame pose,
-                      used as frozen KV in cam→pose cross-attention.  Falls back
-                      to ``pose`` (world-frame) when None.
+                      used as frozen KV in cam→pose cross-attention.
 
         Returns
         -------
-        pose   : [B, T, P, J, 6]
-        shape  : [B, T, P, 10]
-        camera : [B, T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
+        pose        : [B, T, P, J, 6]
+        shape       : [B, T, P, 10]
+        camera      : [B, T, K, 8]
+        pose_per_cam: [B, T, K, P, J, 6]
+        shape_per_cam:[B, T, K, P, 10]
+        trans_aggr  : [B, T, P, 3]
         """
         # ensure batch dim
         if pose.dim() == 5:
@@ -727,26 +782,50 @@ class SSTNetwork(nn.Module):
             joint_mask = joint_mask.unsqueeze(0)
         if person_mask.dim() == 3:
             person_mask = person_mask.unsqueeze(0)
+        if translation.dim() == 4:
+            translation = translation.unsqueeze(0)
         if pose_cam is None:
-            pose_cam = pose  # fallback: no distinction (world == camera frame)
+            pose_cam = pose
         elif pose_cam.dim() == 5:
             pose_cam = pose_cam.unsqueeze(0)
+        if translation_cam is None:
+            translation_cam = translation
+        elif translation_cam.dim() == 4:
+            translation_cam = translation_cam.unsqueeze(0)
 
         assert pose.shape[:4] == shape.shape[:4]
         assert pose.shape[:3] == camera.shape[:3]
         assert pose.shape[:5] == joint_mask.shape
         assert pose.shape[:4] == person_mask.shape
+        assert pose.shape[:4] == translation.shape[:4]
 
-        # encode
-        pose_emb, shape_emb, camera_emb = self.encoder(pose, shape, camera)
-        # Encode camera-frame poses with the same pose encoder (shared weights).
-        # Result is used as frozen KV in cam→pose cross-attention.
+        pose_emb, shape_emb, camera_emb, trans_emb = self.encoder(
+            pose, shape, camera, translation
+        )
         pose_cam_emb = self.encoder.pose_encoder(pose_cam)
         B, T, K, P, J, D = pose_emb.shape
 
-        joint_ids = self.joint_id_embedding.weight  # (J, D)
-        # Inject once into the frozen cam-frame KV (it never changes across layers).
-        pose_cam_emb = pose_cam_emb + joint_ids
+        # Camera-frame spatial KV: (B, T, K, P, 2, D)
+        # Slot 0 — root orientation in each camera's frame (distinct per camera,
+        #           unlike world-frame root which is ~identical across cameras).
+        # Slot 1 — per-camera translation estimate (also distinct: each camera's
+        #           SAM3D fit yields a different body translation).
+        # This is passed as frozen KV in PoseCameraCrossAttention so the camera
+        # stream can triangulate its own position from body observations.
+        cam_root_emb  = pose_cam_emb[:, :, :, :, 0:1, :]                    # (B,T,K,P,1,D)
+        cam_trans_emb = self.encoder.translation_encoder(translation_cam).unsqueeze(4)  # (B,T,K,P,1,D)
+        cam_spatial_kv = torch.cat([cam_root_emb, cam_trans_emb], dim=4)  # (B,T,K,P,2,D)
+
+        # Spatial stream: [root_orient(0), translation(1)] — attend cameras.
+        spatial_stream = torch.cat([
+            pose_emb[:, :, :, :, :1, :],   # root orient  (B,T,K,P,1,D)
+            trans_emb.unsqueeze(4),          # translation  (B,T,K,P,1,D)
+        ], dim=4)                            # → (B,T,K,P,2,D)
+
+        # Kinematic stream: 54 body joints — no camera cross-attn.
+        kin_stream = pose_emb[:, :, :, :, 1:, :]  # (B,T,K,P,54,D)
+
+        joint_ids = self.joint_id_embedding.weight  # (54, D)
         H = self.num_heads
 
         # person_visible: (B, T, K, P) float — 1 present, 0 absent.
@@ -757,16 +836,18 @@ class SSTNetwork(nn.Module):
         # guaranteed zero even if joint_mask was somehow non-zero there.
         joint_mask_masked = joint_mask * person_visible.unsqueeze(-1)  # (B, T, K, P, J)
 
-        joint_mask_flat = joint_mask_masked.reshape(B * T * K * P, J)
-        pose_joint_mask = self._build_confidence_mask(joint_mask_flat, H)
+        # Spatial mask (J=2): root confidence + 1.0 for translation token.
+        ones = torch.ones(B, T, K, P, 1, dtype=joint_mask_masked.dtype, device=joint_mask_masked.device)
+        spatial_mask = torch.cat([joint_mask_masked[:, :, :, :, :1], ones], dim=4)  # (B,T,K,P,2)
+        sp_joint_mask   = self._build_confidence_mask(spatial_mask.reshape(B * T * K * P, 2), H)
+        sp_view_mask    = self._build_confidence_mask(spatial_mask.permute(0, 1, 3, 4, 2).reshape(B * T * P * 2, K), H)
+        sp_temporal_conf = spatial_mask.permute(0, 2, 3, 4, 1).reshape(B * K * P * 2, T)
 
-        view_mask_flat = joint_mask_masked.permute(0, 1, 3, 4, 2).reshape(B * T * P * J, K)
-        pose_view_mask = self._build_confidence_mask(view_mask_flat, H)
-
-        # For pose temporal attention: pass raw (B*K*P*J, T) confidence scores.
-        # WindowedTemporalAttention converts these to a per-logit score_mod
-        # inside the FlashAttention kernel — no T×T tensor is ever allocated.
-        pose_temporal_conf = joint_mask_masked.permute(0, 2, 3, 4, 1).reshape(B * K * P * J, T)
+        # Kinematic mask (J=54).
+        kin_mask = joint_mask_masked[:, :, :, :, 1:]  # (B,T,K,P,54)
+        kin_joint_mask   = self._build_confidence_mask(kin_mask.reshape(B * T * K * P, 54), H)
+        kin_view_mask    = self._build_confidence_mask(kin_mask.permute(0, 1, 3, 4, 2).reshape(B * T * P * 54, K), H)
+        kin_temporal_conf = kin_mask.permute(0, 2, 3, 4, 1).reshape(B * K * P * 54, T)
 
         # Cross-view mask for the shape stream: for each (batch, time, person),
         # which cameras can attend to each other.
@@ -785,25 +866,39 @@ class SSTNetwork(nn.Module):
         camera_visible = person_visible.any(dim=-1).to(pose_emb.dtype)   # (B, T, K)
         camera_temporal_conf = camera_visible.permute(0, 2, 1).reshape(B * K, T)
 
-        # layer loop
-        pose_stream = pose_emb
         shape_stream = shape_emb
         camera_stream = camera_emb
 
         for layer_idx in range(self.num_layers):
-            # Re-inject joint identity before every JointSelfAttention.
-            pose_stream = pose_stream + joint_ids
-
             pe = self.temporal_pe if layer_idx == 0 else None
 
-            pose_stream = self.pose_layers[layer_idx](
-                pose_stream, B, T, K, P, J, D, H,
-                joint_mask=pose_joint_mask,
-                view_mask=pose_view_mask,
-                temporal_conf=pose_temporal_conf,
+            # Kinematic stream: re-inject joint IDs before every joint self-attn.
+            kin_stream = kin_stream + joint_ids
+            kin_stream = self.kin_layers[layer_idx](
+                kin_stream, B, T, K, P, 54, D, H,
+                joint_mask=kin_joint_mask,
+                view_mask=kin_view_mask,
+                temporal_conf=kin_temporal_conf,
                 pe=pe,
                 dropout=self.dropout,
             )
+
+            # Spatial stream: root + translation attend each other, cameras, time.
+            spatial_stream = self.spatial_layers[layer_idx](
+                spatial_stream, B, T, K, P, 2, D, H,
+                joint_mask=sp_joint_mask,
+                view_mask=sp_view_mask,
+                temporal_conf=sp_temporal_conf,
+                pe=pe,
+                dropout=self.dropout,
+            )
+            spatial_stream, camera_stream = self.spatial_cam_attns[layer_idx](
+                spatial_stream, camera_stream, cam_spatial_kv,
+                B, T, K, P, 2, D, self.dropout,
+            )
+
+            # One-directional: kinematic joints inform spatial tokens (not reverse).
+            spatial_stream = self.kin_to_spatial_attns[layer_idx](spatial_stream, kin_stream)
 
             shape_stream = self.shape_layers[layer_idx](
                 shape_stream, B, T, K, P, D,
@@ -820,16 +915,11 @@ class SSTNetwork(nn.Module):
                 temporal_conf=camera_temporal_conf,
             )
 
-            # Pose - Camera cross-attention every layer
-            pose_stream, camera_stream = self.cross_attns[layer_idx](
-                pose_stream, camera_stream, pose_cam_emb,
-                B, T, K, P, J, D, self.dropout,
-            )
-
 
         # decode
         return self.output_heads(
-            pose_stream, shape_stream, camera_stream, camera, pose,
+            spatial_stream, kin_stream, shape_stream, camera_stream,
+            pose, translation, camera,
             B, T, K, P, J, D,
         )
 
