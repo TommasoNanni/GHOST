@@ -294,6 +294,7 @@ class FusionDatapoint(Dataset, ABC):
         pose = np.zeros((T, K, P, J, 6), dtype=np.float32)
         pose_cam = np.zeros((T, K, P, J, 6), dtype=np.float32)
         translation = np.zeros((T, K, P, 3), dtype=np.float32)
+        translation_cam = np.zeros((T, K, P, 3), dtype=np.float32)
         shape = np.zeros((T, K, P, 10), dtype=np.float32)
         camera = np.zeros((T, K, 8), dtype=np.float32)
         joint_mask = np.zeros((T, K, P, J), dtype=np.float32)
@@ -360,6 +361,9 @@ class FusionDatapoint(Dataset, ABC):
                     tr = pdata.get("smplx_transl")
                     if tr is not None:
                         translation[t, k, p_slot] = tr[li]
+                    pct = pdata.get("pred_cam_t")
+                    if pct is not None:
+                        translation_cam[t, k, p_slot] = pct[li]
 
                     # --- Shape ---
                     sp = pdata.get("smplx_betas")
@@ -420,6 +424,7 @@ class FusionDatapoint(Dataset, ABC):
             "pose": torch.from_numpy(pose),
             "pose_cam": torch.from_numpy(pose_cam),
             "translation": torch.from_numpy(translation),
+            "translation_cam": torch.from_numpy(translation_cam),
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),
@@ -572,6 +577,43 @@ class RICHFusionDatapoint(FusionDatapoint):
         Root of the RICH split (contains ``scan_calibration/``,
         ``train_body/``, and the scene video directories).
     """
+
+    def convert_pose(
+        self,
+        body_pose_params: np.ndarray,
+        hand_pose_params: np.ndarray | None,
+        global_rot: np.ndarray,
+    ) -> np.ndarray:
+        """Convert SMPL-X axis-angle params to [J, 6] 6D rotation."""
+        J = self.num_joints
+        out = np.zeros((J, 6), dtype=np.float32)
+        if body_pose_params is None or global_rot is None:
+            return out
+        try:
+            from scipy.spatial.transform import Rotation as SciR
+        except Exception:
+            return out
+
+        go = np.asarray(global_rot, dtype=np.float32).reshape(1, 3)
+        bp = np.asarray(body_pose_params, dtype=np.float32).reshape(-1, 3)
+        parts = [go, bp]
+        if hand_pose_params is not None:
+            hp = np.asarray(hand_pose_params, dtype=np.float32).reshape(-1, 3)
+            parts.append(hp)
+        aa = np.concatenate(parts, axis=0)
+
+        if aa.shape[0] < J:
+            aa = np.concatenate(
+                [aa, np.zeros((J - aa.shape[0], 3), dtype=np.float32)], axis=0
+            )
+        try:
+            mats = SciR.from_rotvec(aa).as_matrix()
+        except Exception:
+            return out
+
+        sixd = np.concatenate([mats[:, :, 0], mats[:, :, 1]], axis=1)
+        out[:J] = sixd[:J]
+        return out
 
     @staticmethod
     def _scene_stem(scene_name: str) -> str:
