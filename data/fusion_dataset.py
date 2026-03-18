@@ -293,6 +293,7 @@ class FusionDatapoint(Dataset, ABC):
 
         pose = np.zeros((T, K, P, J, 6), dtype=np.float32)
         pose_cam = np.zeros((T, K, P, J, 6), dtype=np.float32)
+        translation = np.zeros((T, K, P, 3), dtype=np.float32)
         shape = np.zeros((T, K, P, 10), dtype=np.float32)
         camera = np.zeros((T, K, 8), dtype=np.float32)
         joint_mask = np.zeros((T, K, P, J), dtype=np.float32)
@@ -355,6 +356,11 @@ class FusionDatapoint(Dataset, ABC):
                             bpp[li], hpp_li, gr_cam_li
                         )
 
+                    # --- Translation ---
+                    tr = pdata.get("smplx_transl")
+                    if tr is not None:
+                        translation[t, k, p_slot] = tr[li]
+
                     # --- Shape ---
                     sp = pdata.get("smplx_betas")
                     if sp is not None:
@@ -413,6 +419,7 @@ class FusionDatapoint(Dataset, ABC):
         inputs = {
             "pose": torch.from_numpy(pose),
             "pose_cam": torch.from_numpy(pose_cam),
+            "translation": torch.from_numpy(translation),
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),
