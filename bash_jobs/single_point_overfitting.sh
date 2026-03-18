@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 #SBATCH --account=ls_polle
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4

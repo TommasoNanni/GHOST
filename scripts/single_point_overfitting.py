@@ -152,7 +152,7 @@ def main():
     ])
 
     def metric_fn(preds, targets, mc):
-        pose_aggr, shape_aggr, camera_pred, _, _ = preds
+        pose_aggr, shape_aggr, camera_pred, _, _, _ = preds
         B, T = pose_aggr.shape[:2]
         K = camera_pred.shape[2]
         t_mid = T // 2   # representative frame

@@ -240,7 +240,7 @@ class Trainer:
             inputs, targets = self._unpack_batch(batch)
             with torch.amp.autocast('cuda', enabled=self.use_amp):
                 preds = self._forward(inputs)
-            pose_aggr, shape_aggr, camera_pred, _, _ = preds
+            pose_aggr, shape_aggr, camera_pred, _, _, _ = preds
             all_pose.append(pose_aggr.float().cpu())
             all_shape.append(shape_aggr.float().cpu())
             all_camera.append(camera_pred.float().cpu())

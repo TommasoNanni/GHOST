@@ -89,7 +89,7 @@ class EpipolarLoss(Loss):
 
         preds: (pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam)
         """
-        _, _, camera_stream, pose_stream, shape_stream = preds
+        _, _, camera_stream, pose_stream, shape_stream, _ = preds
         if pose_stream.shape[2] < 2:
             return pose_stream.new_zeros([])
         B, T, K, P, J, _ = pose_stream.shape
@@ -231,7 +231,7 @@ class PoseMSELoss(Loss):
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        pose_aggr, _, _, _, _ = preds
+        pose_aggr, _, _, _, _, _ = preds
         return F.mse_loss(pose_aggr, targets["pose"])
 
 
@@ -240,7 +240,7 @@ class ShapeMSELoss(Loss):
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        _, shape_aggr, _, _, _ = preds
+        _, shape_aggr, _, _, _, _ = preds
         return F.mse_loss(shape_aggr, targets["shape"])
 
 class TemporalSmoothnessLoss(Loss):
@@ -251,7 +251,7 @@ class TemporalSmoothnessLoss(Loss):
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
         """Acceleration smoothness on the aggregated pose stream (B, T, P, J, 6)."""
-        pose_aggr, _, _, _, _ = preds
+        pose_aggr, _, _, _, _, _ = preds
         if pose_aggr.shape[1] < 3:
             return pose_aggr.new_zeros([])
         current   = pose_aggr[:, 2:]
@@ -289,7 +289,7 @@ class VPoserLoss(Loss):
         -------
         Scalar KL loss: KL( q(z|x) ‖ N(0,I) )
         """
-        pose_aggr, _, _, _, _ = preds
+        pose_aggr, _, _, _, _, _ = preds
         if next(self.vposer.parameters()).device != pose_aggr.device:
             self.vposer = self.vposer.to(pose_aggr.device)
         # 6D rotation → rotation matrix → axis-angle
@@ -334,7 +334,7 @@ class BoneLengthconsistencyLoss(Loss):
         -------
         Scalar loss encouraging constant bone length across time.
         """
-        pose_aggr, shape_aggr, _, _, _ = preds
+        pose_aggr, shape_aggr, _, _, _, _ = preds
         joints = get_smplx_joints(pose_aggr, shape_aggr)[..., :55, :]  # (B, T, P, 55, 3)
 
         parent_mapping = torch.tensor(
@@ -373,7 +373,7 @@ class BetaConsistencyLoss(Loss):
         -------
         Scalar loss encouraging consistency of shape parameters across cameras.
         """
-        _, _, _, _, shape_per_cam = preds
+        _, _, _, _, shape_per_cam, _ = preds
         beta_mean = shape_per_cam.mean(dim=2, keepdim=True)  # (B, T, 1, P, 10)
         return torch.mean((shape_per_cam - beta_mean) ** 2)
 
@@ -403,7 +403,7 @@ class CameraMSELoss(Loss):
         -------
         Scalar loss encouraging adherence of camera parameters to the GT.
         """
-        _, _, camera_pred, _, _ = preds
+        _, _, camera_pred, _, _, _ = preds
         cam_gt = targets["camera"]
 
         R_pred = quaternion_to_matrix(camera_pred[..., :4].reshape(-1, 4)).reshape(*camera_pred.shape[:-1], 3, 3)
