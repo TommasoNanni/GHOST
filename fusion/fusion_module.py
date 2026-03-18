@@ -188,6 +188,38 @@ class WindowedTemporalAttention(nn.Module):
 
 
 
+def _safe_mha(
+    module: nn.MultiheadAttention,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_mask: torch.Tensor | None,
+    num_heads: int,
+) -> torch.Tensor:
+    """Run MHA with NaN-safe masking for fully-masked query positions.
+
+    When every key position is masked out for a query token (entire row is -inf),
+    softmax(-inf, -inf, ...) = NaN.  This detects such rows, temporarily fills them
+    with 0.0 so softmax stays finite, then zeros the output so invalid tokens
+    contribute exactly 0.0 to the residual stream — no noise leakage.
+    """
+    if attn_mask is None:
+        out, _ = module(query, key, value)
+        return out
+    N, S_q = query.shape[0], query.shape[1]
+    dead_NH = attn_mask.max(dim=-1).values == float('-inf')  # (N*H, S_q)
+    if dead_NH.any():
+        safe_mask = attn_mask.clone()
+        safe_mask[dead_NH] = 0.0  # uniform attention → no NaN
+        out, _ = module(query, key, value, attn_mask=safe_mask)
+        # Zero out output for dead query positions (any head flagging dead is enough)
+        dead = dead_NH.view(N, num_heads, S_q).any(dim=1)  # (N, S_q)
+        out = out.masked_fill(dead.unsqueeze(-1), 0.0)
+    else:
+        out, _ = module(query, key, value, attn_mask=attn_mask)
+    return out
+
+
 class JointSelfAttention(nn.Module):
     """Self-attention across joints within the same person / camera / frame.
 
@@ -213,7 +245,7 @@ class JointSelfAttention(nn.Module):
         attn_mask : (N*H, J, J) — additive soft mask from joint confidence.
         """
         h = self.norm(x)
-        h, _ = self.attn(h, h, h, attn_mask=attn_mask)
+        h = _safe_mha(self.attn, h, h, h, attn_mask, self.attn.num_heads)
         return x + h
 
 
@@ -244,7 +276,7 @@ class CrossViewAttention(nn.Module):
         attn_mask : (N*H, K, K) or None.
         """
         h = self.norm(x)
-        h, _ = self.attn(h, h, h, attn_mask=attn_mask)
+        h = _safe_mha(self.attn, h, h, h, attn_mask, self.attn.num_heads)
         return x + h
 
 class PoseCameraCrossAttention(nn.Module):
@@ -492,7 +524,15 @@ class SSTOutputHeads(nn.Module):
         self.pose_pool = CameraWeightedPooling(embedding_dim)
         self.shape_pool = CameraWeightedPooling(embedding_dim)
         self.pose_norm = nn.LayerNorm(embedding_dim)
-        self.pose_head = nn.Sequential(
+        # Two independent heads: per-camera features and camera-pooled features
+        # have different statistical distributions, so sharing weights creates
+        # conflicting gradients.
+        self.pose_head_per_cam = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, 6),
+        )
+        self.pose_head_aggr = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
             nn.Linear(embedding_dim, 6),
@@ -516,12 +556,19 @@ class SSTOutputHeads(nn.Module):
             nn.ReLU(),
             nn.Linear(embedding_dim // 4, 1),   # [focal_raw(1)]
         )
-        # Zero-init last layers: delta ≈ 0 at start → output ≈ SAM3D input.
+        # Small-random init for all residual last layers: delta ≈ 0 at start
+        # (small weights × activations ≈ 0), but gradients flow to inner layers
+        # from epoch 0 — unlike zero-init which freezes W1/b1 and causes
+        # step-wise loss curves.
         with torch.no_grad():
-            self.camera_rot_trans_head[-1].weight.zero_()
-            self.camera_rot_trans_head[-1].bias.zero_()
-            self.camera_focal_head[-1].weight.zero_()
-            self.camera_focal_head[-1].bias.zero_()
+            nn.init.normal_(self.pose_head_per_cam[-1].weight, std=1e-3)
+            nn.init.zeros_(self.pose_head_per_cam[-1].bias)
+            nn.init.normal_(self.pose_head_aggr[-1].weight, std=1e-3)
+            nn.init.zeros_(self.pose_head_aggr[-1].bias)
+            nn.init.normal_(self.camera_rot_trans_head[-1].weight, std=1e-3)
+            nn.init.zeros_(self.camera_rot_trans_head[-1].bias)
+            nn.init.normal_(self.camera_focal_head[-1].weight, std=1e-3)
+            nn.init.zeros_(self.camera_focal_head[-1].bias)
 
     def forward(
         self,
@@ -529,13 +576,19 @@ class SSTOutputHeads(nn.Module):
         shape_stream: torch.Tensor,
         camera_stream: torch.Tensor,
         camera_input: torch.Tensor,
+        pose_input: torch.Tensor,
         B: int, T: int, K: int, P: int, J: int, D: int,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         pose = self.pose_norm(pose_stream)
 
-        pose_per_cam = self.pose_head(pose.reshape(B * T * P * K * J, D)).reshape(B, T, K, P, J, 6)
-        pose_aggr_feat = self.pose_pool(pose, k_dim=2) # [B, T, P, J, D]
-        pose_aggr = self.pose_head(pose_aggr_feat.reshape(B * T * P * J, D)).reshape(B, T, P, J, 6)
+        # Residual: predict delta on top of SAM3D input so the model starts at
+        # SAM3D quality (delta≈0 at init) and only needs to learn corrections.
+        pose_delta_per_cam = self.pose_head_per_cam(pose.reshape(B * T * K * P * J, D)).reshape(B, T, K, P, J, 6)
+        pose_per_cam = pose_input + pose_delta_per_cam
+
+        pose_aggr_feat = self.pose_pool(pose, k_dim=2)  # (B, T, P, J, D)
+        pose_delta_aggr = self.pose_head_aggr(pose_aggr_feat.reshape(B * T * P * J, D)).reshape(B, T, P, J, 6)
+        pose_aggr = pose_input.mean(dim=2) + pose_delta_aggr  # mean across K as baseline
 
         shape = self.shape_norm(shape_stream)
 
@@ -546,11 +599,18 @@ class SSTOutputHeads(nn.Module):
         camera = self.camera_norm(camera_stream)
         camera_flat = camera.reshape(B * T * K, D)
         rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
-        focal_delta     = self.camera_focal_head(camera_flat).reshape(B, T, K, 1)
-        camera_delta = torch.cat([rot_trans_delta, focal_delta], dim=-1)
-        # Residual: predict a correction on top of the raw input cameras.
-        # At init (zero-init last layers) delta ≈ 0, so output ≈ SAM3D input.
-        camera = camera_input + camera_delta
+        # Multiplicative residual in log space: predict log(f_pred / f_input).
+        # At init (zero-init last layer) log_ratio=0 → f_pred=f_input (SAM3D value).
+        # Avoids bfloat16 precision loss: adding a small delta to f≈1155 rounds
+        # back to f (step size is 8px in bf16), but multiplying by exp(log_ratio)
+        # works at any scale since log_ratio itself is near zero.
+        log_focal_ratio = self.camera_focal_head(camera_flat).reshape(B, T, K, 1)
+        focal_pred = camera_input[..., 7:8] * torch.exp(log_focal_ratio)
+        # Additive residual for rot/trans (values in [-1,1], bf16 precision is fine).
+        camera = torch.cat([
+            camera_input[..., :7] + rot_trans_delta,
+            focal_pred,
+        ], dim=-1)
 
         return pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam
 
@@ -575,6 +635,7 @@ class SSTNetwork(nn.Module):
         max_temporal_len: int = 4096,
         dropout: float = 0.1,
         temporal_window: int = 128,
+        num_joints: int = 55,
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
@@ -586,6 +647,12 @@ class SSTNetwork(nn.Module):
         self.temporal_pe = PositionalEncoding(max_temporal_len, embedding_dim)
 
         self.encoder = SSTEncoder(embedding_dim)
+        # Learnable joint identity embedding: gives each of the J joints a unique
+        # fingerprint that persists through all attention layers via residual
+        # connections.  Without this, JointSelfAttention averages all joint tokens
+        # together (over-smoothing) so the pose head sees J identical embeddings
+        # and outputs J identical rotations.
+        self.joint_id_embedding = nn.Embedding(num_joints, embedding_dim)
 
         self.pose_layers = nn.ModuleList([
             PoseStreamLayer(embedding_dim, num_heads, temporal_window, dropout)
@@ -615,7 +682,7 @@ class SSTNetwork(nn.Module):
         which hard-excludes them from softmax.
         """
         outer = torch.einsum("bi, bj -> bij", flat, flat)
-        mask = torch.log(outer.clamp(min=1e-8))
+        mask = torch.log(outer)
         return mask.unsqueeze(1).expand(-1, num_heads, -1, -1).reshape(
             flat.shape[0] * num_heads, flat.shape[1], flat.shape[1]
         )
@@ -676,6 +743,10 @@ class SSTNetwork(nn.Module):
         # Result is used as frozen KV in cam→pose cross-attention.
         pose_cam_emb = self.encoder.pose_encoder(pose_cam)
         B, T, K, P, J, D = pose_emb.shape
+
+        joint_ids = self.joint_id_embedding.weight  # (J, D)
+        # Inject once into the frozen cam-frame KV (it never changes across layers).
+        pose_cam_emb = pose_cam_emb + joint_ids
         H = self.num_heads
 
         # person_visible: (B, T, K, P) float — 1 present, 0 absent.
@@ -720,6 +791,9 @@ class SSTNetwork(nn.Module):
         camera_stream = camera_emb
 
         for layer_idx in range(self.num_layers):
+            # Re-inject joint identity before every JointSelfAttention.
+            pose_stream = pose_stream + joint_ids
+
             pe = self.temporal_pe if layer_idx == 0 else None
 
             pose_stream = self.pose_layers[layer_idx](
@@ -755,7 +829,7 @@ class SSTNetwork(nn.Module):
 
         # decode
         return self.output_heads(
-            pose_stream, shape_stream, camera_stream, camera,
+            pose_stream, shape_stream, camera_stream, camera, pose,
             B, T, K, P, J, D,
         )
 
