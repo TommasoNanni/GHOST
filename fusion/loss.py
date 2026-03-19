@@ -81,56 +81,61 @@ class EpipolarLoss(Loss):
             targets: dict,
         ) -> torch.Tensor:
         """
-        Computes the epipolar loss from per-camera pose/shape/camera predictions.
-        Uses pose_per_cam and shape_per_cam so each body is in its own camera frame.
+        Computes the epipolar loss using world-frame predictions.
+
+        Joints are computed from pose_aggr + shape_aggr in world frame,
+        translated by trans_aggr to absolute world positions, then projected
+        into each camera's frame using the predicted camera extrinsics.
 
         Processes T in chunks of `chunk_size` to avoid OOM when running SMPL-X
         on long sequences.
 
-        preds: (pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam)
+        preds: (pose_aggr, shape_aggr, camera, trans_aggr)
         """
-        _, _, camera_stream, pose_stream, shape_stream, _ = preds
-        if pose_stream.shape[2] < 2:
-            return pose_stream.new_zeros([])
-        B, T, K, P, J, _ = pose_stream.shape
+        pose_aggr, shape_aggr, camera, trans_aggr = preds
+        K = camera.shape[2]
+        if K < 2:
+            return pose_aggr.new_zeros([])
+        B, T, P, J, _ = pose_aggr.shape
         num_pairs = 0
-        total_loss = pose_stream.new_zeros([])
+        total_loss = pose_aggr.new_zeros([])
 
         for i in range(K):
             for j in range(i + 1, K):
-                pose_i  = pose_stream[:, :, i]   # (B, T, P, J, 6)
-                pose_j  = pose_stream[:, :, j]
-                shape_i = shape_stream[:, :, i]  # (B, T, P, S)
-                shape_j = shape_stream[:, :, j]
-                cam_i   = camera_stream[:, :, i]
-                cam_j   = camera_stream[:, :, j]
+                cam_i = camera[:, :, i]   # (B, T, 8)
+                cam_j = camera[:, :, j]
 
-                pair_numerator   = pose_i.new_zeros([])
+                pair_numerator   = pose_aggr.new_zeros([])
                 pair_visible_sum = 0
 
                 for t0 in range(0, T, self.chunk_size):
                     t1 = min(t0 + self.chunk_size, T)
 
-                    vi = get_smplx_joints(pose_i[:, t0:t1], shape_i[:, t0:t1])
-                    vj = get_smplx_joints(pose_j[:, t0:t1], shape_j[:, t0:t1])
+                    # Joints in world frame: pelvis-centered → add trans_aggr for absolute position
+                    # shape_aggr is (B, P, 10) — expand to (B, t_chunk, P, 10) for get_smplx_joints
+                    t_chunk = t1 - t0
+                    shape_chunk = shape_aggr.unsqueeze(1).expand(B, t_chunk, P, 10)
+                    joints_world = get_smplx_joints(pose_aggr[:, t0:t1], shape_chunk)  # (B, t_chunk, P, J, 3)
+                    joints_world = joints_world + trans_aggr[:, t0:t1].unsqueeze(-2)
 
                     R_i, t_i, K_i = extract_cameras(cam_i[:, t0:t1], self.img_size)
                     R_j, t_j, K_j = extract_cameras(cam_j[:, t0:t1], self.img_size)
                     F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
 
-                    # Translate joints from local body frame into each camera frame
-                    # by adding pred_cam_t (body root position in camera space).
-                    vi_cam = vi + t_i.reshape(B, t1 - t0, 1, 1, 3)
-                    vj_cam = vj + t_j.reshape(B, t1 - t0, 1, 1, 3)
+                    # Project world joints into each camera frame: v_cam = R @ v_world + t
+                    Jsmplx = joints_world.shape[3]  # SMPL-X outputs more joints than pose_aggr input dim
+                    flat = joints_world.reshape(B * t_chunk, P * Jsmplx, 3)
+                    vi_cam = (torch.bmm(flat, R_i.reshape(B * t_chunk, 3, 3).transpose(-2, -1))
+                              + t_i.reshape(B * t_chunk, 1, 3)).reshape(B, t_chunk, P, Jsmplx, 3)
+                    vj_cam = (torch.bmm(flat, R_j.reshape(B * t_chunk, 3, 3).transpose(-2, -1))
+                              + t_j.reshape(B * t_chunk, 1, 3)).reshape(B, t_chunk, P, Jsmplx, 3)
 
                     x_i = project_to_2d(vi_cam, K_i)
                     x_j = project_to_2d(vj_cam, K_j)
 
                     errors  = self.compute_epipolar_errors(x_i, x_j, F)
-                    visible = (vi_cam[..., 2] > 0) & (vj_cam[..., 2] > 0)  # depth in camera frame
+                    visible = (vi_cam[..., 2] > 0) & (vj_cam[..., 2] > 0)
 
-                    # Normalize by image diagonal² to make loss dimensionless and
-                    # comparable in scale to other losses (pose/shape MSE on [-1,1]).
                     img_diag2 = float(self.img_size[0] ** 2 + self.img_size[1] ** 2)
                     pair_numerator   = pair_numerator + (errors / img_diag2 * visible.to(errors.dtype)).sum()
                     pair_visible_sum = pair_visible_sum + visible.sum().item()
@@ -231,7 +236,7 @@ class PoseMSELoss(Loss):
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        pose_aggr, _, _, _, _, _ = preds
+        pose_aggr, _, _, _ = preds
         return F.mse_loss(pose_aggr, targets["pose"])
 
 
@@ -240,8 +245,10 @@ class ShapeMSELoss(Loss):
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        _, shape_aggr, _, _, _, _ = preds
-        return F.mse_loss(shape_aggr, targets["shape"])
+        # shape_aggr is (B, P, 10); target is (B, T, K, P, 10) — reduce to (B, P, 10)
+        _, shape_aggr, _, _ = preds
+        shape_gt = targets["shape"].mean(dim=(1, 2))
+        return F.mse_loss(shape_aggr, shape_gt)
 
 class TemporalSmoothnessLoss(Loss):
     def __init__(
@@ -251,7 +258,7 @@ class TemporalSmoothnessLoss(Loss):
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
         """Acceleration smoothness on the aggregated pose stream (B, T, P, J, 6)."""
-        pose_aggr, _, _, _, _, _ = preds
+        pose_aggr, _, _, _ = preds
         if pose_aggr.shape[1] < 3:
             return pose_aggr.new_zeros([])
         current   = pose_aggr[:, 2:]
@@ -289,7 +296,7 @@ class VPoserLoss(Loss):
         -------
         Scalar KL loss: KL( q(z|x) ‖ N(0,I) )
         """
-        pose_aggr, _, _, _, _, _ = preds
+        pose_aggr, _, _, _ = preds
         if next(self.vposer.parameters()).device != pose_aggr.device:
             self.vposer = self.vposer.to(pose_aggr.device)
         # 6D rotation → rotation matrix → axis-angle
@@ -334,8 +341,10 @@ class BoneLengthconsistencyLoss(Loss):
         -------
         Scalar loss encouraging constant bone length across time.
         """
-        pose_aggr, shape_aggr, _, _, _, _ = preds
-        joints = get_smplx_joints(pose_aggr, shape_aggr)[..., :55, :]  # (B, T, P, 55, 3)
+        pose_aggr, shape_aggr, _, _ = preds
+        B, T, P = pose_aggr.shape[:3]
+        shape_exp = shape_aggr.unsqueeze(1).expand(B, T, P, 10)
+        joints = get_smplx_joints(pose_aggr, shape_exp)[..., :55, :]  # (B, T, P, 55, 3)
 
         parent_mapping = torch.tensor(
             PARENTS_TABLE, device=joints.device, dtype=torch.long
@@ -354,28 +363,22 @@ class BoneLengthconsistencyLoss(Loss):
         return bone_std.mean()
 
 
-class BetaConsistencyLoss(Loss):
-    def __init__(
-        self,
-        name: str = "Beta Consistency Loss",
-        weight: float = 1.0,
-    ) -> None:
+
+class CameraTemporalSmoothnessLoss(Loss):
+    def __init__(self, name: str = "Camera Temporal Smoothness Loss", weight: float = 1.0) -> None:
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        """
-        Penalises inconsistent shape parameters across cameras.
+        """Penalises frame-to-frame variation in predicted focal length.
 
-        Uses shape_per_cam (B, T, K, P, 10): for each person, betas should be
-        the same regardless of which camera observes them.
-
-        Returns
-        -------
-        Scalar loss encouraging consistency of shape parameters across cameras.
+        Focal length is a camera intrinsic — it should be constant over time.
+        camera: (B, T, K, 8) — [quat(4), trans(3), focal_raw(1)]
         """
-        _, _, _, _, shape_per_cam, _ = preds
-        beta_mean = shape_per_cam.mean(dim=2, keepdim=True)  # (B, T, 1, P, 10)
-        return torch.mean((shape_per_cam - beta_mean) ** 2)
+        _, _, camera, _ = preds
+        if camera.shape[1] < 2:
+            return camera.new_zeros([])
+        focal = camera[..., 7].clamp(min=1.0)   # (B, T, K)
+        return (torch.log(focal[:, 1:]) - torch.log(focal[:, :-1])).pow(2).mean()
 
 
 class CameraMSELoss(Loss):
@@ -403,7 +406,7 @@ class CameraMSELoss(Loss):
         -------
         Scalar loss encouraging adherence of camera parameters to the GT.
         """
-        _, _, camera_pred, _, _, _ = preds
+        _, _, camera_pred, _ = preds
         cam_gt = targets["camera"]
 
         R_pred = quaternion_to_matrix(camera_pred[..., :4].reshape(-1, 4)).reshape(*camera_pred.shape[:-1], 3, 3)

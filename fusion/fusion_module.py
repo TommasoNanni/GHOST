@@ -559,16 +559,7 @@ class SSTOutputHeads(nn.Module):
     def __init__(self, embedding_dim: int):
         super().__init__()
         self.pose_pool = CameraWeightedPooling(embedding_dim)
-        self.shape_pool = CameraWeightedPooling(embedding_dim)
         self.pose_norm = nn.LayerNorm(embedding_dim)
-        # Two independent heads: per-camera features and camera-pooled features
-        # have different statistical distributions, so sharing weights creates
-        # conflicting gradients.
-        self.pose_head_per_cam = nn.Sequential(
-            nn.Linear(embedding_dim, embedding_dim),
-            nn.ReLU(),
-            nn.Linear(embedding_dim, 6),
-        )
         self.pose_head_aggr = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
@@ -601,7 +592,7 @@ class SSTOutputHeads(nn.Module):
             nn.Linear(embedding_dim, embedding_dim), nn.ReLU(), nn.Linear(embedding_dim, 3),
         )
         with torch.no_grad():
-            for head in [self.pose_head_per_cam, self.pose_head_aggr,
+            for head in [self.pose_head_aggr,
                          self.trans_head,
                          self.camera_rot_trans_head, self.camera_focal_head]:
                 nn.init.normal_(head[-1].weight, std=1e-3)
@@ -611,19 +602,18 @@ class SSTOutputHeads(nn.Module):
         self,
         spatial_stream: torch.Tensor,    # (B, T, K, P, 2, D)
         kin_stream: torch.Tensor,        # (B, T, K, P, 54, D)
-        shape_stream: torch.Tensor,
-        camera_stream: torch.Tensor,
+        shape_stream: torch.Tensor,      # (B, T, K, P, D)
+        camera_stream: torch.Tensor,     # (B, T, K, D)
         pose_input: torch.Tensor,        # (B, T, K, P, 55, 6) for residual
         translation_input: torch.Tensor, # (B, T, K, P, 3) for residual
-        camera_input: torch.Tensor,
+        camera_input: torch.Tensor,      # (B, T, K, 8) for residual
+        shape_input: torch.Tensor,       # (B, T, K, P, 10) raw input betas — fallback for never-visible persons
+        person_visible: torch.Tensor,    # (B, T, K, P) float: 1 = visible, 0 = absent
         B: int, T: int, K: int, P: int, J: int, D: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Reconstruct full pose stream (B,T,K,P,55,D) for existing pose heads.
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Reconstruct full pose stream (B,T,K,P,55,D) for pose head.
         pose_stream = torch.cat([spatial_stream[:, :, :, :, :1, :], kin_stream], dim=4)
         pose = self.pose_norm(pose_stream)
-
-        pose_delta_per_cam = self.pose_head_per_cam(pose.reshape(B * T * K * P * J, D)).reshape(B, T, K, P, J, 6)
-        pose_per_cam = pose_input + pose_delta_per_cam
 
         pose_aggr_feat = self.pose_pool(pose, k_dim=2)  # (B, T, P, J, D)
         pose_delta_aggr = self.pose_head_aggr(pose_aggr_feat.reshape(B * T * P * J, D)).reshape(B, T, P, J, 6)
@@ -634,29 +624,34 @@ class SSTOutputHeads(nn.Module):
         trans_aggr_feat = self.pose_pool(trans_feat.unsqueeze(4), k_dim=2).squeeze(3)  # (B, T, P, D)
         trans_aggr = translation_input.mean(dim=2) + self.trans_head(trans_aggr_feat.reshape(B * T * P, D)).reshape(B, T, P, 3)
 
+        # Decode all T×K tokens → 10D beta space, then nanmedian over visible slots.
+        # Betas are PCA axes, so component-wise median is meaningful.
+        # Falls back to raw input betas for persons never observed in any slot.
+        visible_flat = person_visible.reshape(B, T * K, P)
         shape = self.shape_norm(shape_stream)
-
-        shape_per_cam = self.shape_head(shape.reshape(B * T * K * P, D)).reshape(B, T, K, P, 10)
-        shape_aggr_feat = self.shape_pool(shape, k_dim=2) # [B, T, P, D]
-        shape_aggr = self.shape_head(shape_aggr_feat.reshape(B * T * P, D)).reshape(B, T, P, 10)
+        shape_all = self.shape_head(
+            shape.reshape(B * T * K * P, D)
+        ).reshape(B, T * K, P, 10)
+        shape_all[visible_flat.unsqueeze(-1).expand_as(shape_all) == 0] = float('nan')
+        shape_aggr = torch.nanmedian(shape_all, dim=1).values                   # (B, P, 10)
+        input_flat = shape_input.reshape(B, T * K, P, 10).clone()
+        input_flat[visible_flat.unsqueeze(-1).expand_as(input_flat) == 0] = float('nan')
+        input_median = torch.nanmedian(input_flat, dim=1).values.nan_to_num(0.0)
+        shape_aggr = torch.where(shape_aggr.isnan(), input_median, shape_aggr)
 
         camera = self.camera_norm(camera_stream)
         camera_flat = camera.reshape(B * T * K, D)
         rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
-        # Multiplicative residual in log space: predict log(f_pred / f_input).
-        # At init (zero-init last layer) log_ratio=0 → f_pred=f_input (SAM3D value).
-        # Avoids bfloat16 precision loss: adding a small delta to f≈1155 rounds
-        # back to f (step size is 8px in bf16), but multiplying by exp(log_ratio)
-        # works at any scale since log_ratio itself is near zero.
+        # Camera 0 is the world origin — anchor it to identity rotation + zero translation.
+        rot_trans_delta[:, :, 0, :] = 0.0
         log_focal_ratio = self.camera_focal_head(camera_flat).reshape(B, T, K, 1)
         focal_pred = camera_input[..., 7:8] * torch.exp(log_focal_ratio)
-        # Additive residual for rot/trans (values in [-1,1], bf16 precision is fine).
         camera = torch.cat([
             camera_input[..., :7] + rot_trans_delta,
             focal_pred,
         ], dim=-1)
 
-        return pose_aggr, shape_aggr, camera, pose_per_cam, shape_per_cam, trans_aggr
+        return pose_aggr, shape_aggr, camera, trans_aggr
 
 class SSTNetwork(nn.Module):
     """Spatio-Spatio-Temporal attention module that fuses parameters across
@@ -680,6 +675,7 @@ class SSTNetwork(nn.Module):
         dropout: float = 0.1,
         temporal_window: int = 128,
         num_joints: int = 55,
+        max_cameras: int = 16,
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
@@ -693,6 +689,8 @@ class SSTNetwork(nn.Module):
         self.encoder = SSTEncoder(embedding_dim)
         # Joint IDs for the 54 kinematic joints only.
         self.joint_id_embedding = nn.Embedding(num_joints - 1, embedding_dim)
+        # Camera IDs: give each camera a unique learnable identity (analogous to joint IDs).
+        self.camera_id_embedding = nn.Embedding(max_cameras, embedding_dim)
 
         # Kinematic stream: joint self-attn + cross-view + temporal (no camera cross-attn).
         self.kin_layers = nn.ModuleList([
@@ -747,29 +745,23 @@ class SSTNetwork(nn.Module):
         joint_mask: torch.Tensor,
         person_mask: torch.Tensor,
         translation: torch.Tensor,
-        pose_cam: torch.Tensor | None = None,
-        translation_cam: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters
         ----------
-        pose        : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — world-frame (cam-0)
-        shape       : [B, T, K, P, betas] or [T, K, P, betas]
-        camera      : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
-        joint_mask  : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
-        person_mask : [B, T, K, P] or [T, K, P]  bool
-        translation : [B, T, K, P, 3] or [T, K, P, 3]  — world-frame body translation
-        pose_cam    : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — camera-frame pose,
-                      used as frozen KV in cam→pose cross-attention.
+        pose            : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — world-frame (cam-0)
+        shape           : [B, T, K, P, betas] or [T, K, P, betas]
+        camera          : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
+        joint_mask      : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
+        person_mask     : [B, T, K, P] or [T, K, P]  bool
+        translation     : [B, T, K, P, 3] or [T, K, P, 3]  — world-frame body translation
 
         Returns
         -------
-        pose        : [B, T, P, J, 6]
-        shape       : [B, T, P, 10]
-        camera      : [B, T, K, 8]
-        pose_per_cam: [B, T, K, P, J, 6]
-        shape_per_cam:[B, T, K, P, 10]
-        trans_aggr  : [B, T, P, 3]
+        pose_aggr  : [B, T, P, J, 6]
+        shape_aggr : [B, P, 10]
+        camera     : [B, T, K, 8]
+        trans_aggr : [B, T, P, 3]
         """
         # ensure batch dim
         if pose.dim() == 5:
@@ -784,14 +776,6 @@ class SSTNetwork(nn.Module):
             person_mask = person_mask.unsqueeze(0)
         if translation.dim() == 4:
             translation = translation.unsqueeze(0)
-        if pose_cam is None:
-            pose_cam = pose
-        elif pose_cam.dim() == 5:
-            pose_cam = pose_cam.unsqueeze(0)
-        if translation_cam is None:
-            translation_cam = translation
-        elif translation_cam.dim() == 4:
-            translation_cam = translation_cam.unsqueeze(0)
 
         assert pose.shape[:4] == shape.shape[:4]
         assert pose.shape[:3] == camera.shape[:3]
@@ -802,19 +786,7 @@ class SSTNetwork(nn.Module):
         pose_emb, shape_emb, camera_emb, trans_emb = self.encoder(
             pose, shape, camera, translation
         )
-        pose_cam_emb = self.encoder.pose_encoder(pose_cam)
         B, T, K, P, J, D = pose_emb.shape
-
-        # Camera-frame spatial KV: (B, T, K, P, 2, D)
-        # Slot 0 — root orientation in each camera's frame (distinct per camera,
-        #           unlike world-frame root which is ~identical across cameras).
-        # Slot 1 — per-camera translation estimate (also distinct: each camera's
-        #           SAM3D fit yields a different body translation).
-        # This is passed as frozen KV in PoseCameraCrossAttention so the camera
-        # stream can triangulate its own position from body observations.
-        cam_root_emb  = pose_cam_emb[:, :, :, :, 0:1, :]                    # (B,T,K,P,1,D)
-        cam_trans_emb = self.encoder.translation_encoder(translation_cam).unsqueeze(4)  # (B,T,K,P,1,D)
-        cam_spatial_kv = torch.cat([cam_root_emb, cam_trans_emb], dim=4)  # (B,T,K,P,2,D)
 
         # Spatial stream: [root_orient(0), translation(1)] — attend cameras.
         spatial_stream = torch.cat([
@@ -849,16 +821,9 @@ class SSTNetwork(nn.Module):
         kin_view_mask    = self._build_confidence_mask(kin_mask.permute(0, 1, 3, 4, 2).reshape(B * T * P * 54, K), H)
         kin_temporal_conf = kin_mask.permute(0, 2, 3, 4, 1).reshape(B * K * P * 54, T)
 
-        # Cross-view mask for the shape stream: for each (batch, time, person),
-        # which cameras can attend to each other.
-        # Flat shape (B*T*P, K) → additive (B*T*P*H, K, K) via log outer-product;
-        # pairs where either camera is missing the person get -inf.
+        # Cross-view mask for the shape stream.
         person_cross_view_mask_flat = person_visible.permute(0, 1, 3, 2).reshape(B * T * P, K)
         person_cross_view_mask = self._build_confidence_mask(person_cross_view_mask_flat, H)
-
-        # Temporal conf for the shape stream: for each (batch, camera, person),
-        # which frames are present.  Passed as (B*K*P, T) to WindowedTemporalAttention,
-        # which lazily computes log(conf_q * conf_k + eps) per logit inside FA.
         person_temporal_conf = person_visible.permute(0, 2, 3, 1).reshape(B * K * P, T)
 
         # Camera-level presence: camera k is "active" at frame t iff at least one
@@ -872,8 +837,9 @@ class SSTNetwork(nn.Module):
         for layer_idx in range(self.num_layers):
             pe = self.temporal_pe if layer_idx == 0 else None
 
-            # Kinematic stream: re-inject joint IDs before every joint self-attn.
-            kin_stream = kin_stream + joint_ids
+            # Re-inject IDs before every self-attn so each token retains its identity.
+            kin_stream    = kin_stream    + joint_ids
+            camera_stream = camera_stream + self.camera_id_embedding.weight[:K]
             kin_stream = self.kin_layers[layer_idx](
                 kin_stream, B, T, K, P, 54, D, H,
                 joint_mask=kin_joint_mask,
@@ -892,8 +858,15 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
             )
+            camera_stream = self.camera_layers[layer_idx](
+                camera_stream, B, T, K, D,
+                pe=pe,
+                dropout=self.dropout,
+                temporal_conf=camera_temporal_conf,
+            )
+
             spatial_stream, camera_stream = self.spatial_cam_attns[layer_idx](
-                spatial_stream, camera_stream, cam_spatial_kv,
+                spatial_stream, camera_stream, spatial_stream,
                 B, T, K, P, 2, D, self.dropout,
             )
 
@@ -908,18 +881,12 @@ class SSTNetwork(nn.Module):
                 temporal_conf=person_temporal_conf,
             )
 
-            camera_stream = self.camera_layers[layer_idx](
-                camera_stream, B, T, K, D,
-                pe=pe,
-                dropout=self.dropout,
-                temporal_conf=camera_temporal_conf,
-            )
-
 
         # decode
         return self.output_heads(
             spatial_stream, kin_stream, shape_stream, camera_stream,
-            pose, translation, camera,
+            pose, translation, camera, shape,
+            person_visible,
             B, T, K, P, J, D,
         )
 

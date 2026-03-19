@@ -422,9 +422,7 @@ class FusionDatapoint(Dataset, ABC):
 
         inputs = {
             "pose": torch.from_numpy(pose),
-            "pose_cam": torch.from_numpy(pose_cam),
             "translation": torch.from_numpy(translation),
-            "translation_cam": torch.from_numpy(translation_cam),
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),

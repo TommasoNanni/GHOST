@@ -34,8 +34,8 @@ from fusion.loss import (
     TemporalSmoothnessLoss,
     VPoserLoss,
     BoneLengthconsistencyLoss,
-    BetaConsistencyLoss,
     CameraMSELoss,
+    CameraTemporalSmoothnessLoss,
 )
 from fusion.metric import (
     MetricCollection,
@@ -64,6 +64,7 @@ def main():
     temporal_window         = CONFIG.fusion.architecture.temporal_window
     num_heads               = CONFIG.fusion.architecture.num_heads
     num_layers              = CONFIG.fusion.architecture.num_layers
+    max_cameras             = CONFIG.fusion.architecture.max_cameras
     dropout                 = CONFIG.fusion.architecture.dropout
     # Loss weights
     pose_mse_weight         = CONFIG.fusion.loss.pose_mse_weight
@@ -71,8 +72,8 @@ def main():
     epipolar_weight         = CONFIG.fusion.loss.epipolar_weight
     temporal_weight         = CONFIG.fusion.loss.temporal_weight
     bone_length_weight      = CONFIG.fusion.loss.bone_length_weight
-    beta_consistency_weight = CONFIG.fusion.loss.beta_consistency_weight
-    camera_mse_weight       = CONFIG.fusion.loss.camera_mse_weight
+    camera_mse_weight          = CONFIG.fusion.loss.camera_mse_weight
+    camera_temporal_weight     = CONFIG.fusion.loss.camera_temporal_weight
     vposer_weight           = CONFIG.fusion.loss.vposer_weight
     # Training params
     lr                      = CONFIG.fusion.training.lr
@@ -107,6 +108,7 @@ def main():
         max_temporal_len=T,
         dropout=dropout,
         temporal_window=temporal_window,
+        max_cameras=max_cameras,
     )
 
     logger.info("\n" + model.summary())
@@ -134,8 +136,8 @@ def main():
         "epipolar":   (EpipolarLoss(img_size=img_size),  epipolar_weight              ),
         "temporal":   (TemporalSmoothnessLoss(),         temporal_weight              ),
         "bone":       (BoneLengthconsistencyLoss(),      bone_length_weight           ),
-        "beta":       (BetaConsistencyLoss(),            beta_consistency_weight      ),
-        "camera_mse": (CameraMSELoss(img_size=img_size), camera_mse_weight            ),
+        "camera_mse":      (CameraMSELoss(img_size=img_size),      camera_mse_weight      ),
+        "camera_temporal": (CameraTemporalSmoothnessLoss(),        camera_temporal_weight ),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
 
@@ -152,15 +154,17 @@ def main():
     ])
 
     def metric_fn(preds, targets, mc):
-        pose_aggr, shape_aggr, camera_pred, _, _, _ = preds
-        B, T = pose_aggr.shape[:2]
+        pose_aggr, shape_aggr, camera_pred, trans_aggr = preds
+        B, T, P = pose_aggr.shape[:3]
         K = camera_pred.shape[2]
         t_mid = T // 2   # representative frame
 
         with torch.no_grad():
+            # shape_aggr is (B, P, 10) — expand to (B, T, P, 10) for get_smplx_joints
+            shape_exp = shape_aggr.unsqueeze(1).expand(B, T, P, 10)
             # 3D joints via SMPL-X: (B, T, P, Jout, 3)
             pred_joints = get_smplx_joints(
-                pose_aggr.float(), shape_aggr.float()
+                pose_aggr.float(), shape_exp.float()
             ).cpu().numpy()[..., :55, :]
             gt_joints = get_smplx_joints(
                 targets["pose"].float(), targets["shape"].float()
