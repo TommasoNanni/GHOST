@@ -507,3 +507,101 @@ def _read_frame_from_dir(
             if p.exists():
                 return cv2.imread(str(p))
     return None
+
+
+def main() -> None:
+    import torch
+    import smplx
+
+    # ── Config — edit these ──────────────────────────────────────────────────
+    VIDEO_DIR       = Path("test_outputs/reid_logging_segmentation_test/BBQ_001_guitar/cam_00")
+    SMPLX_MODEL_DIR = Path("body_models")
+    FRAMES_DIR      = None          # None → VIDEO_DIR / "frames"
+    FPS             = 30.0
+    PORT            = 9090
+    SAVE            = None          # Path("scene.rrd") to save instead of serving
+    # ────────────────────────────────────────────────────────────────────────
+
+    body_dir     = VIDEO_DIR / "body_data"
+    person_files = sorted(body_dir.glob("person_*.npz"))
+    if not person_files:
+        raise FileNotFoundError(f"No person_*.npz files found in {body_dir}")
+
+    # ── Load per-person data ─────────────────────────────────────────────────
+    person_data = [dict(np.load(p, allow_pickle=True)) for p in person_files]
+    T = int(max(d["frame_indices"].max() for d in person_data)) + 1
+    P = len(person_data)
+    print(f"Found {P} person(s) across {T} frames.")
+
+    # ── SMPL-X forward pass ──────────────────────────────────────────────────
+    # smplx.create expects a body_models/smplx/ subfolder; load directly instead.
+    smplx_pkl = SMPLX_MODEL_DIR / "SMPLX_NEUTRAL.pkl"
+    smplx_model = smplx.SMPLX(str(smplx_pkl), use_pca=False, num_betas=10)
+    smplx_model.eval()
+
+    n_verts  = smplx_model.get_num_verts()
+    faces    = smplx_model.faces.copy()                          # (F, 3)
+    vertices = np.full((T, P, n_verts, 3), np.nan, dtype=np.float32)
+
+    with torch.no_grad():
+        for p_idx, data in enumerate(person_data):
+            frame_indices = data["frame_indices"]                # (N,)
+            out = smplx_model(
+                betas         = torch.from_numpy(data["smplx_betas"]),
+                body_pose     = torch.from_numpy(data["smplx_body_pose"]),
+                global_orient = torch.from_numpy(data["smplx_global_orient"]),
+                transl        = torch.from_numpy(data["smplx_transl"]),
+                return_verts  = True,
+            )
+            verts_np = out.vertices.numpy()                      # (N, V, 3)
+            for i, fi in enumerate(frame_indices):
+                vertices[int(fi), p_idx] = verts_np[i]
+            print(f"  Person {p_idx} ({person_files[p_idx].name}): {len(frame_indices)} frames.")
+
+    # ── Camera ───────────────────────────────────────────────────────────────
+    # SMPL-X vertices are in camera space; camera sits at the origin.
+    all_focals = np.concatenate([d["focal_length"] for d in person_data])
+    focal      = float(np.median(all_focals))
+    frames_dir = FRAMES_DIR or (VIDEO_DIR / "frames")
+
+    # Detect image dimensions from the first readable frame.
+    W, H = 1920, 1080
+    for stem in (f"{0:06d}", f"{0:05d}", f"{0:04d}", "0"):
+        found = False
+        for ext in _FRAME_EXTS:
+            p = frames_dir / f"{stem}{ext}"
+            if p.exists():
+                img = cv2.imread(str(p))
+                if img is not None:
+                    H, W = img.shape[:2]
+                found = True
+                break
+        if found:
+            break
+
+    cam = CameraView(
+        R=np.eye(3, dtype=np.float32),
+        t=np.zeros(3, dtype=np.float32),
+        focal_length=focal,
+        img_wh=(W, H),
+        frames_dir=frames_dir,
+    )
+
+    viewer = SceneViewer(
+        vertices=vertices,
+        faces=faces,
+        cameras={VIDEO_DIR.name: cam},
+        fps=FPS,
+    )
+
+    if SAVE is not None:
+        viewer.save(SAVE)
+    else:
+        print(f"\nStarting Rerun viewer on port {PORT}.")
+        print(f"On a cluster, run on your laptop:  ssh -L {PORT}:localhost:{PORT} <host>")
+        print(f"Then open:  http://localhost:{PORT}\n")
+        viewer.serve(port=PORT)
+
+
+if __name__ == "__main__":
+    main()
