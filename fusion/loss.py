@@ -364,22 +364,6 @@ class BoneLengthconsistencyLoss(Loss):
 
 
 
-class CameraTemporalSmoothnessLoss(Loss):
-    def __init__(self, name: str = "Camera Temporal Smoothness Loss", weight: float = 1.0) -> None:
-        super().__init__(name, weight)
-
-    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        """Penalises frame-to-frame variation in predicted focal length.
-
-        Focal length is a camera intrinsic — it should be constant over time.
-        camera: (B, T, K, 8) — [quat(4), trans(3), focal_raw(1)]
-        """
-        _, _, camera, _ = preds
-        if camera.shape[1] < 2:
-            return camera.new_zeros([])
-        focal = camera[..., 7].clamp(min=1.0)   # (B, T, K)
-        return (torch.log(focal[:, 1:]) - torch.log(focal[:, :-1])).pow(2).mean()
-
 
 class CameraMSELoss(Loss):
     def __init__(
@@ -411,10 +395,8 @@ class CameraMSELoss(Loss):
 
         R_pred = quaternion_to_matrix(camera_pred[..., :4].reshape(-1, 4)).reshape(*camera_pred.shape[:-1], 3, 3)
         t_pred = camera_pred[..., 4:7]
-        focal_pred = camera_pred[..., 7]
         R_gt   = quaternion_to_matrix(cam_gt[..., :4].reshape(-1, 4)).reshape(*cam_gt.shape[:-1], 3, 3)
         t_gt   = cam_gt[..., 4:7]
-        focal_gt = cam_gt[..., 7]
 
         q      = matrix_to_quaternion(R_pred.reshape(-1, 3, 3))
         q_gt   = matrix_to_quaternion(R_gt.reshape(-1, 3, 3))
@@ -428,13 +410,4 @@ class CameraMSELoss(Loss):
         scene_scale = diff.norm(dim=-1).mean().clamp(min=1e-3)
         trans_loss = torch.norm(t_pred - t_gt, dim=-1).pow(2).mean() / (scene_scale ** 2)
 
-        # Log-scale focal MSE: penalises relative focal error uniformly across
-        # all focal lengths.  MSE on log(f) gives gradient 2*log(f_p/f_g)/f_p,
-        # which is ~2.5× stronger than the atan gradient and avoids the near-flat
-        # region that kills learning when focal >> img_size.
-        log_focal_loss = F.mse_loss(
-            torch.log(focal_pred.clamp(min=1.0)),
-            torch.log(focal_gt.clamp(min=1.0)),
-        )
-
-        return rot_loss + trans_loss + 0.01 * log_focal_loss
+        return rot_loss + trans_loss

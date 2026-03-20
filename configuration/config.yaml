@@ -2,7 +2,7 @@ data:
   egoexo_data_root: "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
   rich_data_root: "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"
   rich_max_side: 1440  # resize RICH frames so longest side <= this before SAM3; null to skip
-  output_directory: "/cluster/project/cvg/students/tnanni/ghost/test_outputs/rich10_segmentation_test"
+  output_directory: "/cluster/project/cvg/students/tnanni/ghost/test_outputs/focal_single_segmentation_test"
   slice: null # Number of scenes to load (set for testing)
   exclude_egocentric: true # Exclude egocentric videos for simplicity
   smplx_model_path: "body_models/SMPLX_NEUTRAL.pkl"
@@ -48,7 +48,6 @@ fusion:
     temporal_weight: 0.001
     bone_length_weight: 0.01
     camera_mse_weight: 1.0
-    camera_temporal_weight: 0.01
     vposer_weight: 0.0001
   training:
     max_epochs: 500

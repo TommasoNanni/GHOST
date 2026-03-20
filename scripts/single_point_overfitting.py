@@ -35,14 +35,13 @@ from fusion.loss import (
     VPoserLoss,
     BoneLengthconsistencyLoss,
     CameraMSELoss,
-    CameraTemporalSmoothnessLoss,
 )
 from fusion.metric import (
     MetricCollection,
     WMPJPE, GAMPJPE, PAMPJPE,
     WMPJRE, GAMPJRE, PAMPJRE,
     TranslationError, ScaledTranslationError,
-    AngleError, FocalError,
+    AngleError,
     RRA, CCA, ScaledCCA,
 )
 from fusion.trainer import Trainer
@@ -73,7 +72,6 @@ def main():
     temporal_weight         = CONFIG.fusion.loss.temporal_weight
     bone_length_weight      = CONFIG.fusion.loss.bone_length_weight
     camera_mse_weight          = CONFIG.fusion.loss.camera_mse_weight
-    camera_temporal_weight     = CONFIG.fusion.loss.camera_temporal_weight
     vposer_weight           = CONFIG.fusion.loss.vposer_weight
     # Training params
     lr                      = CONFIG.fusion.training.lr
@@ -137,7 +135,6 @@ def main():
         "temporal":   (TemporalSmoothnessLoss(),         temporal_weight              ),
         "bone":       (BoneLengthconsistencyLoss(),      bone_length_weight           ),
         "camera_mse":      (CameraMSELoss(img_size=img_size),      camera_mse_weight      ),
-        "camera_temporal": (CameraTemporalSmoothnessLoss(),        camera_temporal_weight ),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
 
@@ -149,7 +146,7 @@ def main():
         WMPJPE(), GAMPJPE(), PAMPJPE(),
         WMPJRE(), GAMPJRE(), PAMPJRE(),
         TranslationError(), ScaledTranslationError(),
-        AngleError(), FocalError(),
+        AngleError(),
         RRA(threshold=15.0), CCA(threshold=15.0), ScaledCCA(threshold=15.0),
     ])
 
@@ -224,9 +221,6 @@ def main():
             # Camera rotation metrics
             mc["AE"].update(Rp, Rg)
             mc["RRA@15"].update(Rp, Rg)
-
-            # Focal length
-            mc["FocalMAE"].update(f_pred[b, t_mid], f_gt[b, t_mid])
 
     if CONFIG.fusion.use_wandb:
         import wandb

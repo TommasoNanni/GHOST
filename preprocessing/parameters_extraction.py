@@ -157,6 +157,7 @@ class BodyParameterEstimator:
         self,
         scene: Scene,
         video_dirs: dict[str, Path],
+        gt_cam_int_map: dict[str, np.ndarray] | None = None,
     ) -> None:
         """Run SAM3D Body estimation on pre-segmented scene data.
 
@@ -202,6 +203,7 @@ class BodyParameterEstimator:
                     gallery_ema_alpha=self.gallery_ema_alpha,
                     reid_match_window=self.reid_match_window,
                     converter=converter,
+                    gt_cam_int=gt_cam_int_map.get(video.video_id) if gt_cam_int_map else None,
                 )
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -222,6 +224,7 @@ class BodyParameterEstimator:
                 video.video_id,
                 str(video_dirs[video.video_id]),
                 str(video.frames_home) if video.frames_home else None,
+                gt_cam_int_map.get(video.video_id) if gt_cam_int_map else None,
             ))
         # One sentinel per worker signals end of work
         num_workers = min(num_gpus, num_videos)
@@ -315,7 +318,7 @@ class BodyParameterEstimator:
             if task is None:
                 break
 
-            video_id, video_dir, frames_dir = task
+            video_id, video_dir, frames_dir, gt_cam_int = task
             logging.info(f"{gpu_label}Processing {video_id}")
             try:
                 BodyParameterEstimator._process_video_core(
@@ -331,6 +334,7 @@ class BodyParameterEstimator:
                     gallery_ema_alpha=gallery_ema_alpha,
                     reid_match_window=reid_match_window,
                     converter=converter,
+                    gt_cam_int=gt_cam_int,
                 )
             except Exception as e:
                 logging.error(f"{gpu_label}Error processing {video_id}: {e}")
@@ -377,6 +381,7 @@ class BodyParameterEstimator:
         gallery_ema_alpha: float = 0.9,
         reid_match_window: int = 5,
         converter=None,
+        gt_cam_int: np.ndarray | None = None,
     ) -> None:
         """Process all frames of one video with batched per-frame inference.
 
@@ -560,8 +565,21 @@ class BodyParameterEstimator:
                 _hook_handle = None
 
             try:
+                # Build cam_int tensor from GT calibration K matrix if available.
+                # camera_head.py operates in full-image pixel space: bbox_center
+                # and ori_img_size are both in the original frame dimensions, so
+                # the calibration K (also full-image) can be passed directly.
+                # SAM3D conditions its scale prediction on focal_length (see
+                # sam3d_body.py condition_info normalisation), so providing the
+                # true K replaces the FOV-estimator guess at inference time.
+                cam_int_tensor = None
+                if gt_cam_int is not None:
+                    cam_int_tensor = torch.from_numpy(
+                        gt_cam_int[np.newaxis]  # (1, 3, 3)
+                    ).float().cuda()
                 outputs = estimator.process_one_image(
-                    frame_rgb, bboxes=bboxes_arr
+                    frame_rgb, bboxes=bboxes_arr,
+                    cam_int=cam_int_tensor,
                 )
             except Exception as e:
                 logging.error(

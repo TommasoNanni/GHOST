@@ -1,5 +1,7 @@
 import logging
+import re
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent / 'MHR' / 'tools' / 'mhr_smpl_conversion'))
@@ -109,6 +111,30 @@ def _apply_shifts(
         confs_list .append(per_person_confs)
     return joints_list, confs_list
 
+def _build_gt_intrinsics_map(scene_id: str, cam_ids: list[str], rich_data_root: str) -> dict[str, np.ndarray]:
+    """Parse RICH calibration XMLs and return {video_id: K (3x3)} per camera."""
+    stem = re.match(r'^(.+?)_\d{3}_', scene_id)
+    stem = stem.group(1) if stem else scene_id
+    calib_dir = Path(rich_data_root) / "scan_calibration" / stem / "calibration"
+    intr_map: dict[str, np.ndarray] = {}
+    for i, vid_id in enumerate(cam_ids):
+        xml_path = calib_dir / f"{i:03d}.xml"
+        if not xml_path.exists():
+            logging.warning(f"No calibration XML for {vid_id} at {xml_path}")
+            continue
+        tree = ET.parse(str(xml_path))
+        intr_node = tree.getroot().find("Intrinsics")
+        if intr_node is None:
+            continue
+        data = list(map(float, intr_node.findtext("data", default="").split()))
+        rows = int(intr_node.findtext("rows", default="3"))
+        cols = int(intr_node.findtext("cols", default="3"))
+        K = np.array(data, dtype=np.float32).reshape(rows, cols)
+        intr_map[vid_id] = K
+        logging.info(f"  GT intrinsics {vid_id}: fx={K[0,0]:.1f} px")
+    return intr_map
+
+
 def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     """Run the full pipeline on a single scene."""
     print(f"\n=== Scene: {scene.scene_id} ({len(scene)} videos) ===")
@@ -126,11 +152,21 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     for video_id, vdir in video_dirs.items():
         print(f"  {video_id}: {vdir}")
 
-    # Step 2: Estimate body parameters from segmentation output
+    # Step 2: Estimate body parameters from segmentation output.
+    # Build GT camera intrinsics per camera so SAM3D uses the real K matrix
+    # at inference time instead of its FOV estimator.  All quantities in
+    # camera_head.py (bbox_center, ori_img_size, cam_int) are in full-image
+    # pixel space, so the calibration K is passed as-is.
     print(f"\n--- Running body parameter estimation ---")
+    gt_cam_int_map = _build_gt_intrinsics_map(
+        scene_id=scene.scene_id,
+        cam_ids=list(video_dirs.keys()),
+        rich_data_root=CONFIG.data.rich_data_root,
+    )
     estimator.estimate_scene(
         scene=scene,
         video_dirs=video_dirs,
+        gt_cam_int_map=gt_cam_int_map if gt_cam_int_map else None,
     )
 
     # Step 3: Match person IDs across camera views
@@ -345,6 +381,7 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
+    ds.scenes = [ds.scenes[0]]
     for scene in ds.scenes:
         # Re-instantiate per scene so no Python-level instance state (gallery
         # EMA, cached model handles, etc.) leaks from one scene into the next.

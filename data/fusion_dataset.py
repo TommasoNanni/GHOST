@@ -962,20 +962,31 @@ class RICHFusionDatapoint(FusionDatapoint):
     ) -> np.ndarray:
         """Use the Kabsch-estimated cam-0→cam-i extrinsic for inputs["camera"].
 
-        Falls back to the base implementation (identity rotation + pred_cam_t)
-        if no estimated extrinsics are available for this camera.
+        Position 7 carries the GT focal length from calibration instead of the
+        predicted focal — it is used as fixed context, not predicted by the network.
+
+        Falls back to identity rotation + pred_cam_t (already metric from Stage 2)
+        if no Kabsch extrinsics are available for this camera.
         """
+        intr = cam_calib.get("intrinsics") if cam_calib else None
+        focal_gt = float(intr[0, 0]) if intr is not None else float(focal_length)
+
         est = cam_calib.get("estimated_extrinsics") if cam_calib else None
         if est is not None:
             from scipy.spatial.transform import Rotation as SciR
-            q_xyzw = SciR.from_matrix(est[:3, :3].astype(np.float64)).as_quat()  # scipy [qx,qy,qz,qw]
+            q_xyzw = SciR.from_matrix(est[:3, :3].astype(np.float64)).as_quat()
             cam = np.zeros(8, dtype=np.float32)
             cam[:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)  # → pytorch3d [qw,qx,qy,qz]
             cam[4:7] = est[:3, 3]
-            _f = float(focal_length)
-            cam[7] = _f if _f > 20.0 else float(np.log(np.expm1(_f) + 1e-6))
+            cam[7] = focal_gt
             return cam
-        return super().convert_camera(pred_cam_t, focal_length, global_rot, cam_calib)
+
+        # Fallback: identity rotation + pred_cam_t (metric after Stage 2 correction).
+        cam = np.zeros(8, dtype=np.float32)
+        cam[0] = 1.0  # identity quaternion [w,x,y,z]
+        cam[4:7] = pred_cam_t
+        cam[7] = focal_gt
+        return cam
 
     def build_gt_targets(
         self,

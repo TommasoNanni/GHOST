@@ -572,17 +572,10 @@ class SSTOutputHeads(nn.Module):
             nn.Linear(embedding_dim, 10),
         )
         self.camera_norm = nn.LayerNorm(embedding_dim)
-        # Split into two independent heads so that fov gradients cannot flow
-        # into the rotation/translation path through a shared hidden layer.
         self.camera_rot_trans_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
             nn.Linear(embedding_dim, 7),   # [quat(4), trans(3)]
-        )
-        self.camera_focal_head = nn.Sequential(
-            nn.Linear(embedding_dim, embedding_dim // 4),
-            nn.ReLU(),
-            nn.Linear(embedding_dim // 4, 1),   # [focal_raw(1)]
         )
         # Small-random init for all residual last layers: delta ≈ 0 at start
         # (small weights × activations ≈ 0), but gradients flow to inner layers
@@ -594,7 +587,7 @@ class SSTOutputHeads(nn.Module):
         with torch.no_grad():
             for head in [self.pose_head_aggr,
                          self.trans_head,
-                         self.camera_rot_trans_head, self.camera_focal_head]:
+                         self.camera_rot_trans_head]:
                 nn.init.normal_(head[-1].weight, std=1e-3)
                 nn.init.zeros_(head[-1].bias)
 
@@ -644,11 +637,10 @@ class SSTOutputHeads(nn.Module):
         rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
         # Camera 0 is the world origin — anchor it to identity rotation + zero translation.
         rot_trans_delta[:, :, 0, :] = 0.0
-        log_focal_ratio = self.camera_focal_head(camera_flat).reshape(B, T, K, 1)
-        focal_pred = camera_input[..., 7:8] * torch.exp(log_focal_ratio)
+        # Focal length (position 7) is the GT focal from calibration — pass through unchanged.
         camera = torch.cat([
             camera_input[..., :7] + rot_trans_delta,
-            focal_pred,
+            camera_input[..., 7:8],
         ], dim=-1)
 
         return pose_aggr, shape_aggr, camera, trans_aggr
