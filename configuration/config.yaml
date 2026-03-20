@@ -56,4 +56,4 @@ fusion:
     batch_size: 1
     grad_clip: 1.0
     scheduler: null  # cosine | plateau | null
-    patience: 20  # early stopping patience (null to disable)
+    patience: null  # early stopping patience (null to disable)
