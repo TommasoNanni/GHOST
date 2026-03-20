@@ -245,9 +245,9 @@ class ShapeMSELoss(Loss):
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        # shape_aggr is (B, P, 10); target is (B, T, K, P, 10) — reduce to (B, P, 10)
+        # shape_aggr is (B, P, 10); target is (B, T, P, 10) — reduce over T only
         _, shape_aggr, _, _ = preds
-        shape_gt = targets["shape"].mean(dim=(1, 2))
+        shape_gt = targets["shape"].mean(dim=1)
         return F.mse_loss(shape_aggr, shape_gt)
 
 class TemporalSmoothnessLoss(Loss):
@@ -437,4 +437,4 @@ class CameraMSELoss(Loss):
             torch.log(focal_gt.clamp(min=1.0)),
         )
 
-        return rot_loss + trans_loss + log_focal_loss
+        return rot_loss + trans_loss + 0.01 * log_focal_loss

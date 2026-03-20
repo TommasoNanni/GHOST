@@ -263,7 +263,7 @@ def main():
         batch = next(iter(loader))
         inputs, targets = trainer._unpack_batch(batch)
         preds = trainer._forward(inputs)
-        final_loss = sum(fn(preds, targets).item() for fn, _ in losses.values())
+        final_loss = sum(w * fn(preds, targets).item() for fn, w in losses.values())
 
     logger.info(f"\nFinal combined loss: {final_loss:.6f}")
     if final_loss < 0.01:
