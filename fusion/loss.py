@@ -92,7 +92,7 @@ class EpipolarLoss(Loss):
 
         preds: (pose_aggr, shape_aggr, camera, trans_aggr)
         """
-        pose_aggr, shape_aggr, camera, trans_aggr = preds
+        pose_aggr, shape_aggr, camera, trans_aggr = preds[:4]
         K = camera.shape[2]
         if K < 2:
             return pose_aggr.new_zeros([])
@@ -236,8 +236,16 @@ class PoseMSELoss(Loss):
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        pose_aggr, _, _, _ = preds
-        return F.mse_loss(pose_aggr, targets["pose"])
+        pose_aggr = preds[0]                       # (B, T, P, J, 6)
+        gt_pose   = targets["pose"]                # (B, T, P, J, 6)
+        if "gt_valid" in targets:
+            mask = targets["gt_valid"]             # (B, T, P)
+            if not mask.any():
+                return pose_aggr.new_zeros([])
+            # expand mask to (B, T, P, J, 6) and index
+            m = mask.unsqueeze(-1).unsqueeze(-1).expand_as(pose_aggr)
+            return F.mse_loss(pose_aggr[m], gt_pose[m])
+        return F.mse_loss(pose_aggr, gt_pose)
 
 
 class ShapeMSELoss(Loss):
@@ -245,10 +253,19 @@ class ShapeMSELoss(Loss):
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        # shape_aggr is (B, P, 10); target is (B, T, P, 10) — reduce over T only
-        _, shape_aggr, _, _ = preds
-        shape_gt = targets["shape"].mean(dim=1)
-        return F.mse_loss(shape_aggr, shape_gt)
+        # shape_aggr is (B, P, 10); target is (B, T, P, 10)
+        _, shape_aggr, _, _ = preds[:4]
+        shape_gt = targets["shape"]                # (B, T, P, 10)
+        if "gt_valid" in targets:
+            mask = targets["gt_valid"]             # (B, T, P)
+            if not mask.any():
+                return shape_aggr.new_zeros([])
+            # average GT shape only over valid frames per person
+            mask_f = mask.float().unsqueeze(-1)    # (B, T, P, 1)
+            shape_gt_mean = (shape_gt * mask_f).sum(dim=1) / mask_f.sum(dim=1).clamp(min=1)
+        else:
+            shape_gt_mean = shape_gt.mean(dim=1)   # (B, P, 10)
+        return F.mse_loss(shape_aggr, shape_gt_mean)
 
 class TemporalSmoothnessLoss(Loss):
     def __init__(
@@ -258,7 +275,7 @@ class TemporalSmoothnessLoss(Loss):
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
         """Acceleration smoothness on the aggregated pose stream (B, T, P, J, 6)."""
-        pose_aggr, _, _, _ = preds
+        pose_aggr, _, _, _ = preds[:4]
         if pose_aggr.shape[1] < 3:
             return pose_aggr.new_zeros([])
         current   = pose_aggr[:, 2:]
@@ -296,7 +313,7 @@ class VPoserLoss(Loss):
         -------
         Scalar KL loss: KL( q(z|x) ‖ N(0,I) )
         """
-        pose_aggr, _, _, _ = preds
+        pose_aggr, _, _, _ = preds[:4]
         if next(self.vposer.parameters()).device != pose_aggr.device:
             self.vposer = self.vposer.to(pose_aggr.device)
         # 6D rotation → rotation matrix → axis-angle
@@ -341,7 +358,7 @@ class BoneLengthconsistencyLoss(Loss):
         -------
         Scalar loss encouraging constant bone length across time.
         """
-        pose_aggr, shape_aggr, _, _ = preds
+        pose_aggr, shape_aggr, _, _ = preds[:4]
         B, T, P = pose_aggr.shape[:3]
         shape_exp = shape_aggr.unsqueeze(1).expand(B, T, P, 10)
         joints = get_smplx_joints(pose_aggr, shape_exp)[..., :55, :]  # (B, T, P, 55, 3)
@@ -363,6 +380,82 @@ class BoneLengthconsistencyLoss(Loss):
         return bone_std.mean()
 
 
+
+
+class TriangulationLoss(Loss):
+    """Cross-camera consistency loss on the spatial stream outputs.
+
+    The model produces one world-frame estimate of root orientation and
+    translation per camera, before aggregation (preds[4] and preds[5]).
+    Ideally all K estimates should agree — this loss penalises pairwise
+    disagreement, enforcing geometric consistency across views.
+
+    For translation: MSE between every pair of world-frame estimates,
+    normalised by the squared scene scale so the loss is unit-free.
+
+    For root orientation: geodesic distance between every pair of world-frame
+    rotation matrices (1 - |q_k · q_j|), analogous to CameraMSELoss.
+    """
+
+    def __init__(
+        self,
+        name: str = "Triangulation Loss",
+        weight: float = 1.0,
+    ) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        """
+        preds[4] : root_world_6d  (B, T, K, P, 6) — per-camera world-frame root orient
+        preds[5] : t_world_k      (B, T, K, P, 3) — per-camera world-frame translation
+        """
+        if len(preds) < 6:
+            return preds[0].new_zeros([])
+
+        root_world_6d  = preds[4]   # (B, T, K, P, 6)
+        t_world_k      = preds[5]   # (B, T, K, P, 3)
+        person_visible = preds[6].bool() if len(preds) > 6 else None  # (B, T, K, P)
+        K = t_world_k.shape[2]
+
+        if K < 2:
+            return t_world_k.new_zeros([])
+
+        trans_loss = t_world_k.new_zeros([])
+        rot_loss   = t_world_k.new_zeros([])
+        num_pairs  = 0
+
+        from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_quaternion
+
+        for i in range(K):
+            for j in range(i + 1, K):
+                # Mask: person must be visible in both camera i and camera j.
+                if person_visible is not None:
+                    mask = (person_visible[:, :, i] & person_visible[:, :, j]).float()  # (B, T, P)
+                    n = mask.sum().clamp(min=1e-8)
+                else:
+                    mask = None
+                    n = float(t_world_k[:, :, i].shape[0] * t_world_k[:, :, i].shape[1] * t_world_k[:, :, i].shape[2])
+
+                diff_t = t_world_k[:, :, i] - t_world_k[:, :, j]    # (B, T, P, 3)
+                if mask is not None:
+                    trans_loss = trans_loss + (diff_t.pow(2).sum(-1) * mask).sum() / n
+                else:
+                    trans_loss = trans_loss + diff_t.pow(2).mean()
+
+                R_i = rotation_6d_to_matrix(root_world_6d[:, :, i].reshape(-1, 6))  # (B*T*P, 3, 3)
+                R_j = rotation_6d_to_matrix(root_world_6d[:, :, j].reshape(-1, 6))
+                q_i = matrix_to_quaternion(R_i)
+                q_j = matrix_to_quaternion(R_j)
+                dot = torch.clamp(torch.sum(q_i * q_j, dim=-1), -1.0 + 1e-7, 1.0 - 1e-7)
+                geodesic = 1 - torch.abs(dot)  # (B*T*P,)
+                if mask is not None:
+                    rot_loss = rot_loss + (geodesic * mask.reshape(-1)).sum() / n
+                else:
+                    rot_loss = rot_loss + geodesic.mean()
+
+                num_pairs += 1
+
+        return (trans_loss + rot_loss) / num_pairs
 
 
 class CameraMSELoss(Loss):
@@ -390,7 +483,7 @@ class CameraMSELoss(Loss):
         -------
         Scalar loss encouraging adherence of camera parameters to the GT.
         """
-        _, _, camera_pred, _ = preds
+        _, _, camera_pred, _ = preds[:4]
         cam_gt = targets["camera"]
 
         R_pred = quaternion_to_matrix(camera_pred[..., :4].reshape(-1, 4)).reshape(*camera_pred.shape[:-1], 3, 3)

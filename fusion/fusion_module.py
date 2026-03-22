@@ -352,6 +352,56 @@ class PoseCameraCrossAttention(nn.Module):
         return pose_stream, camera_stream
 
 
+class CameraPoseEncoding(nn.Module):
+    """Encodes a camera extrinsic (R, t) into a D-dimensional embedding.
+
+    Uses a minimal 6D geometric descriptor — axis-angle (3D) + translation (3D)
+    — then projects through a small MLP.  Axis-angle is the Lie-algebra
+    representation of SO(3): direction = rotation axis, magnitude = angle.
+    Together with t this covers the full SE(3) pose in an unconstrained,
+    minimal parameterisation (no orthogonality constraints to learn).
+
+    Injected into spatial stream tokens before every attention layer so the
+    model knows which camera frame each (root_orient, translation) token
+    lives in, making cross-view attention geometrically meaningful.
+    """
+
+    def __init__(self, embedding_dim: int):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.mlp = nn.Sequential(
+            nn.Linear(6, 2 * embedding_dim),
+            nn.ReLU(),
+            nn.Linear(2 * embedding_dim, embedding_dim),
+        )
+
+    def forward(self, camera: torch.Tensor) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        camera : (B, T, K, 8)  — [quat(4), trans(3), focal(1)]
+                 Quaternion uses pytorch3d convention [w, x, y, z].
+
+        Returns
+        -------
+        (B, T, K, D)
+        """
+        from pytorch3d.transforms import quaternion_to_matrix, matrix_to_axis_angle
+
+        B, T, K, _ = camera.shape
+        quat  = camera[..., :4]   # (B, T, K, 4)
+        trans = camera[..., 4:7]  # (B, T, K, 3)
+
+        # quat → rotation matrix → axis-angle (Lie algebra of SO(3))
+        R  = quaternion_to_matrix(quat.reshape(B * T * K, 4))  # (B*T*K, 3, 3)
+        aa = matrix_to_axis_angle(R)                           # (B*T*K, 3)
+
+        # 6D geometric descriptor: [axis-angle | translation]
+        geom = torch.cat([aa, trans.reshape(B * T * K, 3)], dim=-1)  # (B*T*K, 6)
+
+        return self.mlp(geom).reshape(B, T, K, self.embedding_dim)   # (B, T, K, D)
+
+
 class FeedForward(nn.Module):
     def __init__(self, embedding_dim: int, expansion: int = 2):
         super().__init__()
@@ -554,13 +604,32 @@ class KinToSpatialAttention(nn.Module):
 
 
 class SSTOutputHeads(nn.Module):
-    """Final norm + linear decoders for pose, shape, camera."""
+    """Final norm + linear decoders for pose, shape, camera.
+
+    Pose decoding is split into two geometrically distinct paths:
+
+    * Kinematic joints 1-54: camera-independent local rotations.
+      Camera-weighted pooling across K is valid; residual on the K-mean is valid.
+
+    * Root orient (joint 0) + Translation: camera-dependent quantities,
+      now provided in each camera's own frame.
+      Decoded per-camera (no pooling), then analytically back-projected to
+      world frame using the camera extrinsics, then confidence-weighted mean.
+      This is geometrically correct triangulation rather than naive averaging.
+    """
 
     def __init__(self, embedding_dim: int):
         super().__init__()
         self.pose_pool = CameraWeightedPooling(embedding_dim)
         self.pose_norm = nn.LayerNorm(embedding_dim)
+        # Decodes kinematic joints 1-54 (camera-independent, after K-pooling).
         self.pose_head_aggr = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, 6),
+        )
+        # Decodes root orient delta per-camera (before back-projection to world).
+        self.root_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
             nn.Linear(embedding_dim, 6),
@@ -577,15 +646,14 @@ class SSTOutputHeads(nn.Module):
             nn.ReLU(),
             nn.Linear(embedding_dim, 7),   # [quat(4), trans(3)]
         )
-        # Small-random init for all residual last layers: delta ≈ 0 at start
-        # (small weights × activations ≈ 0), but gradients flow to inner layers
-        # from epoch 0 — unlike zero-init which freezes W1/b1 and causes
-        # step-wise loss curves.
+        # Decodes translation delta per-camera (before back-projection to world).
         self.trans_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim), nn.ReLU(), nn.Linear(embedding_dim, 3),
         )
+        # Small-random init for all residual last layers: delta ≈ 0 at start.
         with torch.no_grad():
             for head in [self.pose_head_aggr,
+                         self.root_head,
                          self.trans_head,
                          self.camera_rot_trans_head]:
                 nn.init.normal_(head[-1].weight, std=1e-3)
@@ -597,29 +665,81 @@ class SSTOutputHeads(nn.Module):
         kin_stream: torch.Tensor,        # (B, T, K, P, 54, D)
         shape_stream: torch.Tensor,      # (B, T, K, P, D)
         camera_stream: torch.Tensor,     # (B, T, K, D)
-        pose_input: torch.Tensor,        # (B, T, K, P, 55, 6) for residual
-        translation_input: torch.Tensor, # (B, T, K, P, 3) for residual
-        camera_input: torch.Tensor,      # (B, T, K, 8) for residual
-        shape_input: torch.Tensor,       # (B, T, K, P, 10) raw input betas — fallback for never-visible persons
+        pose_input: torch.Tensor,        # (B, T, K, P, 55, 6) — joint 0 in camera frame
+        translation_input: torch.Tensor, # (B, T, K, P, 3)     — in camera frame
+        camera_input: torch.Tensor,      # (B, T, K, 8)
+        shape_input: torch.Tensor,       # (B, T, K, P, 10) raw input betas
         person_visible: torch.Tensor,    # (B, T, K, P) float: 1 = visible, 0 = absent
         B: int, T: int, K: int, P: int, J: int, D: int,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Reconstruct full pose stream (B,T,K,P,55,D) for pose head.
-        pose_stream = torch.cat([spatial_stream[:, :, :, :, :1, :], kin_stream], dim=4)
-        pose = self.pose_norm(pose_stream)
+        from pytorch3d.transforms import quaternion_to_matrix, rotation_6d_to_matrix
 
-        pose_aggr_feat = self.pose_pool(pose, k_dim=2)  # (B, T, P, J, D)
-        pose_delta_aggr = self.pose_head_aggr(pose_aggr_feat.reshape(B * T * P * J, D)).reshape(B, T, P, J, 6)
-        pose_aggr = pose_input.mean(dim=2) + pose_delta_aggr
+        BTK = B * T * K
 
-        # Translation from the second spatial token — aggregate across cameras only.
-        trans_feat = spatial_stream[:, :, :, :, 1, :]   # (B, T, K, P, D)
-        trans_aggr_feat = self.pose_pool(trans_feat.unsqueeze(4), k_dim=2).squeeze(3)  # (B, T, P, D)
-        trans_aggr = translation_input.mean(dim=2) + self.trans_head(trans_aggr_feat.reshape(B * T * P, D)).reshape(B, T, P, 3)
+        # Extract camera rotation matrices once — used for both root and translation.
+        # Convention: v_cam = R_k @ v_world + t_k
+        R_k = quaternion_to_matrix(camera_input[..., :4].reshape(BTK, 4))  # (BTK, 3, 3)
+        t_k = camera_input[..., 4:7]                                        # (B, T, K, 3)
 
-        # Decode all T×K tokens → 10D beta space, then nanmedian over visible slots.
-        # Betas are PCA axes, so component-wise median is meaningful.
-        # Falls back to raw input betas for persons never observed in any slot.
+        # Confidence weights for the mean: (B, T, K, P) → (B, T, P, 1) denominator.
+        w_sum = person_visible.sum(dim=2, keepdim=True).clamp(min=1e-8)  # (B, T, 1, P)
+        w_sum = w_sum.squeeze(2).unsqueeze(-1)                            # (B, T, P, 1)
+
+        # ── 1. Kinematic joints 1-54 ─────────────────────────────────────────
+        # Camera-independent local rotations: pool across K then decode delta.
+        kin = self.pose_norm(kin_stream)                          # (B, T, K, P, 54, D)
+        kin_pooled = self.pose_pool(kin, k_dim=2)                 # (B, T, P, 54, D)
+        kin_delta = self.pose_head_aggr(
+            kin_pooled.reshape(B * T * P * 54, D)
+        ).reshape(B, T, P, 54, 6)
+        # Mean across K is valid for camera-independent joints.
+        kin_aggr = pose_input[:, :, :, :, 1:, :].mean(dim=2) + kin_delta  # (B, T, P, 54, 6)
+
+        # ── 2. Root orient (joint 0): per-camera → back-project → mean ───────
+        # Decode per-camera delta in camera frame (no pooling).
+        root_feat = spatial_stream[:, :, :, :, 0, :]             # (B, T, K, P, D)
+        root_cam_delta = self.root_head(
+            root_feat.reshape(BTK * P, D)
+        ).reshape(B, T, K, P, 6)
+        root_cam_6d = pose_input[:, :, :, :, 0, :] + root_cam_delta  # (B, T, K, P, 6)
+
+        # 6D → rotation matrix, then back-project: R_world = R_k^T @ R_body_cam.
+        R_body_cam = rotation_6d_to_matrix(root_cam_6d.reshape(BTK * P, 6))   # (BTK*P, 3, 3)
+        R_k_exp = R_k.unsqueeze(1).expand(BTK, P, 3, 3).reshape(BTK * P, 3, 3)
+        R_body_world = R_k_exp.transpose(-1, -2) @ R_body_cam                 # (BTK*P, 3, 3)
+
+        # Rotation matrix → 6D: take first two rows of R (pytorch3d convention).
+        root_world_6d = torch.cat(
+            [R_body_world[:, 0, :], R_body_world[:, 1, :]], dim=-1
+        ).reshape(B, T, K, P, 6)
+
+        # Confidence-weighted mean across cameras.
+        root_aggr = (
+            (root_world_6d * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
+        )  # (B, T, P, 6)
+
+        # ── 3. Translation: per-camera → back-project → mean ─────────────────
+        trans_feat = spatial_stream[:, :, :, :, 1, :]            # (B, T, K, P, D)
+        trans_delta = self.trans_head(
+            trans_feat.reshape(BTK * P, D)
+        ).reshape(B, T, K, P, 3)
+        trans_cam = translation_input + trans_delta               # (B, T, K, P, 3) camera frame
+
+        # Back-project: v_world = R_k^T @ (v_cam - t_k).
+        # Row-vector convention: v_world = (v_cam - t_k) @ R_k.
+        trans_flat = trans_cam.reshape(BTK, P, 3)
+        t_k_flat   = t_k.reshape(BTK, 1, 3)
+        t_world_k  = torch.bmm(trans_flat - t_k_flat, R_k).reshape(B, T, K, P, 3)
+
+        # Confidence-weighted mean across cameras.
+        trans_aggr = (
+            (t_world_k * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
+        )  # (B, T, P, 3)
+
+        # ── 4. Concatenate root + kinematic → full world-frame pose ──────────
+        pose_aggr = torch.cat([root_aggr.unsqueeze(-2), kin_aggr], dim=-2)  # (B, T, P, 55, 6)
+
+        # ── 5. Shape (unchanged) ──────────────────────────────────────────────
         visible_flat = person_visible.reshape(B, T * K, P)
         shape = self.shape_norm(shape_stream)
         shape_all = self.shape_head(
@@ -632,18 +752,22 @@ class SSTOutputHeads(nn.Module):
         input_median = torch.nanmedian(input_flat, dim=1).values.nan_to_num(0.0)
         shape_aggr = torch.where(shape_aggr.isnan(), input_median, shape_aggr)
 
+        # ── 6. Camera (unchanged) ─────────────────────────────────────────────
         camera = self.camera_norm(camera_stream)
-        camera_flat = camera.reshape(B * T * K, D)
+        camera_flat = camera.reshape(BTK, D)
         rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
         # Camera 0 is the world origin — anchor it to identity rotation + zero translation.
         rot_trans_delta[:, :, 0, :] = 0.0
         # Focal length (position 7) is the GT focal from calibration — pass through unchanged.
-        camera = torch.cat([
+        camera_out = torch.cat([
             camera_input[..., :7] + rot_trans_delta,
             camera_input[..., 7:8],
         ], dim=-1)
 
-        return pose_aggr, shape_aggr, camera, trans_aggr
+        # root_world_6d and t_world_k are the per-camera world-frame estimates
+        # before aggregation — exposed for the triangulation loss.
+        # person_visible is returned so the triangulation loss can mask absent persons.
+        return pose_aggr, shape_aggr, camera_out, trans_aggr, root_world_6d, t_world_k, person_visible
 
 class SSTNetwork(nn.Module):
     """Spatio-Spatio-Temporal attention module that fuses parameters across
@@ -683,6 +807,10 @@ class SSTNetwork(nn.Module):
         self.joint_id_embedding = nn.Embedding(num_joints - 1, embedding_dim)
         # Camera IDs: give each camera a unique learnable identity (analogous to joint IDs).
         self.camera_id_embedding = nn.Embedding(max_cameras, embedding_dim)
+        # Geometric PE for the spatial stream: encodes the actual camera extrinsic
+        # (axis-angle + translation → MLP → D) so cross-view attention on the
+        # spatial stream knows which camera frame each token is expressed in.
+        self.camera_pose_encoding = CameraPoseEncoding(embedding_dim)
 
         # Kinematic stream: joint self-attn + cross-view + temporal (no camera cross-attn).
         self.kin_layers = nn.ModuleList([
@@ -826,12 +954,21 @@ class SSTNetwork(nn.Module):
         shape_stream = shape_emb
         camera_stream = camera_emb
 
+        # Camera pose geometric PE: (B, T, K, D) — computed once from the raw
+        # camera extrinsics (fixed geometry, not updated by the network).
+        # Broadcast shape for spatial stream: (B, T, K, 1, 1, D).
+        camera_pose_emb = self.camera_pose_encoding(camera).unsqueeze(3).unsqueeze(4)
+
         for layer_idx in range(self.num_layers):
             pe = self.temporal_pe if layer_idx == 0 else None
 
             # Re-inject IDs before every self-attn so each token retains its identity.
             kin_stream    = kin_stream    + joint_ids
             camera_stream = camera_stream + self.camera_id_embedding.weight[:K]
+            # Re-inject camera pose PE into the spatial stream before each layer.
+            # This tells the cross-view attention which camera frame each
+            # (root_orient, translation) token is expressed in.
+            spatial_stream = spatial_stream + camera_pose_emb
             kin_stream = self.kin_layers[layer_idx](
                 kin_stream, B, T, K, P, 54, D, H,
                 joint_mask=kin_joint_mask,

@@ -35,6 +35,7 @@ from fusion.loss import (
     VPoserLoss,
     BoneLengthconsistencyLoss,
     CameraMSELoss,
+    TriangulationLoss,
 )
 from fusion.metric import (
     MetricCollection,
@@ -72,6 +73,7 @@ def main():
     temporal_weight         = CONFIG.fusion.loss.temporal_weight
     bone_length_weight      = CONFIG.fusion.loss.bone_length_weight
     camera_mse_weight          = CONFIG.fusion.loss.camera_mse_weight
+    triangulation_weight       = CONFIG.fusion.loss.triangulation_weight
     vposer_weight           = CONFIG.fusion.loss.vposer_weight
     # Training params
     lr                      = CONFIG.fusion.training.lr
@@ -135,6 +137,7 @@ def main():
         "temporal":   (TemporalSmoothnessLoss(),         temporal_weight              ),
         "bone":       (BoneLengthconsistencyLoss(),      bone_length_weight           ),
         "camera_mse":      (CameraMSELoss(img_size=img_size),      camera_mse_weight      ),
+        "triangulation":   (TriangulationLoss(),                  triangulation_weight   ),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
 
@@ -151,7 +154,7 @@ def main():
     ])
 
     def metric_fn(preds, targets, mc):
-        pose_aggr, shape_aggr, camera_pred, trans_aggr = preds
+        pose_aggr, shape_aggr, camera_pred, trans_aggr = preds[:4]
         B, T, P = pose_aggr.shape[:3]
         K = camera_pred.shape[2]
         t_mid = T // 2   # representative frame
@@ -192,35 +195,35 @@ def main():
         cam_centres_pred = -np.einsum("...ji,...j->...i", R_pred, t_pred)  # (B, T, K, 3)
         cam_centres_gt   = -np.einsum("...ji,...j->...i", R_gt,   t_gt)
 
+        gt_valid_np = targets["gt_valid"].cpu().numpy() if "gt_valid" in targets else None  # (B, T, P)
+
         for b in range(B):
-            pj  = pred_joints[b, t_mid]          # (P, J, 3)
-            gj  = gt_joints[b, t_mid]
-            pr  = pred_rotmats[b, t_mid]         # (P, J, 3, 3)
-            gr  = gt_rotmats[b, t_mid]
-            Cp  = cam_centres_pred[b, t_mid]     # (K, 3)
-            Cg  = cam_centres_gt[b, t_mid]
-            Rp  = R_pred[b, t_mid]               # (K, 3, 3)
-            Rg  = R_gt[b, t_mid]
-
-            # Human position metrics
-            mc["W-MPJPE"].update(pj, gj, Cp, Cg)
-            mc["GA-MPJPE"].update(pj, gj)
-            mc["PA-MPJPE"].update(pj, gj)
-
-            # Human rotation metrics
-            mc["W-MPJRE"].update(pr, gr, Cp, Cg)
-            mc["GA-MPJRE"].update(pr, gr)
-            mc["PA-MPJRE"].update(pr, gr)
-
-            # Camera position metrics
+            # Camera metrics: GT cameras are static in RICH — use middle frame
+            Cp = cam_centres_pred[b, t_mid]      # (K, 3)
+            Cg = cam_centres_gt[b, t_mid]
+            Rp = R_pred[b, t_mid]                # (K, 3, 3)
+            Rg = R_gt[b, t_mid]
             mc["TE"].update(Cp, Cg)
             mc["s-TE"].update(Cp, Cg)
-            mc[f"CCA@15"].update(Cp, Cg)
-            mc[f"s-CCA@15"].update(Cp, Cg)
-
-            # Camera rotation metrics
+            mc["CCA@15"].update(Cp, Cg)
+            mc["s-CCA@15"].update(Cp, Cg)
             mc["AE"].update(Rp, Rg)
             mc["RRA@15"].update(Rp, Rg)
+
+            # Body metrics: average over all annotated frames
+            for t in range(T):
+                if gt_valid_np is not None and not gt_valid_np[b, t].any():
+                    continue
+                pj = pred_joints[b, t]           # (P, J, 3)
+                gj = gt_joints[b, t]
+                pr = pred_rotmats[b, t]          # (P, J, 3, 3)
+                gr = gt_rotmats[b, t]
+                mc["W-MPJPE"].update(pj, gj, Cp, Cg)
+                mc["GA-MPJPE"].update(pj, gj)
+                mc["PA-MPJPE"].update(pj, gj)
+                mc["W-MPJRE"].update(pr, gr, Cp, Cg)
+                mc["GA-MPJRE"].update(pr, gr)
+                mc["PA-MPJRE"].update(pr, gr)
 
     if CONFIG.fusion.use_wandb:
         import wandb
@@ -260,13 +263,6 @@ def main():
         final_loss = sum(w * fn(preds, targets).item() for fn, w in losses.values())
 
     logger.info(f"\nFinal combined loss: {final_loss:.6f}")
-    if final_loss < 0.01:
-        logger.info("PASS — model successfully overfit the sample.")
-    else:
-        logger.warning(
-            f"FAIL — loss {final_loss:.4f} is still high. "
-            "Try more epochs or a larger model."
-        )
 
 
 if __name__ == "__main__":

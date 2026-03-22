@@ -223,9 +223,11 @@ class Trainer:
           pose      (T, P, J, 6)  – 6-D rotation in cam0 world space
           shape     (T, P, 10)    – SMPL-X betas
           camera    (T, K, 8)     – raw [quat(4), trans(3), focal_raw(1)] per camera
-          gt_pose   (T, P, J, 6)  – ground-truth pose   (when available in targets)
-          gt_shape  (T, P, 10)    – ground-truth shape  (when available in targets)
-          gt_camera (T, K, 8)     – ground-truth camera (when available in targets)
+          trans     (T, P, 3)     – predicted world-frame root translation
+          gt_pose   (T, P, J, 6)  – ground-truth pose        (when available in targets)
+          gt_shape  (T, P, 10)    – ground-truth shape       (when available in targets)
+          gt_camera (T, K, 8)     – ground-truth camera      (when available in targets)
+          gt_trans  (T, P, 3)     – ground-truth translation (when available in targets)
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
@@ -233,21 +235,23 @@ class Trainer:
 
         self.model.eval()
 
-        all_pose, all_shape, all_camera = [], [], []
-        all_gt_pose, all_gt_shape, all_gt_camera = [], [], []
+        all_pose, all_shape, all_camera, all_trans = [], [], [], []
+        all_gt_pose, all_gt_shape, all_gt_camera, all_gt_trans = [], [], [], []
 
         for batch in loader:
             inputs, targets = self._unpack_batch(batch)
             with torch.amp.autocast('cuda', enabled=self.use_amp):
                 preds = self._forward(inputs)
-            pose_aggr, shape_aggr, camera_pred, _ = preds
+            pose_aggr, shape_aggr, camera_pred, trans_aggr = preds[:4]
             all_pose.append(pose_aggr.float().cpu())
             all_shape.append(shape_aggr.float().cpu())
             all_camera.append(camera_pred.float().cpu())
+            all_trans.append(trans_aggr.float().cpu())
             if isinstance(targets, dict):
                 if "pose"   in targets: all_gt_pose.append(targets["pose"].float().cpu())
                 if "shape"  in targets: all_gt_shape.append(targets["shape"].float().cpu())
                 if "camera" in targets: all_gt_camera.append(targets["camera"].float().cpu())
+                if "trans"  in targets: all_gt_trans.append(targets["trans"].float().cpu())
 
         def _cat_squeeze(lst):
             t = torch.cat(lst, dim=0)
@@ -257,10 +261,12 @@ class Trainer:
             "pose":   _cat_squeeze(all_pose),
             "shape":  _cat_squeeze(all_shape),
             "camera": _cat_squeeze(all_camera),
+            "trans":  _cat_squeeze(all_trans),
         }
         if all_gt_pose:   arrays["gt_pose"]   = _cat_squeeze(all_gt_pose)
         if all_gt_shape:  arrays["gt_shape"]  = _cat_squeeze(all_gt_shape)
         if all_gt_camera: arrays["gt_camera"] = _cat_squeeze(all_gt_camera)
+        if all_gt_trans:  arrays["gt_trans"]  = _cat_squeeze(all_gt_trans)
 
         np.savez_compressed(str(out_file), **arrays)
         logger.info(f"Predictions saved → {out_file}  (keys: {list(arrays)})")

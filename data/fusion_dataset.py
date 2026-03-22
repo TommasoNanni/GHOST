@@ -238,6 +238,7 @@ class FusionDatapoint(Dataset, ABC):
         shape_out: np.ndarray,
         camera_out: np.ndarray,
         kp3d_out: np.ndarray,
+        transl_out: np.ndarray,
     ) -> None:
         """Fill GT target arrays for one person / one frame.
 
@@ -251,6 +252,7 @@ class FusionDatapoint(Dataset, ABC):
         shape_out  : writable view into targets["shape"][t, cam_idx, person_slot]
         camera_out : writable view into targets["camera"][t, cam_idx]
         kp3d_out   : writable view into targets["keypoints_3d"][t, cam_idx, person_slot]
+        transl_out : writable view into targets["trans"][t, cam_idx, person_slot]
         """
 
     # ------------------------------------------------------------------
@@ -308,6 +310,7 @@ class FusionDatapoint(Dataset, ABC):
         gt_shape = np.zeros_like(shape)
         gt_camera = np.zeros_like(camera)
         gt_kp3d = np.zeros_like(kp3d)
+        gt_trans = np.zeros((T, K, P, 3), dtype=np.float32)
 
         for k in range(K):
             cam_persons = self._raw[k]
@@ -410,6 +413,7 @@ class FusionDatapoint(Dataset, ABC):
                         shape_out=gt_shape[t, k, p_slot],
                         camera_out=gt_camera[t, k],
                         kp3d_out=gt_kp3d[t, k, p_slot],
+                        transl_out=gt_trans[t, k, p_slot],
                     )
 
         # Default self-supervised targets: mirror inputs where GT wasn't set.
@@ -421,18 +425,30 @@ class FusionDatapoint(Dataset, ABC):
             gt_kp3d = kp3d.copy()
 
         inputs = {
-            "pose": torch.from_numpy(pose),
-            "translation": torch.from_numpy(translation),
+            # pose_cam: joint 0 (root orient) in camera k's own frame;
+            # joints 1-54 are local kinematic rotations, identical to pose.
+            "pose": torch.from_numpy(pose_cam),
+            # translation_cam: body root position in camera k's frame (pred_cam_t).
+            "translation": torch.from_numpy(translation_cam),
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),
             "person_mask": torch.from_numpy(person_mask),  # (T, K, P) bool
         }
+        # gt_valid: True for frames that have real GT annotations.
+        # Frames with all-zero gt_trans have no RICH annotation and must be
+        # excluded from supervised losses (pose MSE, shape MSE, etc.).
+        gt_trans_cam0 = gt_trans[:, 0]                            # (T, P, 3)
+        gt_valid = ~np.all(                                       # (T, P) bool
+            gt_trans_cam0.reshape(T, max(P, 1), 3) == 0, axis=-1
+        )
         targets = {
             "pose": torch.from_numpy(gt_pose[:, 0]),           # [T, P, J, 6]
             "shape": torch.from_numpy(gt_shape[:, 0]),         # [T, P, 10]
             "camera": torch.from_numpy(gt_camera),             # [T, K, 8]
             "keypoints_3d": torch.from_numpy(gt_kp3d[:, 0]),  # [T, P, 70, 3]
+            "trans": torch.from_numpy(gt_trans_cam0),          # [T, P, 3]
+            "gt_valid": torch.from_numpy(gt_valid),            # [T, P] bool
         }
         return inputs, targets
 
@@ -536,7 +552,7 @@ class EgoExoFusionDatapoint(FusionDatapoint):
         except Exception:
             return out
 
-        sixd = np.concatenate([mats[:, :, 0], mats[:, :, 1]], axis=1)
+        sixd = np.concatenate([mats[:, 0, :], mats[:, 1, :]], axis=1)
         out[:J] = sixd[:J]
         return out
 
@@ -609,7 +625,7 @@ class RICHFusionDatapoint(FusionDatapoint):
         except Exception:
             return out
 
-        sixd = np.concatenate([mats[:, :, 0], mats[:, :, 1]], axis=1)
+        sixd = np.concatenate([mats[:, 0, :], mats[:, 1, :]], axis=1)
         out[:J] = sixd[:J]
         return out
 
@@ -999,6 +1015,7 @@ class RICHFusionDatapoint(FusionDatapoint):
         shape_out: np.ndarray,
         camera_out: np.ndarray,
         kp3d_out: np.ndarray,
+        transl_out: np.ndarray,
     ) -> None:
         """Fill GT targets from RICH SMPL-X annotations.
 
@@ -1062,9 +1079,13 @@ class RICHFusionDatapoint(FusionDatapoint):
                 )
             mats = SciR.from_rotvec(aa).as_matrix()      # (55, 3, 3)
             sixd = np.concatenate(
-                [mats[:, :, 0], mats[:, :, 1]], axis=1
+                [mats[:, 0, :], mats[:, 1, :]], axis=1
             )                                             # (55, 6)
             pose_out[:J_pose] = sixd[:J_pose]
+
+        # Translation: world-frame root position (3,)
+        if "transl" in gt:
+            transl_out[:] = gt["transl"][gt_idx]
 
 
 # ======================================================================

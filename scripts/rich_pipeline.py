@@ -153,20 +153,10 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
         print(f"  {video_id}: {vdir}")
 
     # Step 2: Estimate body parameters from segmentation output.
-    # Build GT camera intrinsics per camera so SAM3D uses the real K matrix
-    # at inference time instead of its FOV estimator.  All quantities in
-    # camera_head.py (bbox_center, ori_img_size, cam_int) are in full-image
-    # pixel space, so the calibration K is passed as-is.
     print(f"\n--- Running body parameter estimation ---")
-    gt_cam_int_map = _build_gt_intrinsics_map(
-        scene_id=scene.scene_id,
-        cam_ids=list(video_dirs.keys()),
-        rich_data_root=CONFIG.data.rich_data_root,
-    )
     estimator.estimate_scene(
         scene=scene,
         video_dirs=video_dirs,
-        gt_cam_int_map=gt_cam_int_map if gt_cam_int_map else None,
     )
 
     # Step 3: Match person IDs across camera views
