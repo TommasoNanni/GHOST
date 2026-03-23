@@ -261,7 +261,7 @@ class ShapeMSELoss(Loss):
             if not mask.any():
                 return shape_aggr.new_zeros([])
             # average GT shape only over valid frames per person
-            mask_f = mask.float().unsqueeze(-1)    # (B, T, P, 1)
+            mask_f = mask.to(shape_gt.dtype).unsqueeze(-1)    # (B, T, P, 1)
             shape_gt_mean = (shape_gt * mask_f).sum(dim=1) / mask_f.sum(dim=1).clamp(min=1)
         else:
             shape_gt_mean = shape_gt.mean(dim=1)   # (B, P, 10)
@@ -430,7 +430,7 @@ class TriangulationLoss(Loss):
             for j in range(i + 1, K):
                 # Mask: person must be visible in both camera i and camera j.
                 if person_visible is not None:
-                    mask = (person_visible[:, :, i] & person_visible[:, :, j]).float()  # (B, T, P)
+                    mask = (person_visible[:, :, i] & person_visible[:, :, j]).to(t_world_k.dtype)  # (B, T, P)
                     n = mask.sum().clamp(min=1e-8)
                 else:
                     mask = None
@@ -456,6 +456,49 @@ class TriangulationLoss(Loss):
                 num_pairs += 1
 
         return (trans_loss + rot_loss) / num_pairs
+
+
+class TranslationMSELoss(Loss):
+    """Direct MSE supervision of world-frame body root translation.
+
+    Compares ``trans_aggr`` (preds[3], world frame, (B,T,P,3)) against
+    the GT SMPL-X world-frame translation ``targets["trans"]`` (B,T,P,3).
+    Frames with no RICH annotation are masked out via ``targets["gt_valid"]``.
+
+    Translation values are in metres, so the loss is normalised by a
+    squared scene scale (computed from the GT camera centres) to keep it
+    roughly in the same range as the other losses.
+    """
+
+    def __init__(self, name: str = "Translation MSE Loss", weight: float = 1.0) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        trans_aggr = preds[3]              # (B, T, P, 3) — world frame
+        gt_trans   = targets["trans"]      # (B, T, P, 3) — world frame GT
+
+        if "gt_valid" in targets:
+            mask = targets["gt_valid"]     # (B, T, P) bool
+            if not mask.any():
+                return trans_aggr.new_zeros([])
+            m = mask.unsqueeze(-1).expand_as(trans_aggr)
+            loss = F.mse_loss(trans_aggr[m], gt_trans[m])
+        else:
+            loss = F.mse_loss(trans_aggr, gt_trans)
+
+        # Normalise by squared scene scale so the loss is unit-free.
+        # Re-use the camera GT to estimate scene scale the same way
+        # CameraMSELoss does.
+        if "camera" in targets:
+            cam_gt = targets["camera"]     # (B, T, K, 8)
+            R_gt   = quaternion_to_matrix(cam_gt[..., :4].reshape(-1, 4)).reshape(*cam_gt.shape[:-1], 3, 3)
+            t_gt   = cam_gt[..., 4:7]
+            cam_centres_gt = -torch.einsum("...ji,...j->...i", R_gt, t_gt)
+            diff = cam_centres_gt.unsqueeze(-2) - cam_centres_gt.unsqueeze(-3)
+            scene_scale = diff.norm(dim=-1).mean().clamp(min=1e-3)
+            loss = loss / (scene_scale ** 2)
+
+        return loss
 
 
 class CameraMSELoss(Loss):

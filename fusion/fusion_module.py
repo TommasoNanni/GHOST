@@ -685,7 +685,7 @@ class SSTOutputHeads(nn.Module):
         w_sum = person_visible.sum(dim=2, keepdim=True).clamp(min=1e-8)  # (B, T, 1, P)
         w_sum = w_sum.squeeze(2).unsqueeze(-1)                            # (B, T, P, 1)
 
-        # ── 1. Kinematic joints 1-54 ─────────────────────────────────────────
+        # Kinematic joints 1-54
         # Camera-independent local rotations: pool across K then decode delta.
         kin = self.pose_norm(kin_stream)                          # (B, T, K, P, 54, D)
         kin_pooled = self.pose_pool(kin, k_dim=2)                 # (B, T, P, 54, D)
@@ -695,7 +695,7 @@ class SSTOutputHeads(nn.Module):
         # Mean across K is valid for camera-independent joints.
         kin_aggr = pose_input[:, :, :, :, 1:, :].mean(dim=2) + kin_delta  # (B, T, P, 54, 6)
 
-        # ── 2. Root orient (joint 0): per-camera → back-project → mean ───────
+        # Root orient (joint 0): per-camera → back-project → mean
         # Decode per-camera delta in camera frame (no pooling).
         root_feat = spatial_stream[:, :, :, :, 0, :]             # (B, T, K, P, D)
         root_cam_delta = self.root_head(
@@ -718,7 +718,7 @@ class SSTOutputHeads(nn.Module):
             (root_world_6d * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
         )  # (B, T, P, 6)
 
-        # ── 3. Translation: per-camera → back-project → mean ─────────────────
+        # Translation: per-camera → back-project → mean
         trans_feat = spatial_stream[:, :, :, :, 1, :]            # (B, T, K, P, D)
         trans_delta = self.trans_head(
             trans_feat.reshape(BTK * P, D)
@@ -736,10 +736,10 @@ class SSTOutputHeads(nn.Module):
             (t_world_k * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
         )  # (B, T, P, 3)
 
-        # ── 4. Concatenate root + kinematic → full world-frame pose ──────────
+        # 4. Concatenate root + kinematic → full world-frame pose
         pose_aggr = torch.cat([root_aggr.unsqueeze(-2), kin_aggr], dim=-2)  # (B, T, P, 55, 6)
 
-        # ── 5. Shape (unchanged) ──────────────────────────────────────────────
+        # Shape 
         visible_flat = person_visible.reshape(B, T * K, P)
         shape = self.shape_norm(shape_stream)
         shape_all = self.shape_head(
@@ -752,7 +752,7 @@ class SSTOutputHeads(nn.Module):
         input_median = torch.nanmedian(input_flat, dim=1).values.nan_to_num(0.0)
         shape_aggr = torch.where(shape_aggr.isnan(), input_median, shape_aggr)
 
-        # ── 6. Camera (unchanged) ─────────────────────────────────────────────
+        # Camera
         camera = self.camera_norm(camera_stream)
         camera_flat = camera.reshape(BTK, D)
         rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
