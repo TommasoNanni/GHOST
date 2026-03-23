@@ -49,6 +49,7 @@ fusion:
     bone_length_weight: 0.01
     camera_mse_weight: 1.0
     triangulation_weight: 0.1
+    translation_mse_weight: 1.0
     vposer_weight: 0.0001
   training:
     max_epochs: 500
