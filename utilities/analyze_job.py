@@ -62,12 +62,12 @@ def _parse_log(log_path: Path) -> dict[str, list[float]]:
 
 
 def analyze_predictions(d: dict[str, np.ndarray]) -> None:
-    pose      = d["pose"]       # (T, P, J, 6)
-    gt_pose   = d["gt_pose"]
-    camera    = d["camera"]     # (T, K, 8)
-    gt_camera = d["gt_camera"]
-    shape     = d["shape"]      # (T, P, 10)
-    gt_shape  = d["gt_shape"]
+    pose              = d["pose"]              # (T, P, J, 6)  predicted body pose (6D)
+    gt_body_pose      = d["gt_body_pose"]      # (T, P, J, 6)  ground-truth body pose
+    camera            = d["camera"]            # (T, K, 8)     predicted [quat(4), trans(3), focal(1)]
+    gt_camera         = d["gt_camera"]
+    shape             = d["shape"]             # (T, P, 10)    predicted SMPL-X betas
+    gt_body_shape     = d["gt_body_shape"]     # (T, P, 10)    ground-truth SMPL-X betas
 
     T, P, J, _ = pose.shape
     K = camera.shape[1]
@@ -80,16 +80,16 @@ def analyze_predictions(d: dict[str, np.ndarray]) -> None:
     # ── POSE ─────────────────────────────────────────────────────────────────
     print("── POSE (6D rotation) ──────────────────────────────────")
     pred_std = pose.std(axis=0).mean()
-    gt_std   = gt_pose.std(axis=0).mean()
-    mse      = ((pose - gt_pose) ** 2).mean()
+    gt_std   = gt_body_pose.std(axis=0).mean()
+    mse      = ((pose - gt_body_pose) ** 2).mean()
 
     # Per-frame variance (how much does the prediction vary over T?)
     pred_var_per_frame = pose.var(axis=0).mean()   # var over T at each position
-    gt_var_per_frame   = gt_pose.var(axis=0).mean()
+    gt_var_per_frame   = gt_body_pose.var(axis=0).mean()
 
     # Correlation: flatten T dimension, correlate per output element
     p_flat  = pose.reshape(T, -1)
-    g_flat  = gt_pose.reshape(T, -1)
+    g_flat  = gt_body_pose.reshape(T, -1)
     # Mean pearson-r across all output dimensions
     p_c = p_flat - p_flat.mean(0, keepdims=True)
     g_c = g_flat - g_flat.mean(0, keepdims=True)
@@ -108,15 +108,15 @@ def analyze_predictions(d: dict[str, np.ndarray]) -> None:
     print(f"  Frac frozen dims:  {frac_frozen:.2%}  (std<1e-3 over T)")
 
     # per-joint MSE
-    joint_mse = ((pose - gt_pose) ** 2).mean(axis=(0, 2, 3))  # (P,)
+    joint_mse = ((pose - gt_body_pose) ** 2).mean(axis=(0, 2, 3))  # (P,)
     for p in range(P):
         print(f"  Person {p} joint MSE: {joint_mse[p]:.6f}")
 
     # ── SHAPE ────────────────────────────────────────────────────────────────
     print("\n── SHAPE (betas) ───────────────────────────────────────")
-    shape_mse  = ((shape - gt_shape) ** 2).mean()
+    shape_mse  = ((shape - gt_body_shape) ** 2).mean()
     shape_std  = shape.std(axis=0).mean()
-    gt_shape_std = gt_shape.std(axis=0).mean()
+    gt_shape_std = gt_body_shape.std(axis=0).mean()
     shape_frozen = float((shape.std(axis=0) < 1e-4).mean())
     print(f"  pred std over T :  {shape_std:.6f}   (GT: {gt_shape_std:.6f})")
     print(f"  MSE(pred, GT)   :  {shape_mse:.6f}")
@@ -132,19 +132,21 @@ def analyze_predictions(d: dict[str, np.ndarray]) -> None:
             xyzw = np.concatenate([q[:, 1:], q[:, :1]], axis=-1)
             return R.from_quat(xyzw).as_matrix()  # (N, 3, 3)
 
-        pred_R = quat_to_mat(camera[:, :, :4].reshape(-1, 4)).reshape(T, K, 3, 3)
-        pred_t = camera[:, :, 4:7]
-        gt_R   = quat_to_mat(gt_camera[:, :, :4].reshape(-1, 4)).reshape(T, K, 3, 3)
-        gt_t   = gt_camera[:, :, 4:7]
+        # Predicted camera w2c rotations (T, K, 3, 3) and translations (T, K, 3)
+        cam_rot_w2c    = quat_to_mat(camera[:, :, :4].reshape(-1, 4)).reshape(T, K, 3, 3)
+        cam_transl_w2c = camera[:, :, 4:7]
+        # GT camera w2c rotations and translations
+        gt_cam_rot_w2c    = quat_to_mat(gt_camera[:, :, :4].reshape(-1, 4)).reshape(T, K, 3, 3)
+        gt_cam_transl_w2c = gt_camera[:, :, 4:7]
         pred_f = camera[:, :, 7]
         gt_f   = gt_camera[:, :, 7]
 
-        # Camera centres: C = -R^T t
-        pred_C = -np.einsum("...ji,...j->...i", pred_R, pred_t)  # (T, K, 3)
-        gt_C   = -np.einsum("...ji,...j->...i", gt_R,   gt_t)
+        # Camera centres in world frame: C = -R^T t
+        cam_centres    = -np.einsum("...ji,...j->...i", cam_rot_w2c,    cam_transl_w2c)    # (T, K, 3)
+        gt_cam_centres = -np.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
 
         # ── Translation ─────────────────────────────────────────────────────
-        te_per_cam = np.linalg.norm(pred_C - gt_C, axis=-1)  # (T, K)
+        te_per_cam = np.linalg.norm(cam_centres - gt_cam_centres, axis=-1)  # (T, K)
         print(f"  Translation error (camera centre, metres):")
         for k in range(K):
             print(f"    Camera {k}: mean={te_per_cam[:, k].mean():.4f}m  "
@@ -153,7 +155,7 @@ def analyze_predictions(d: dict[str, np.ndarray]) -> None:
 
         # ── Rotation ────────────────────────────────────────────────────────
         # Geodesic angle error: theta = arccos(clip((trace(R_rel)-1)/2, -1, 1))
-        R_rel = np.einsum("...ji,...jk->...ik", gt_R, pred_R)  # R_gt^T R_pred
+        R_rel = np.einsum("...ji,...jk->...ik", gt_cam_rot_w2c, cam_rot_w2c)  # R_gt^T R_pred
         trace = np.trace(R_rel, axis1=-2, axis2=-1)            # (T, K)
         cos_theta = np.clip((trace - 1.0) / 2.0, -1.0, 1.0)
         angle_err_deg = np.degrees(np.arccos(cos_theta))       # (T, K)

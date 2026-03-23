@@ -157,7 +157,7 @@ def main():
     ])
 
     def metric_fn(preds, targets, mc):
-        pose_aggr, shape_aggr, camera_pred, trans_aggr = preds[:4]
+        pose_aggr, shape_aggr, camera_pred, body_transl_world = preds[:4]
         B, T, P = pose_aggr.shape[:3]
         K = camera_pred.shape[2]
         t_mid = T // 2   # representative frame
@@ -181,31 +181,32 @@ def main():
                 targets["pose"].float()
             ).cpu().numpy()
 
-            # Camera rotations (B, T, K, 3, 3), translations (B, T, K, 3)
-            R_pred = quaternion_to_matrix(
+            # Predicted camera w2c rotations (B, T, K, 3, 3) and translations (B, T, K, 3)
+            cam_rot_w2c = quaternion_to_matrix(
                 camera_pred[..., :4].float().reshape(-1, 4)
             ).reshape(B, T, K, 3, 3).cpu().numpy()
-            t_pred = camera_pred[..., 4:7].float().cpu().numpy()
+            cam_transl_w2c = camera_pred[..., 4:7].float().cpu().numpy()
             f_pred = camera_pred[..., 7].float().cpu().numpy()   # (B, T, K)
 
-            R_gt = quaternion_to_matrix(
+            # GT camera w2c rotations and translations
+            gt_cam_rot_w2c = quaternion_to_matrix(
                 targets["camera"][..., :4].float().reshape(-1, 4)
             ).reshape(B, T, K, 3, 3).cpu().numpy()
-            t_gt   = targets["camera"][..., 4:7].float().cpu().numpy()
+            gt_cam_transl_w2c = targets["camera"][..., 4:7].float().cpu().numpy()
             f_gt   = targets["camera"][..., 7].float().cpu().numpy()
 
-        # Camera centres: C = -R^T t
-        cam_centres_pred = -np.einsum("...ji,...j->...i", R_pred, t_pred)  # (B, T, K, 3)
-        cam_centres_gt   = -np.einsum("...ji,...j->...i", R_gt,   t_gt)
+        # Camera centres in world frame: C = -R^T t
+        cam_centres      = -np.einsum("...ji,...j->...i", cam_rot_w2c,    cam_transl_w2c)     # (B, T, K, 3)
+        gt_cam_centres   = -np.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
 
         gt_valid_np = targets["gt_valid"].cpu().numpy() if "gt_valid" in targets else None  # (B, T, P)
 
         for b in range(B):
             # Camera metrics: GT cameras are static in RICH — use middle frame
-            Cp = cam_centres_pred[b, t_mid]      # (K, 3)
-            Cg = cam_centres_gt[b, t_mid]
-            Rp = R_pred[b, t_mid]                # (K, 3, 3)
-            Rg = R_gt[b, t_mid]
+            Cp = cam_centres[b, t_mid]           # (K, 3)  predicted camera centres
+            Cg = gt_cam_centres[b, t_mid]        # (K, 3)  GT camera centres
+            Rp = cam_rot_w2c[b, t_mid]           # (K, 3, 3) predicted w2c rotations
+            Rg = gt_cam_rot_w2c[b, t_mid]        # (K, 3, 3) GT w2c rotations
             mc["TE"].update(Cp, Cg)
             mc["s-TE"].update(Cp, Cg)
             mc["CCA@15"].update(Cp, Cg)

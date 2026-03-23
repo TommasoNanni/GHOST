@@ -60,7 +60,7 @@ class SSTEncoder(nn.Module):
         pose: torch.Tensor,
         shape: torch.Tensor,
         camera: torch.Tensor,
-        translation: torch.Tensor,
+        body_transl_cam_in: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Returns
@@ -74,7 +74,7 @@ class SSTEncoder(nn.Module):
             self.pose_encoder(pose),
             self.shape_encoder(shape),
             self.camera_encoder(camera),
-            self.translation_encoder(translation),
+            self.translation_encoder(body_transl_cam_in),
         )
 
 
@@ -666,7 +666,7 @@ class SSTOutputHeads(nn.Module):
         shape_stream: torch.Tensor,      # (B, T, K, P, D)
         camera_stream: torch.Tensor,     # (B, T, K, D)
         pose_input: torch.Tensor,        # (B, T, K, P, 55, 6) — joint 0 in camera frame
-        translation_input: torch.Tensor, # (B, T, K, P, 3)     — in camera frame
+        body_transl_cam_in: torch.Tensor, # (B, T, K, P, 3)     — in camera frame
         camera_input: torch.Tensor,      # (B, T, K, 8)
         shape_input: torch.Tensor,       # (B, T, K, P, 10) raw input betas
         person_visible: torch.Tensor,    # (B, T, K, P) float: 1 = visible, 0 = absent
@@ -677,9 +677,9 @@ class SSTOutputHeads(nn.Module):
         BTK = B * T * K
 
         # Extract camera rotation matrices once — used for both root and translation.
-        # Convention: v_cam = R_k @ v_world + t_k
-        R_k = quaternion_to_matrix(camera_input[..., :4].reshape(BTK, 4))  # (BTK, 3, 3)
-        t_k = camera_input[..., 4:7]                                        # (B, T, K, 3)
+        # Convention: v_cam = cam_rot_w2c @ v_world + cam_transl_w2c
+        cam_rot_w2c   = quaternion_to_matrix(camera_input[..., :4].reshape(BTK, 4))  # (BTK, 3, 3)
+        cam_transl_w2c = camera_input[..., 4:7]                                       # (B, T, K, 3)
 
         # Confidence weights for the mean: (B, T, K, P) → (B, T, P, 1) denominator.
         w_sum = person_visible.sum(dim=2, keepdim=True).clamp(min=1e-8)  # (B, T, 1, P)
@@ -703,37 +703,39 @@ class SSTOutputHeads(nn.Module):
         ).reshape(B, T, K, P, 6)
         root_cam_6d = pose_input[:, :, :, :, 0, :] + root_cam_delta  # (B, T, K, P, 6)
 
-        # 6D → rotation matrix, then back-project: R_world = R_k^T @ R_body_cam.
-        R_body_cam = rotation_6d_to_matrix(root_cam_6d.reshape(BTK * P, 6))   # (BTK*P, 3, 3)
-        R_k_exp = R_k.unsqueeze(1).expand(BTK, P, 3, 3).reshape(BTK * P, 3, 3)
-        R_body_world = R_k_exp.transpose(-1, -2) @ R_body_cam                 # (BTK*P, 3, 3)
+        # 6D → rotation matrix, then back-project: R_world = cam_rot_w2c^T @ R_body_cam.
+        R_body_cam = rotation_6d_to_matrix(root_cam_6d.reshape(BTK * P, 6))          # (BTK*P, 3, 3)
+        cam_rot_w2c_exp = cam_rot_w2c.unsqueeze(1).expand(BTK, P, 3, 3).reshape(BTK * P, 3, 3)
+        R_body_world = cam_rot_w2c_exp.transpose(-1, -2) @ R_body_cam                # (BTK*P, 3, 3)
 
         # Rotation matrix → 6D: take first two rows of R (pytorch3d convention).
-        root_world_6d = torch.cat(
+        body_orient_world_per_cam = torch.cat(
             [R_body_world[:, 0, :], R_body_world[:, 1, :]], dim=-1
         ).reshape(B, T, K, P, 6)
 
         # Confidence-weighted mean across cameras.
         root_aggr = (
-            (root_world_6d * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
+            (body_orient_world_per_cam * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
         )  # (B, T, P, 6)
 
         # Translation: per-camera → back-project → mean
         trans_feat = spatial_stream[:, :, :, :, 1, :]            # (B, T, K, P, D)
-        trans_delta = self.trans_head(
+        body_transl_cam_delta = self.trans_head(
             trans_feat.reshape(BTK * P, D)
         ).reshape(B, T, K, P, 3)
-        trans_cam = translation_input + trans_delta               # (B, T, K, P, 3) camera frame
+        body_transl_cam = body_transl_cam_in + body_transl_cam_delta   # (B, T, K, P, 3) camera frame
 
-        # Back-project: v_world = R_k^T @ (v_cam - t_k).
-        # Row-vector convention: v_world = (v_cam - t_k) @ R_k.
-        trans_flat = trans_cam.reshape(BTK, P, 3)
-        t_k_flat   = t_k.reshape(BTK, 1, 3)
-        t_world_k  = torch.bmm(trans_flat - t_k_flat, R_k).reshape(B, T, K, P, 3)
+        # Back-project: v_world = cam_rot_w2c^T @ (v_cam - cam_transl_w2c).
+        # Row-vector convention: v_world = (v_cam - cam_transl_w2c) @ cam_rot_w2c.
+        body_transl_cam_flat    = body_transl_cam.reshape(BTK, P, 3)
+        cam_transl_w2c_flat     = cam_transl_w2c.reshape(BTK, 1, 3)
+        body_transl_world_per_cam = torch.bmm(
+            body_transl_cam_flat - cam_transl_w2c_flat, cam_rot_w2c
+        ).reshape(B, T, K, P, 3)
 
         # Confidence-weighted mean across cameras.
-        trans_aggr = (
-            (t_world_k * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
+        body_transl_world = (
+            (body_transl_world_per_cam * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
         )  # (B, T, P, 3)
 
         # 4. Concatenate root + kinematic → full world-frame pose
@@ -764,10 +766,10 @@ class SSTOutputHeads(nn.Module):
             camera_input[..., 7:8],
         ], dim=-1)
 
-        # root_world_6d and t_world_k are the per-camera world-frame estimates
+        # body_orient_world_per_cam and body_transl_world_per_cam are the per-camera world-frame estimates
         # before aggregation — exposed for the triangulation loss.
         # person_visible is returned so the triangulation loss can mask absent persons.
-        return pose_aggr, shape_aggr, camera_out, trans_aggr, root_world_6d, t_world_k, person_visible
+        return pose_aggr, shape_aggr, camera_out, body_transl_world, body_orient_world_per_cam, body_transl_world_per_cam, person_visible
 
 class SSTNetwork(nn.Module):
     """Spatio-Spatio-Temporal attention module that fuses parameters across
@@ -864,24 +866,24 @@ class SSTNetwork(nn.Module):
         camera: torch.Tensor,
         joint_mask: torch.Tensor,
         person_mask: torch.Tensor,
-        translation: torch.Tensor,
+        body_transl_cam_in: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters
         ----------
-        pose            : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — world-frame (cam-0)
-        shape           : [B, T, K, P, betas] or [T, K, P, betas]
-        camera          : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
-        joint_mask      : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
-        person_mask     : [B, T, K, P] or [T, K, P]  bool
-        translation     : [B, T, K, P, 3] or [T, K, P, 3]  — world-frame body translation
+        pose               : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — world-frame (cam-0)
+        shape              : [B, T, K, P, betas] or [T, K, P, betas]
+        camera             : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
+        joint_mask         : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
+        person_mask        : [B, T, K, P] or [T, K, P]  bool
+        body_transl_cam_in : [B, T, K, P, 3] or [T, K, P, 3]  — body root translation in camera frame
 
         Returns
         -------
         pose_aggr  : [B, T, P, J, 6]
         shape_aggr : [B, P, 10]
         camera     : [B, T, K, 8]
-        trans_aggr : [B, T, P, 3]
+        body_transl_world : [B, T, P, 3]
         """
         # ensure batch dim
         if pose.dim() == 5:
@@ -894,17 +896,17 @@ class SSTNetwork(nn.Module):
             joint_mask = joint_mask.unsqueeze(0)
         if person_mask.dim() == 3:
             person_mask = person_mask.unsqueeze(0)
-        if translation.dim() == 4:
-            translation = translation.unsqueeze(0)
+        if body_transl_cam_in.dim() == 4:
+            body_transl_cam_in = body_transl_cam_in.unsqueeze(0)
 
         assert pose.shape[:4] == shape.shape[:4]
         assert pose.shape[:3] == camera.shape[:3]
         assert pose.shape[:5] == joint_mask.shape
         assert pose.shape[:4] == person_mask.shape
-        assert pose.shape[:4] == translation.shape[:4]
+        assert pose.shape[:4] == body_transl_cam_in.shape[:4]
 
         pose_emb, shape_emb, camera_emb, trans_emb = self.encoder(
-            pose, shape, camera, translation
+            pose, shape, camera, body_transl_cam_in
         )
         B, T, K, P, J, D = pose_emb.shape
 
@@ -1014,7 +1016,7 @@ class SSTNetwork(nn.Module):
         # decode
         return self.output_heads(
             spatial_stream, kin_stream, shape_stream, camera_stream,
-            pose, translation, camera, shape,
+            pose, body_transl_cam_in, camera, shape,
             person_visible,
             B, T, K, P, J, D,
         )

@@ -220,10 +220,10 @@ def run(
     print(f"Loading {predictions} …")
     d = dict(np.load(predictions, allow_pickle=True))
 
-    pose   = d["pose"]    # (T, P, J, 6)
-    shape  = d["shape"]   # (P, 10)
-    camera = d["camera"]  # (T, K, 8)  [quat wxyz(4), trans(3), focal(1)]
-    trans  = d["trans"]   # (T, P, 3)
+    pose              = d["pose"]               # (T, P, J, 6)  predicted body pose (6D)
+    shape             = d["shape"]              # (P, 10)        predicted SMPL-X betas
+    camera            = d["camera"]             # (T, K, 8)      predicted [quat wxyz(4), trans(3), focal(1)]
+    body_transl_world = d["body_transl_world"]  # (T, P, 3)      predicted body root in world (cam-0) frame
 
     T, P, J, _ = pose.shape
     K = camera.shape[1]
@@ -232,31 +232,31 @@ def run(
     print(f"  T={T} frames, P={P} persons, K={K} cameras")
 
     # Optionally load GT for side-by-side comparison
-    gt_pose  = d.get("gt_pose")   # (T, P, J, 6) or None
-    gt_shape = d.get("gt_shape")  # (T, P, 10) or None
-    gt_trans = d.get("gt_trans")  # (T, P, 3)  or None — may be absent
+    gt_body_pose          = d.get("gt_body_pose")          # (T, P, J, 6) or None
+    gt_body_shape         = d.get("gt_body_shape")         # (T, P, 10) or None
+    gt_body_transl_world  = d.get("gt_body_transl_world")  # (T, P, 3)  or None — may be absent
 
-    # Frames where gt_trans is all-zero have no RICH annotation — hide GT there.
-    if gt_trans is not None:
-        gt_valid = ~np.all(gt_trans.reshape(T, -1) == 0, axis=-1)  # (T,) bool
+    # Frames where gt_body_transl_world is all-zero have no RICH annotation — hide GT there.
+    if gt_body_transl_world is not None:
+        gt_valid = ~np.all(gt_body_transl_world.reshape(T, -1) == 0, axis=-1)  # (T,) bool
         first_valid = int(gt_valid.argmax()) if gt_valid.any() else 0
         n_missing = int((~gt_valid).sum())
         if n_missing:
-            print(f"  {n_missing} frames have no GT annotation (gt_trans=0) — GT body hidden there.")
+            print(f"  {n_missing} frames have no GT annotation (gt_body_transl_world=0) — GT body hidden there.")
     else:
         gt_valid = np.zeros(T, dtype=bool)
         first_valid = 0
 
     # ── build SMPL-X meshes ───────────────────────────────────────────────────
     print("Running SMPL-X forward pass for predictions …")
-    pred_verts, faces = _build_smplx_vertices(pose, shape, trans, smplx_model_dir)
+    pred_verts, faces = _build_smplx_vertices(pose, shape, body_transl_world, smplx_model_dir)
     # pred_verts: (T, P, V, 3) in world (cam-0) space
 
     gt_verts = None
-    if show_gt and gt_pose is not None and gt_trans is not None:
+    if show_gt and gt_body_pose is not None and gt_body_transl_world is not None:
         print("Running SMPL-X forward pass for GT …")
-        gt_shape_arr = gt_shape if gt_shape is not None else shape
-        gt_verts, _ = _build_smplx_vertices(gt_pose, gt_shape_arr, gt_trans, smplx_model_dir)
+        gt_shape_arr = gt_body_shape if gt_body_shape is not None else shape
+        gt_verts, _ = _build_smplx_vertices(gt_body_pose, gt_shape_arr, gt_body_transl_world, smplx_model_dir)
 
     # Apply Y-flip for viser convention
     pred_verts_vis = pred_verts @ _ROT180.T   # (T, P, V, 3)

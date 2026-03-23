@@ -207,7 +207,7 @@ class FusionDatapoint(Dataset, ABC):
 
     def convert_camera(
         self,
-        pred_cam_t: np.ndarray,
+        body_transl_cam: np.ndarray,
         focal_length: float,
         global_rot: np.ndarray,
         cam_calib: dict[str, Any] | None = None,
@@ -216,11 +216,11 @@ class FusionDatapoint(Dataset, ABC):
 
         ``cam_calib`` is ``self._cameras[cam_idx]`` -- available for
         subclasses that have proper extrinsics.
-        Default: identity rotation + pred_cam_t + softplus(focal_raw)=focal_length.
+        Default: identity rotation + body_transl_cam (body root in cam frame) + softplus(focal_raw)=focal_length.
         """
         cam = np.zeros(8, dtype=np.float32)
         cam[0] = 1.0  # pytorch3d [w,x,y,z]: w=1 -> identity rotation
-        cam[4:7] = pred_cam_t
+        cam[4:7] = body_transl_cam
         # Store softplus_inv(focal) so that extract_cameras can recover the
         # true focal length by applying softplus.  For f >> 1, softplus_inv(f) ≈ f.
         _f = float(focal_length)
@@ -296,7 +296,7 @@ class FusionDatapoint(Dataset, ABC):
         pose = np.zeros((T, K, P, J, 6), dtype=np.float32)
         pose_cam = np.zeros((T, K, P, J, 6), dtype=np.float32)
         translation = np.zeros((T, K, P, 3), dtype=np.float32)
-        translation_cam = np.zeros((T, K, P, 3), dtype=np.float32)
+        body_transl_cam = np.zeros((T, K, P, 3), dtype=np.float32)  # body root in each camera's local frame
         shape = np.zeros((T, K, P, 10), dtype=np.float32)
         camera = np.zeros((T, K, 8), dtype=np.float32)
         joint_mask = np.zeros((T, K, P, J), dtype=np.float32)
@@ -306,11 +306,11 @@ class FusionDatapoint(Dataset, ABC):
         kp3d = np.zeros((T, K, P, 70, 3), dtype=np.float32)
 
         # Target arrays (may be overwritten by build_gt_targets).
-        gt_pose = np.zeros_like(pose)
-        gt_shape = np.zeros_like(shape)
+        gt_body_pose = np.zeros_like(pose)                              # ground-truth body pose (T, K, P, J, 6)
+        gt_body_shape = np.zeros_like(shape)                            # ground-truth SMPL-X betas (T, K, P, 10)
         gt_camera = np.zeros_like(camera)
         gt_kp3d = np.zeros_like(kp3d)
-        gt_trans = np.zeros((T, K, P, 3), dtype=np.float32)
+        gt_body_transl_world = np.zeros((T, K, P, 3), dtype=np.float32)  # ground-truth body root in world (cam-0) frame
 
         for k in range(K):
             cam_persons = self._raw[k]
@@ -366,7 +366,7 @@ class FusionDatapoint(Dataset, ABC):
                         translation[t, k, p_slot] = tr[li]
                     pct = pdata.get("pred_cam_t")
                     if pct is not None:
-                        translation_cam[t, k, p_slot] = pct[li]
+                        body_transl_cam[t, k, p_slot] = pct[li]
 
                     # --- Shape ---
                     sp = pdata.get("smplx_betas")
@@ -386,7 +386,7 @@ class FusionDatapoint(Dataset, ABC):
 
                     # --- Camera ---
                     if not cam_camera_filled[t]:
-                        pct = pdata.get("pred_cam_t")
+                        pct = pdata.get("pred_cam_t")  # body root in camera frame (NPZ key)
                         fl = pdata.get("focal_length")
                         if pct is not None and gr is not None:
                             camera[t, k] = self.convert_camera(
@@ -409,18 +409,18 @@ class FusionDatapoint(Dataset, ABC):
                         pid=pid,
                         local_idx=li,
                         t=t,
-                        pose_out=gt_pose[t, k, p_slot],
-                        shape_out=gt_shape[t, k, p_slot],
+                        pose_out=gt_body_pose[t, k, p_slot],
+                        shape_out=gt_body_shape[t, k, p_slot],
                         camera_out=gt_camera[t, k],
                         kp3d_out=gt_kp3d[t, k, p_slot],
-                        transl_out=gt_trans[t, k, p_slot],
+                        transl_out=gt_body_transl_world[t, k, p_slot],
                     )
 
         # Default self-supervised targets: mirror inputs where GT wasn't set.
         _has_gt = any(len(g) > 0 for g in self._gt) if self._gt else False
         if not _has_gt:
-            gt_pose = pose.copy()
-            gt_shape = shape.copy()
+            gt_body_pose = pose.copy()
+            gt_body_shape = shape.copy()
             gt_camera = camera.copy()
             gt_kp3d = kp3d.copy()
 
@@ -428,27 +428,27 @@ class FusionDatapoint(Dataset, ABC):
             # pose_cam: joint 0 (root orient) in camera k's own frame;
             # joints 1-54 are local kinematic rotations, identical to pose.
             "pose": torch.from_numpy(pose_cam),
-            # translation_cam: body root position in camera k's frame (pred_cam_t).
-            "translation": torch.from_numpy(translation_cam),
+            # body_transl_cam_in: body root position in camera k's local frame (from pred_cam_t).
+            "body_transl_cam_in": torch.from_numpy(body_transl_cam),
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),
             "person_mask": torch.from_numpy(person_mask),  # (T, K, P) bool
         }
         # gt_valid: True for frames that have real GT annotations.
-        # Frames with all-zero gt_trans have no RICH annotation and must be
+        # Frames with all-zero gt_body_transl_world have no RICH annotation and must be
         # excluded from supervised losses (pose MSE, shape MSE, etc.).
-        gt_trans_cam0 = gt_trans[:, 0]                            # (T, P, 3)
-        gt_valid = ~np.all(                                       # (T, P) bool
-            gt_trans_cam0.reshape(T, max(P, 1), 3) == 0, axis=-1
+        gt_body_transl_world_cam0 = gt_body_transl_world[:, 0]    # (T, P, 3) — cam-0 copy (world frame)
+        gt_valid = ~np.all(                                        # (T, P) bool
+            gt_body_transl_world_cam0.reshape(T, max(P, 1), 3) == 0, axis=-1
         )
         targets = {
-            "pose": torch.from_numpy(gt_pose[:, 0]),           # [T, P, J, 6]
-            "shape": torch.from_numpy(gt_shape[:, 0]),         # [T, P, 10]
-            "camera": torch.from_numpy(gt_camera),             # [T, K, 8]
-            "keypoints_3d": torch.from_numpy(gt_kp3d[:, 0]),  # [T, P, 70, 3]
-            "trans": torch.from_numpy(gt_trans_cam0),          # [T, P, 3]
-            "gt_valid": torch.from_numpy(gt_valid),            # [T, P] bool
+            "pose": torch.from_numpy(gt_body_pose[:, 0]),           # [T, P, J, 6]  ground-truth body pose
+            "shape": torch.from_numpy(gt_body_shape[:, 0]),         # [T, P, 10]    ground-truth SMPL-X betas
+            "camera": torch.from_numpy(gt_camera),                   # [T, K, 8]
+            "keypoints_3d": torch.from_numpy(gt_kp3d[:, 0]),        # [T, P, 70, 3]
+            "trans": torch.from_numpy(gt_body_transl_world_cam0),   # [T, P, 3]     ground-truth body root in world frame
+            "gt_valid": torch.from_numpy(gt_valid),                  # [T, P] bool
         }
         return inputs, targets
 
@@ -971,7 +971,7 @@ class RICHFusionDatapoint(FusionDatapoint):
     # ------------------------------------------------------------------
     def convert_camera(
         self,
-        pred_cam_t: np.ndarray,
+        body_transl_cam: np.ndarray,
         focal_length: float,
         global_rot: np.ndarray,
         cam_calib: dict | None = None,
@@ -981,7 +981,7 @@ class RICHFusionDatapoint(FusionDatapoint):
         Position 7 carries the GT focal length from calibration instead of the
         predicted focal — it is used as fixed context, not predicted by the network.
 
-        Falls back to identity rotation + pred_cam_t (already metric from Stage 2)
+        Falls back to identity rotation + body_transl_cam (body root in cam frame, metric after Stage 2)
         if no Kabsch extrinsics are available for this camera.
         """
         intr = cam_calib.get("intrinsics") if cam_calib else None
@@ -997,10 +997,10 @@ class RICHFusionDatapoint(FusionDatapoint):
             cam[7] = focal_gt
             return cam
 
-        # Fallback: identity rotation + pred_cam_t (metric after Stage 2 correction).
+        # Fallback: identity rotation + body_transl_cam (metric after Stage 2 correction).
         cam = np.zeros(8, dtype=np.float32)
         cam[0] = 1.0  # identity quaternion [w,x,y,z]
-        cam[4:7] = pred_cam_t
+        cam[4:7] = body_transl_cam
         cam[7] = focal_gt
         return cam
 

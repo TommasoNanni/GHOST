@@ -220,14 +220,14 @@ class Trainer:
         """Run the model in eval mode and save final predictions to a .npz file.
 
         Saved arrays (all float32, batch dim squeezed when B=1):
-          pose      (T, P, J, 6)  – 6-D rotation in cam0 world space
-          shape     (T, P, 10)    – SMPL-X betas
-          camera    (T, K, 8)     – raw [quat(4), trans(3), focal_raw(1)] per camera
-          trans     (T, P, 3)     – predicted world-frame root translation
-          gt_pose   (T, P, J, 6)  – ground-truth pose        (when available in targets)
-          gt_shape  (T, P, 10)    – ground-truth shape       (when available in targets)
-          gt_camera (T, K, 8)     – ground-truth camera      (when available in targets)
-          gt_trans  (T, P, 3)     – ground-truth translation (when available in targets)
+          pose                  (T, P, J, 6)  – predicted 6-D body pose in cam-0 world frame
+          shape                 (T, P, 10)    – predicted SMPL-X betas
+          camera                (T, K, 8)     – predicted [quat(4), trans(3), focal_raw(1)] per camera
+          body_transl_world     (T, P, 3)     – predicted body root translation in world (cam-0) frame
+          gt_body_pose          (T, P, J, 6)  – ground-truth body pose       (when available in targets)
+          gt_body_shape         (T, P, 10)    – ground-truth body shape      (when available in targets)
+          gt_camera             (T, K, 8)     – ground-truth camera          (when available in targets)
+          gt_body_transl_world  (T, P, 3)     – ground-truth body root translation in world frame (when available)
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
@@ -235,38 +235,38 @@ class Trainer:
 
         self.model.eval()
 
-        all_pose, all_shape, all_camera, all_trans = [], [], [], []
-        all_gt_pose, all_gt_shape, all_gt_camera, all_gt_trans = [], [], [], []
+        all_pose, all_shape, all_camera, all_body_transl_world = [], [], [], []
+        all_gt_body_pose, all_gt_body_shape, all_gt_camera, all_gt_body_transl_world = [], [], [], []
 
         for batch in loader:
             inputs, targets = self._unpack_batch(batch)
             with torch.amp.autocast('cuda', enabled=self.use_amp):
                 preds = self._forward(inputs)
-            pose_aggr, shape_aggr, camera_pred, trans_aggr = preds[:4]
+            pose_aggr, shape_aggr, camera_pred, body_transl_world = preds[:4]
             all_pose.append(pose_aggr.float().cpu())
             all_shape.append(shape_aggr.float().cpu())
             all_camera.append(camera_pred.float().cpu())
-            all_trans.append(trans_aggr.float().cpu())
+            all_body_transl_world.append(body_transl_world.float().cpu())
             if isinstance(targets, dict):
-                if "pose"   in targets: all_gt_pose.append(targets["pose"].float().cpu())
-                if "shape"  in targets: all_gt_shape.append(targets["shape"].float().cpu())
+                if "pose"   in targets: all_gt_body_pose.append(targets["pose"].float().cpu())
+                if "shape"  in targets: all_gt_body_shape.append(targets["shape"].float().cpu())
                 if "camera" in targets: all_gt_camera.append(targets["camera"].float().cpu())
-                if "trans"  in targets: all_gt_trans.append(targets["trans"].float().cpu())
+                if "trans"  in targets: all_gt_body_transl_world.append(targets["trans"].float().cpu())
 
         def _cat_squeeze(lst):
             t = torch.cat(lst, dim=0)
             return t.squeeze(0).numpy().astype(np.float32)
 
         arrays: dict[str, np.ndarray] = {
-            "pose":   _cat_squeeze(all_pose),
-            "shape":  _cat_squeeze(all_shape),
-            "camera": _cat_squeeze(all_camera),
-            "trans":  _cat_squeeze(all_trans),
+            "pose":                 _cat_squeeze(all_pose),
+            "shape":                _cat_squeeze(all_shape),
+            "camera":               _cat_squeeze(all_camera),
+            "body_transl_world":    _cat_squeeze(all_body_transl_world),
         }
-        if all_gt_pose:   arrays["gt_pose"]   = _cat_squeeze(all_gt_pose)
-        if all_gt_shape:  arrays["gt_shape"]  = _cat_squeeze(all_gt_shape)
-        if all_gt_camera: arrays["gt_camera"] = _cat_squeeze(all_gt_camera)
-        if all_gt_trans:  arrays["gt_trans"]  = _cat_squeeze(all_gt_trans)
+        if all_gt_body_pose:          arrays["gt_body_pose"]         = _cat_squeeze(all_gt_body_pose)
+        if all_gt_body_shape:         arrays["gt_body_shape"]        = _cat_squeeze(all_gt_body_shape)
+        if all_gt_camera:             arrays["gt_camera"]            = _cat_squeeze(all_gt_camera)
+        if all_gt_body_transl_world:  arrays["gt_body_transl_world"] = _cat_squeeze(all_gt_body_transl_world)
 
         np.savez_compressed(str(out_file), **arrays)
         logger.info(f"Predictions saved → {out_file}  (keys: {list(arrays)})")
