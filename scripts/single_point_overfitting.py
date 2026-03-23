@@ -36,6 +36,7 @@ from fusion.loss import (
     BoneLengthconsistencyLoss,
     CameraMSELoss,
     TriangulationLoss,
+    TranslationMSELoss,
 )
 from fusion.metric import (
     MetricCollection,
@@ -74,6 +75,7 @@ def main():
     bone_length_weight      = CONFIG.fusion.loss.bone_length_weight
     camera_mse_weight          = CONFIG.fusion.loss.camera_mse_weight
     triangulation_weight       = CONFIG.fusion.loss.triangulation_weight
+    translation_mse_weight     = CONFIG.fusion.loss.translation_mse_weight
     vposer_weight           = CONFIG.fusion.loss.vposer_weight
     # Training params
     lr                      = CONFIG.fusion.training.lr
@@ -138,6 +140,7 @@ def main():
         "bone":       (BoneLengthconsistencyLoss(),      bone_length_weight           ),
         "camera_mse":      (CameraMSELoss(img_size=img_size),      camera_mse_weight      ),
         "triangulation":   (TriangulationLoss(),                  triangulation_weight   ),
+        "translation_mse": (TranslationMSELoss(),                 translation_mse_weight ),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
 

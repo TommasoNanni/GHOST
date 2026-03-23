@@ -9,11 +9,43 @@ Usage
         --predictions fusion_outputs/60980456_predictions.npz \\
         --scene_dir   test_outputs/rich10_segmentation_test/BBQ_001_guitar \\
         --frame_start 0 \\
-        --port 9090
+        --port 8080
 
-On a cluster, forward the port before opening a browser:
-    ssh -L 9090:localhost:9090 <host>
-    http://localhost:9090
+IMPORTANT — run as a persistent background process (otherwise it dies when the
+shell exits):
+
+    nohup bash -c 'CONDA_OVERRIDE_CUDA=12.6 pixi run python scripts/visualize_fusion.py --predictions fusion_outputs/<job_id>_predictions.npz --scene_dir test_outputs/rich10_segmentation_test/BBQ_001_guitar --smplx-model-dir body_models/SMPLX_NEUTRAL.pkl --port 8080' > ~/viser.log 2>&1 &
+
+    NOTE: do NOT use line breaks in the nohup command — copy it as a single line.
+    NOTE: use ~/viser.log (not /tmp/viser.log) to avoid permission issues.
+
+Check it started:
+    tail ~/viser.log
+    lsof -t -i:8080         # should print a PID
+
+To stop it:
+    kill $(lsof -t -i:8080)
+
+Port forwarding on Euler (VSCode + Windows)
+-------------------------------------------
+PROBLEM: euler.ethz.ch is a round-robin — each SSH connection may land on a
+different login node. If the server runs on eu-login-08 but the tunnel goes to
+eu-login-15, the browser gets "Connection refused".
+
+SOLUTION: Always forward directly to the node the server is running on:
+
+    # 1. Find which node the server is on (run on the cluster):
+    hostname
+
+    # 2. On your Windows laptop, forward to that specific node:
+    ssh -L 8080:eu-login-08:8080 tnanni@euler.ethz.ch
+    #                ^^^^^^^^^^^ replace with actual node
+
+    # 3. Open in browser:
+    http://localhost:8080
+
+VSCode auto-tunneling also works IF VSCode is connected to the same node.
+Check bottom-left corner of VSCode — it must match the node the server is on.
 """
 from __future__ import annotations
 
@@ -166,7 +198,7 @@ def run(
     predictions:     Path,
     scene_dir:       Path,
     rich_data_root:  Path  = Path("/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"),
-    smplx_model_dir: Path  = Path("body_models"),
+    smplx_model_dir: Path  = Path("body_models/SMPLX_NEUTRAL.pkl"),
     frame_start:     int   = 0,
     show_gt:         bool  = True,
     port:            int   = 9090,
@@ -402,7 +434,7 @@ def main(
     predictions:     Path,
     scene_dir:       Path,
     rich_data_root:  Path = Path("/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"),
-    smplx_model_dir: Path = Path("body_models"),
+    smplx_model_dir: Path = Path("body_models/SMPLX_NEUTRAL.pkl"),
     frame_start:     int  = 0,
     show_gt:         bool = True,
     port:            int  = 9090,
