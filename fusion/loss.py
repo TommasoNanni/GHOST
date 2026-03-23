@@ -461,34 +461,52 @@ class TriangulationLoss(Loss):
 class TranslationMSELoss(Loss):
     """Direct MSE supervision of world-frame body root translation.
 
-    Compares ``trans_aggr`` (preds[3], world frame, (B,T,P,3)) against
-    the GT SMPL-X world-frame translation ``targets["trans"]`` (B,T,P,3).
-    Frames with no RICH annotation are masked out via ``targets["gt_valid"]``.
+    Two terms are summed:
+    1. ``trans_aggr`` (preds[3], (B,T,P,3)) vs GT — supervises the
+       confidence-weighted mean across cameras.
+    2. ``t_world_k`` (preds[5], (B,T,K,P,3)) vs GT — supervises each
+       per-camera back-projected translation independently, masked by
+       ``person_visible`` (preds[6]).  This forces all cameras to agree
+       on the same world-frame position, coupling camera and body
+       translation optimisation.
 
-    Translation values are in metres, so the loss is normalised by a
-    squared scene scale (computed from the GT camera centres) to keep it
-    roughly in the same range as the other losses.
+    Frames with no RICH annotation are masked out via ``targets["gt_valid"]``.
+    Both terms are normalised by squared scene scale to keep the loss unit-free.
     """
 
     def __init__(self, name: str = "Translation MSE Loss", weight: float = 1.0) -> None:
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        trans_aggr = preds[3]              # (B, T, P, 3) — world frame
-        gt_trans   = targets["trans"]      # (B, T, P, 3) — world frame GT
+        trans_aggr     = preds[3]   # (B, T, P, 3)    — aggregated world frame
+        t_world_k      = preds[5]   # (B, T, K, P, 3) — per-camera world frame
+        person_visible = preds[6]   # (B, T, K, P)    — visibility weights
+        gt_trans       = targets["trans"]   # (B, T, P, 3)
 
-        if "gt_valid" in targets:
-            mask = targets["gt_valid"]     # (B, T, P) bool
-            if not mask.any():
+        gt_valid = targets.get("gt_valid")  # (B, T, P) bool or None
+
+        def _masked_mse(pred, gt, mask):
+            m = mask.unsqueeze(-1).expand_as(pred)
+            if not m.any():
+                return pred.new_zeros([])
+            return F.mse_loss(pred[m], gt[m])
+
+        # 1. Aggregated translation loss
+        if gt_valid is not None:
+            if not gt_valid.any():
                 return trans_aggr.new_zeros([])
-            m = mask.unsqueeze(-1).expand_as(trans_aggr)
-            loss = F.mse_loss(trans_aggr[m], gt_trans[m])
+            loss = _masked_mse(trans_aggr, gt_trans, gt_valid)
         else:
             loss = F.mse_loss(trans_aggr, gt_trans)
 
+        # 2. Per-camera translation loss
+        gt_trans_k = gt_trans.unsqueeze(2).expand_as(t_world_k)  # (B, T, K, P, 3)
+        vis_mask = person_visible > 0                              # (B, T, K, P) bool
+        if gt_valid is not None:
+            vis_mask = vis_mask & gt_valid.unsqueeze(2).expand_as(vis_mask)
+        loss = loss + _masked_mse(t_world_k, gt_trans_k, vis_mask)
+
         # Normalise by squared scene scale so the loss is unit-free.
-        # Re-use the camera GT to estimate scene scale the same way
-        # CameraMSELoss does.
         if "camera" in targets:
             cam_gt = targets["camera"]     # (B, T, K, 8)
             R_gt   = quaternion_to_matrix(cam_gt[..., :4].reshape(-1, 4)).reshape(*cam_gt.shape[:-1], 3, 3)
