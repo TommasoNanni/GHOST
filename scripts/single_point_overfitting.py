@@ -63,6 +63,7 @@ def main():
     # Architecture
     embedding_dim           = CONFIG.fusion.architecture.embedding_dimension
     temporal_window         = CONFIG.fusion.architecture.temporal_window
+    max_temporal_len        = CONFIG.fusion.architecture.max_temporal_len
     num_heads               = CONFIG.fusion.architecture.num_heads
     num_layers              = CONFIG.fusion.architecture.num_layers
     max_cameras             = CONFIG.fusion.architecture.max_cameras
@@ -107,7 +108,7 @@ def main():
         embedding_dim=embedding_dim,
         num_heads=num_heads,
         num_layers=num_layers,
-        max_temporal_len=T,
+        max_temporal_len=max_temporal_len,
         dropout=dropout,
         temporal_window=temporal_window,
         max_cameras=max_cameras,

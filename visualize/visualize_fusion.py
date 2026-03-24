@@ -14,7 +14,7 @@ Usage
 IMPORTANT — run as a persistent background process (otherwise it dies when the
 shell exits):
 
-    nohup bash -c 'CONDA_OVERRIDE_CUDA=12.6 pixi run python scripts/visualize_fusion.py --predictions fusion_outputs/<job_id>_predictions.npz --scene_dir test_outputs/rich10_segmentation_test/BBQ_001_guitar --smplx-model-dir body_models/SMPLX_NEUTRAL.pkl --port 8080' > ~/viser.log 2>&1 &
+    nohup bash -c 'CONDA_OVERRIDE_CUDA=12.6 pixi run python visualize/visualize_fusion.py --predictions fusion_outputs/<job_id>_predictions.npz --scene_dir test_outputs/rich10_segmentation_test/BBQ_001_guitar --smplx-model-dir body_models/SMPLX_NEUTRAL.pkl --port 8080' > ~/viser.log 2>&1 &
 
     NOTE: do NOT use line breaks in the nohup command — copy it as a single line.
     NOTE: use ~/viser.log (not /tmp/viser.log) to avoid permission issues.
@@ -274,6 +274,19 @@ def run(
     t_w2c  = camera[..., 4:7]                              # (T, K, 3)
     focal  = camera[0, :, 7]                               # (K,) constant
 
+    # ── decode GT cameras (if available) ─────────────────────────────────────
+    gt_camera_data = d.get("gt_camera")                    # (T, K, 8) or None
+    gt_R_w2c = gt_t_w2c = gt_focal = None
+    if gt_camera_data is not None:
+        gt_quat_raw = gt_camera_data[..., :4]
+        gt_norms    = np.linalg.norm(gt_quat_raw, axis=-1, keepdims=True).clip(1e-8)
+        gt_quat_n   = gt_quat_raw / gt_norms
+        gt_R_w2c    = quaternion_to_matrix(
+            torch.from_numpy(gt_quat_n.reshape(-1, 4).astype(np.float32))
+        ).numpy().reshape(T, K, 3, 3)
+        gt_t_w2c    = gt_camera_data[..., 4:7]             # (T, K, 3)
+        gt_focal    = gt_camera_data[0, :, 7]              # (K,) constant
+
     # Image size from first available frame
     sample_img = _load_rich_frame(rich_data_root, scene_name, 0, frame_start)
     if sample_img is not None:
@@ -306,16 +319,44 @@ def run(
         gui_play_button.label = "⏸  Pause" if _playing else "▶  Play"
 
     with server.gui.add_folder("Visibility"):
-        gui_show_pred    = server.gui.add_checkbox("Predicted body", True)
-        gui_show_gt      = server.gui.add_checkbox("GT body", True)
-        gui_show_frustum = server.gui.add_checkbox("Camera frustums", True)
-        gui_show_frames  = server.gui.add_checkbox("Video frames", True)
+        gui_show_pred       = server.gui.add_checkbox("Predicted body", True)
+        gui_show_gt         = server.gui.add_checkbox("GT body", True)
+        gui_show_frustum    = server.gui.add_checkbox("Camera frustums", True)
+        gui_show_gt_frustum = server.gui.add_checkbox("GT camera frustums", gt_R_w2c is not None)
+        gui_show_frames     = server.gui.add_checkbox("Video frames", True)
 
     with server.gui.add_folder("Frustum"):
-        gui_frustum_scale = server.gui.add_slider(
+        gui_frustum_scale    = server.gui.add_slider(
             "Scale", min=0.05, max=2.0, step=0.01, initial_value=0.3)
-        gui_line_width    = server.gui.add_slider(
+        gui_line_width       = server.gui.add_slider(
             "Line width", min=0.5, max=5.0, step=0.1, initial_value=1.5)
+        gui_frame_downsample = server.gui.add_slider(
+            "Frame downsample", min=1, max=16, step=1, initial_value=4)
+        gui_video_cam        = server.gui.add_dropdown(
+            "Video camera", options=["all", "none"] + [str(k) for k in range(K)],
+            initial_value="all")
+
+    # ── pre-load all video frames into RAM ───────────────────────────────────
+    # Eliminates per-frame disk I/O so update_frame() only does memory lookups.
+    # frames_cache[cam_idx][t_idx] = RGB uint8 ndarray, or None if frame missing.
+    frames_cache: list[list[np.ndarray | None]] = [[] for _ in range(K)]
+    if rich_data_root is not None:
+        ds_pre = max(1, int(gui_frame_downsample.value))
+        print(f"Pre-loading {T} frames × {K} cameras at 1/{ds_pre} resolution …")
+        for k in range(K):
+            for t_idx in range(T):
+                img_bgr = _load_rich_frame(
+                    rich_data_root, scene_name, k, frame_start + t_idx)
+                if img_bgr is not None:
+                    if ds_pre > 1:
+                        img_bgr = img_bgr[::ds_pre, ::ds_pre]
+                    frames_cache[k].append(
+                        cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+                else:
+                    frames_cache[k].append(None)
+            n_found = sum(f is not None for f in frames_cache[k])
+            print(f"  cam {k}: {n_found}/{T} frames loaded")
+        print("Pre-loading complete.\n")
 
     # ── mesh handles (created once, updated per frame) ────────────────────────
     pred_mesh_handles = []
@@ -351,24 +392,43 @@ def run(
         wxyz, pos = _cam_to_viser(R_w2c[0, k], t_w2c[0, k])
         fh = server.scene.add_camera_frustum(
             f"/world/cam_{k:02d}",
-            fov          = vfov,
-            aspect       = aspect,
-            scale        = gui_frustum_scale.value,
-            line_width   = gui_line_width.value,
-            wxyz         = wxyz,
-            position     = pos,
+            fov        = vfov,
+            aspect     = aspect,
+            scale      = gui_frustum_scale.value,
+            line_width = gui_line_width.value,
+            wxyz       = wxyz,
+            position   = pos,
         )
         frustum_handles.append(fh)
+
+    # GT camera frustums — green, static (GT extrinsics don't change over time)
+    gt_frustum_handles = []
+    if gt_R_w2c is not None:
+        for k in range(K):
+            vfov_gt = 2 * np.arctan(H / 2 / max(gt_focal[k], 1.0))
+            wxyz_gt, pos_gt = _cam_to_viser(gt_R_w2c[0, k], gt_t_w2c[0, k])
+            fh_gt = server.scene.add_camera_frustum(
+                f"/world/cam_gt_{k:02d}",
+                fov        = vfov_gt,
+                aspect     = aspect,
+                scale      = gui_frustum_scale.value,
+                line_width = gui_line_width.value,
+                color      = (0, 200, 80),
+                wxyz       = wxyz_gt,
+                position   = pos_gt,
+                visible    = gui_show_gt_frustum.value,
+            )
+            gt_frustum_handles.append(fh_gt)
 
     # ── frustum style callbacks ───────────────────────────────────────────────
     @gui_frustum_scale.on_update
     def _(_):
-        for fh in frustum_handles:
+        for fh in frustum_handles + gt_frustum_handles:
             fh.scale = gui_frustum_scale.value
 
     @gui_line_width.on_update
     def _(_):
-        for fh in frustum_handles:
+        for fh in frustum_handles + gt_frustum_handles:
             fh.line_width = gui_line_width.value
 
     # ── per-frame update ──────────────────────────────────────────────────────
@@ -391,21 +451,25 @@ def run(
                 h.vertices = gt_verts_vis[t_idx, p]
                 h.visible  = gui_show_gt.value and show_gt and bool(gt_valid[t_idx])
 
-            # Cameras + images
+            # Predicted cameras + images (served from RAM cache — no disk I/O here)
+            vid_cam_str = gui_video_cam.value
+            show_all    = vid_cam_str == "all"
+            vid_cam_idx = -1 if vid_cam_str in ("all", "none") else int(vid_cam_str)
+
             for k, fh in enumerate(frustum_handles):
                 wxyz, pos = _cam_to_viser(R_w2c[t_idx, k], t_w2c[t_idx, k])
                 fh.wxyz    = wxyz
                 fh.position = pos
                 fh.visible  = gui_show_frustum.value
 
-                if gui_show_frames.value:
-                    img_bgr = _load_rich_frame(rich_data_root, scene_name,
-                                               k, rich_frame_idx)
-                    if img_bgr is not None:
-                        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                        fh.image = img_rgb
+                if gui_show_frames.value and (show_all or k == vid_cam_idx):
+                    fh.image = frames_cache[k][t_idx] if frames_cache[k] else None
                 else:
                     fh.image = None
+
+            # GT cameras — position is static; only toggle visibility
+            for fh_gt in gt_frustum_handles:
+                fh_gt.visible = gui_show_gt_frustum.value
 
     # first render — start at first annotated frame
     update_frame(first_valid)

@@ -288,7 +288,7 @@ class Trainer:
         epoch  : current epoch index (used as wandb step).
         """
         import wandb
-        wandb.log({f"{phase}/loss/{name}": s["mean"] for name, s in stats.items()}, step=epoch)
+        wandb.log({f"{phase}_losses/{name}": s["mean"] for name, s in stats.items()}, step=epoch)
 
     def log_metrics_to_wandb(
         self,
@@ -307,7 +307,7 @@ class Trainer:
         """
         import wandb
         wandb.log(
-            {f"{phase}/metric/{name}": s["mean"] for name, s in metric_results.items()},
+            {f"{phase}_metrics/{name}": s["mean"] for name, s in metric_results.items()},
             step=epoch,
         )
 

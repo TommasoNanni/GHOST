@@ -102,6 +102,7 @@ class FusionDatapoint(Dataset, ABC):
         self.load_cameras(**kwargs)         # fills the _cameras with predicted cameras
         self.load_ground_truth(**kwargs)    # fills the _gt with GT data
         self._transform_to_world_frame()    # Projects the 3D quantities in the "world" (=cam0) system
+        self._match_persons_to_gt()         # Remaps _gt keys from dataset pids to ghost pids
 
         self.num_cameras: int = len(self._cam_dirs)
         if self.num_cameras == 0:
@@ -189,6 +190,15 @@ class FusionDatapoint(Dataset, ABC):
 
         Called automatically by ``__init__`` after all three data-loading
         hooks complete.
+        """
+
+    def _match_persons_to_gt(self) -> None:
+        """Remap ``self._gt`` keys from dataset person IDs to ghost person IDs.
+
+        Called after ``_transform_to_world_frame()`` so both predictions and
+        GT are in the same world coordinate frame.  Default is a no-op.
+        Override in subclasses that have GT with independent person IDs.
+        Automatically skipped when ``self._gt`` is empty (inference mode).
         """
 
     # Hooks to be overridden
@@ -707,11 +717,18 @@ class RICHFusionDatapoint(FusionDatapoint):
 
         self._cameras = []
         self._gt_camera_vecs: list[np.ndarray] = []  # (8,) per camera
+        valid_cam_indices: list[int] = []             # indices into self._cam_dirs with valid GT calibration
         for i, cam_dir in enumerate(self._cam_dirs):
-            xml_path = calib_dir / f"{i:03d}.xml"
+            # Extract camera number from directory name (e.g. "cam_10" → 10 → "010.xml")
+            # rather than using the sequential index, which would give the wrong file
+            # when camera numbers are non-contiguous (e.g. cam_00, cam_01, cam_10).
+            _m = re.search(r"\d+", cam_dir.name)
+            _cam_num = int(_m.group()) if _m else i
+            xml_path = calib_dir / f"{_cam_num:03d}.xml"
             if xml_path.exists():
                 calib = self._parse_calib_xml(xml_path)
                 self._cameras.append(calib)
+                valid_cam_indices.append(i)
                 # Pre-compute GT camera vector [qx, qy, qz, qw, tx, ty, tz, focal]
                 # from the static (per-camera) extrinsic matrix.
                 ext = calib.get("extrinsics")  # (3, 4)
@@ -724,20 +741,22 @@ class RICHFusionDatapoint(FusionDatapoint):
                     intr = calib.get("intrinsics")
                     vec[7] = float(intr[0, 0]) if intr is not None else 1000.0
                 else:
-                    vec = np.array([1., 0., 0., 0., 0., 0., 0., 1000.], dtype=np.float32)  # pytorch3d identity [w,x,y,z]
+                    vec = np.array([1., 0., 0., 0., 0., 0., 0., 1000.], dtype=np.float32)
                 self._gt_camera_vecs.append(vec)
                 logger.debug(
                     f"  {cam_dir.name}: loaded calibration from {xml_path.name}"
                 )
             else:
                 logger.warning(
-                    f"No calibration found for {cam_dir.name} "
-                    f"(expected {os.path.abspath(xml_path)})"
+                    f"No GT calibration for {cam_dir.name} "
+                    f"(expected {os.path.abspath(xml_path)}) — camera will be ignored"
                 )
-                self._cameras.append({})
-                self._gt_camera_vecs.append(
-                    np.array([1., 0., 0., 0., 0., 0., 0., 1000.], dtype=np.float32)  # pytorch3d identity [w,x,y,z]
-                )
+
+        # Drop cameras with no GT calibration from _cam_dirs and _raw so the
+        # rest of the pipeline only sees cameras with valid extrinsics.
+        if len(valid_cam_indices) < len(self._cam_dirs):
+            self._cam_dirs = [self._cam_dirs[i] for i in valid_cam_indices]
+            self._raw      = [self._raw[i]      for i in valid_cam_indices]
 
         # Re-express GT camera vectors relative to cam-0 so that they are in
         # the same frame as the body predictions (which are mapped to cam-0 in
@@ -1003,6 +1022,109 @@ class RICHFusionDatapoint(FusionDatapoint):
         cam[4:7] = body_transl_cam
         cam[7] = focal_gt
         return cam
+
+    def _match_persons_to_gt(self) -> None:
+        """Match ghost person IDs to RICH GT person IDs by 3D proximity.
+
+        Both are already in cam-0 world space after _transform_to_world_frame().
+        For each RICH GT person, finds the ghost person whose world-frame
+        translation is closest (mean distance over common frames), then remaps
+        _gt and _gt_frame_lut to use ghost pids as keys.
+
+        Skipped automatically when _gt is empty (inference mode).
+        Unmatched ghost persons have no _gt entry → build_gt_targets returns
+        zeros → gt_valid is False → masked by the loss.
+        """
+        if not self._gt or not self._raw:
+            return
+
+        gt_dict = self._gt[0]   # {rich_pid: {field: array}}
+        rich_pids = list(gt_dict.keys())
+        if not rich_pids:
+            return
+
+        # Collect world-frame translations for every ghost person across ALL cameras.
+        # After _transform_to_world_frame() all cameras share the same world frame,
+        # so we can aggregate across cameras to get a robust position estimate and
+        # to catch persons that are only visible in non-cam-0 cameras.
+        # ghost_transl[ghost_pid][frame_idx] = mean world-translation across cameras
+        all_ghost_pids: set[int] = set()
+        for cam_persons in self._raw:
+            all_ghost_pids.update(cam_persons.keys())
+        ghost_pids = sorted(all_ghost_pids)
+        if not ghost_pids:
+            return
+
+        # accum[ghost_pid][frame_idx] = list of (3,) translations (one per camera)
+        accum: dict[int, dict[int, list[np.ndarray]]] = {gpid: {} for gpid in ghost_pids}
+        for cam_persons in self._raw:
+            for gpid, pdata in cam_persons.items():
+                tr = pdata.get("smplx_transl")   # (N, 3) world frame
+                fi = pdata.get("frame_indices")  # (N,)
+                if tr is None or fi is None:
+                    continue
+                for i, f in enumerate(fi):
+                    accum[gpid].setdefault(int(f), []).append(tr[i])
+
+        # Average across cameras per frame
+        ghost_transl: dict[int, dict[int, np.ndarray]] = {}
+        for gpid in ghost_pids:
+            ghost_transl[gpid] = {
+                f: np.mean(views, axis=0)
+                for f, views in accum[gpid].items()
+            }
+
+        # For each RICH GT person pick the closest ghost person
+        rich_to_ghost: dict[int, int] = {}
+        for rpid in rich_pids:
+            gt_lut   = self._gt_frame_lut.get(rpid, {})
+            gt_transl = gt_dict[rpid].get("transl")   # (N, 3) world frame
+            if gt_transl is None:
+                continue
+
+            best_gpid: int | None = None
+            best_dist = float("inf")
+            for gpid in ghost_pids:
+                common = set(gt_lut.keys()) & set(ghost_transl[gpid].keys())
+                if not common:
+                    continue
+                dists = [
+                    np.linalg.norm(gt_transl[gt_lut[f]] - ghost_transl[gpid][f])
+                    for f in common
+                ]
+                mean_dist = float(np.mean(dists))
+                if mean_dist < best_dist:
+                    best_dist = mean_dist
+                    best_gpid = gpid
+
+            if best_gpid is not None:
+                rich_to_ghost[rpid] = best_gpid
+                logger.info(
+                    f"GT person {rpid} → ghost person {best_gpid} "
+                    f"(mean dist={best_dist:.3f} m)"
+                )
+            else:
+                logger.warning(f"No ghost match found for GT person {rpid} — will be skipped")
+
+        # Remap _gt and _gt_frame_lut: replace RICH pids with ghost pids
+        new_gt_dict: dict[int, dict[str, np.ndarray]] = {
+            rich_to_ghost[rpid]: gt_dict[rpid]
+            for rpid in rich_to_ghost
+        }
+        new_lut: dict[int, dict[int, int]] = {
+            rich_to_ghost[rpid]: self._gt_frame_lut[rpid]
+            for rpid in rich_to_ghost
+        }
+        n_cams = len(self._gt)
+        self._gt = [new_gt_dict] * n_cams
+        self._gt_frame_lut = new_lut
+
+        unmatched = set(ghost_pids) - set(rich_to_ghost.values())
+        if unmatched:
+            logger.info(
+                f"Ghost persons {sorted(unmatched)} have no GT match "
+                f"— targets will be zero (masked by gt_valid)"
+            )
 
     def build_gt_targets(
         self,
