@@ -4,6 +4,9 @@ from __future__ import annotations
 import logging
 import sys
 import os
+
+# Set to True to print memory/shape diagnostics without running full training
+DEBUG_MEMORY = os.environ.get("GHOST_DEBUG_MEMORY", "0") == "1"
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 hbp_path = os.path.join(project_root, 'human_body_prior')
 if hbp_path not in sys.path:
@@ -17,7 +20,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch3d.transforms import matrix_to_quaternion, rotation_6d_to_matrix, matrix_to_axis_angle, quaternion_to_matrix
 
-from utilities.smplx_utilities import get_smplx_joints
 from utilities.camera_utilities import extract_cameras
 from utilities.geometry import project_to_2d, skew_symmetric
 from configuration import CONFIG
@@ -69,11 +71,9 @@ class EpipolarLoss(Loss):
         name: str = "Epipolar Loss",
         weight: float = 1.0,
         img_size: tuple[int, int] = (224, 224),
-        chunk_size: int = 32,
     ) -> None:
         super().__init__(name, weight)
         self.img_size = img_size
-        self.chunk_size = chunk_size
 
     def forward(
             self,
@@ -92,55 +92,47 @@ class EpipolarLoss(Loss):
 
         preds: (pose_aggr, shape_aggr, camera, body_transl_world)
         """
-        pose_aggr, shape_aggr, camera, body_transl_world = preds[:4]
+        pose_aggr, _, camera, _ = preds[:4]
         K = camera.shape[2]
         if K < 2:
             return pose_aggr.new_zeros([])
-        B, T, P, J, _ = pose_aggr.shape
+        B, T, P = pose_aggr.shape[:3]
+
+        # joints_world precomputed once per step in Trainer._append_smplx_joints
+        joints_world = preds[7]                                                 # (B, T, P, Jsmplx, 3)
+        Jsmplx = joints_world.shape[3]
+        flat_world = joints_world.reshape(B * T, P * Jsmplx, 3)                # (B*T, P*J, 3)
+
+        if DEBUG_MEMORY:
+            mem = torch.cuda.memory_allocated(pose_aggr.device) / 1024**3
+            print(f"[EpipolarLoss] B={B} T={T} P={P} K={K} — using precomputed joints. "
+                  f"GPU mem: {mem:.2f} GB")
+
         num_pairs = 0
         total_loss = pose_aggr.new_zeros([])
+        img_diag2 = float(self.img_size[0] ** 2 + self.img_size[1] ** 2)
 
         for i in range(K):
             for j in range(i + 1, K):
-                cam_i = camera[:, :, i]   # (B, T, 8)
-                cam_j = camera[:, :, j]
+                R_i, t_i, K_i = extract_cameras(camera[:, :, i], self.img_size)  # (B, T, 3, 3/3/3x3)
+                R_j, t_j, K_j = extract_cameras(camera[:, :, j], self.img_size)
+                F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
 
-                pair_numerator   = pose_aggr.new_zeros([])
-                pair_visible_sum = 0
+                vi_cam = (torch.bmm(flat_world, R_i.reshape(B * T, 3, 3).transpose(-2, -1))
+                          + t_i.reshape(B * T, 1, 3)).reshape(B, T, P, Jsmplx, 3)
+                vj_cam = (torch.bmm(flat_world, R_j.reshape(B * T, 3, 3).transpose(-2, -1))
+                          + t_j.reshape(B * T, 1, 3)).reshape(B, T, P, Jsmplx, 3)
 
-                for t0 in range(0, T, self.chunk_size):
-                    t1 = min(t0 + self.chunk_size, T)
+                x_i = project_to_2d(vi_cam, K_i)
+                x_j = project_to_2d(vj_cam, K_j)
 
-                    # Joints in world frame: pelvis-centered → add body_transl_world for absolute position
-                    # shape_aggr is (B, P, 10) — expand to (B, t_chunk, P, 10) for get_smplx_joints
-                    t_chunk = t1 - t0
-                    shape_chunk = shape_aggr.unsqueeze(1).expand(B, t_chunk, P, 10)
-                    joints_world = get_smplx_joints(pose_aggr[:, t0:t1], shape_chunk)  # (B, t_chunk, P, J, 3)
-                    joints_world = joints_world + body_transl_world[:, t0:t1].unsqueeze(-2)
+                errors  = self.compute_epipolar_errors(x_i, x_j, F)
+                visible = (vi_cam[..., 2] > 0) & (vj_cam[..., 2] > 0)
 
-                    R_i, t_i, K_i = extract_cameras(cam_i[:, t0:t1], self.img_size)
-                    R_j, t_j, K_j = extract_cameras(cam_j[:, t0:t1], self.img_size)
-                    F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
-
-                    # Project world joints into each camera frame: v_cam = R @ v_world + t
-                    Jsmplx = joints_world.shape[3]  # SMPL-X outputs more joints than pose_aggr input dim
-                    flat = joints_world.reshape(B * t_chunk, P * Jsmplx, 3)
-                    vi_cam = (torch.bmm(flat, R_i.reshape(B * t_chunk, 3, 3).transpose(-2, -1))
-                              + t_i.reshape(B * t_chunk, 1, 3)).reshape(B, t_chunk, P, Jsmplx, 3)
-                    vj_cam = (torch.bmm(flat, R_j.reshape(B * t_chunk, 3, 3).transpose(-2, -1))
-                              + t_j.reshape(B * t_chunk, 1, 3)).reshape(B, t_chunk, P, Jsmplx, 3)
-
-                    x_i = project_to_2d(vi_cam, K_i)
-                    x_j = project_to_2d(vj_cam, K_j)
-
-                    errors  = self.compute_epipolar_errors(x_i, x_j, F)
-                    visible = (vi_cam[..., 2] > 0) & (vj_cam[..., 2] > 0)
-
-                    img_diag2 = float(self.img_size[0] ** 2 + self.img_size[1] ** 2)
-                    pair_numerator   = pair_numerator + (errors / img_diag2 * visible.to(errors.dtype)).sum()
-                    pair_visible_sum = pair_visible_sum + visible.sum().item()
-
-                total_loss = total_loss + pair_numerator / (pair_visible_sum + 1e-8)
+                total_loss = total_loss + (
+                    (errors / img_diag2 * visible.to(errors.dtype)).sum()
+                    / (visible.sum() + 1e-8)
+                )
                 num_pairs += 1
 
         return total_loss / num_pairs
@@ -177,9 +169,12 @@ class EpipolarLoss(Loss):
             R_rel.reshape(B*T,3,3)
         ).reshape(B,T,3,3)
 
-        # torch.inverse does not support low-precision dtypes — compute in float32
-        K_i_inv = torch.inverse(K_i.reshape(B*T,3,3).float()).to(K_i.dtype).reshape(B,T,3,3)
-        K_j_inv_T = torch.inverse(K_j.reshape(B*T,3,3).float()).to(K_j.dtype).transpose(-2,-1).reshape(B,T,3,3)
+        # Focal length is known from calibration — K must not receive gradients through
+        # torch.inverse (its backward is -(K^{-1} ⊗ K^{-1}), which produces NaN when
+        # focal is near zero early in training).  Detach before inverting so that
+        # gradients for focal flow only via CameraMSELoss, not through F.
+        K_i_inv = torch.inverse(K_i.detach().reshape(B*T,3,3).float()).to(K_i.dtype).reshape(B,T,3,3)
+        K_j_inv_T = torch.inverse(K_j.detach().reshape(B*T,3,3).float()).to(K_j.dtype).transpose(-2,-1).reshape(B,T,3,3)
 
         F = torch.bmm(
             torch.bmm(
@@ -289,8 +284,10 @@ class VPoserLoss(Loss):
         self,
         name: str = "VPoser Loss",
         weight: float = 1.0,
+        chunk_size: int = 256,
     ) -> None:
         super().__init__(name, weight)
+        self.chunk_size = chunk_size
 
         from human_body_prior.tools.model_loader import load_model
         from human_body_prior.models.vposer_model import VPoser
@@ -307,7 +304,8 @@ class VPoserLoss(Loss):
         """
         Compute the VPoser KL-divergence prior on the aggregated body pose.
 
-        Converts pose_aggr from 6D rotation to axis-angle, then encodes with VPoser.
+        Converts pose_aggr from 6D rotation to axis-angle, then encodes with VPoser
+        in chunks of `chunk_size` rows to avoid OOM on long sequences.
 
         Returns
         -------
@@ -324,22 +322,24 @@ class VPoserLoss(Loss):
         # slice body joints 1-22 (skip root, skip hands/face), flatten to (N, 21*3=63)
         smpl_pose = pose[..., 1:22, :].reshape(-1, 63).float()  # VPoser is float32
 
-        dist = self.vposer.encode(smpl_pose)
+        kl_chunks = []
+        for i in range(0, smpl_pose.shape[0], self.chunk_size):
+            chunk = smpl_pose[i : i + self.chunk_size]
+            dist = self.vposer.encode(chunk)
+            mean   = dist.mean
+            std    = dist.scale
+            logvar = 2.0 * torch.log(std + 1e-8)
+            kl = -0.5 * torch.sum(1 + logvar - mean ** 2 - logvar.exp(), dim=-1)
+            kl_chunks.append(kl)
 
-        mean = dist.mean          # (N, latent_dim)
-        std  = dist.scale         # (N, latent_dim)
-        logvar = 2.0 * torch.log(std + 1e-8)
-
-        kl_loss = -0.5 * torch.sum(1 + logvar - mean ** 2 - logvar.exp(), dim=-1)
-
-        return kl_loss.mean()
+        return torch.cat(kl_chunks).mean()
 
 
 class BoneLengthconsistencyLoss(Loss):
     def __init__(
-        self, 
+        self,
         name: str = "Bone Lenght Consistency Loss",
-        weight: float = 1.0
+        weight: float = 1.0,
     )-> None:
         super().__init__(name, weight)
 
@@ -347,8 +347,7 @@ class BoneLengthconsistencyLoss(Loss):
         """
         Penalises inconsistent bone lengths across time in the fused prediction.
 
-        Runs one SMPL-X forward pass on (pose_aggr, shape_aggr) to get 3D joints,
-        then checks that each bone length is stable over T.
+        Uses precomputed joints_world from preds[7] (set by Trainer._append_smplx_joints).
 
         pose_aggr : (B, T, P, J, 6)
         shape_aggr: (B, T, P, 10)
@@ -358,10 +357,12 @@ class BoneLengthconsistencyLoss(Loss):
         -------
         Scalar loss encouraging constant bone length across time.
         """
-        pose_aggr, shape_aggr, _, _ = preds[:4]
+        pose_aggr = preds[0]
         B, T, P = pose_aggr.shape[:3]
-        shape_exp = shape_aggr.unsqueeze(1).expand(B, T, P, 10)
-        joints = get_smplx_joints(pose_aggr, shape_exp)[..., :55, :]  # (B, T, P, 55, 3)
+
+        # joints_world precomputed once per step in Trainer._append_smplx_joints
+        # bone lengths are global-translation invariant, so world-frame joints are fine
+        joints = preds[7][..., :55, :]     # (B, T, P, 55, 3)
 
         parent_mapping = torch.tensor(
             PARENTS_TABLE, device=joints.device, dtype=torch.long
@@ -507,14 +508,29 @@ class TranslationMSELoss(Loss):
         loss = loss + _masked_mse(body_transl_world_per_cam, gt_body_transl_world_per_cam, vis_mask)
 
         # Normalise by squared scene scale so the loss is unit-free.
+        # Only use cameras with real GT (non-zero quaternion) to avoid NaN from
+        # quaternion_to_matrix and to prevent zero-translation cameras from
+        # collapsing the scene scale toward zero.
         if "camera" in targets:
             cam_gt = targets["camera"]     # (B, T, K, 8)
-            gt_cam_rot_w2c   = quaternion_to_matrix(cam_gt[..., :4].reshape(-1, 4)).reshape(*cam_gt.shape[:-1], 3, 3)
-            gt_cam_transl_w2c = cam_gt[..., 4:7]
-            gt_cam_centres = -torch.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
-            diff = gt_cam_centres.unsqueeze(-2) - gt_cam_centres.unsqueeze(-3)
-            scene_scale = diff.norm(dim=-1).mean().clamp(min=1e-3)
-            loss = loss / (scene_scale ** 2)
+            cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
+            if cam_valid.any():
+                # Replace invalid quaternions with identity to prevent NaN in quaternion_to_matrix
+                q_safe = cam_gt[..., :4].clone()
+                q_safe[~cam_valid] = q_safe.new_tensor([1., 0., 0., 0.])
+                gt_cam_rot_w2c = quaternion_to_matrix(q_safe.reshape(-1, 4)).reshape(*cam_gt.shape[:-1], 3, 3)
+                gt_cam_transl_w2c = cam_gt[..., 4:7]
+                gt_cam_centres = -torch.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
+                # Pairwise distances between valid cameras only
+                diff = gt_cam_centres.unsqueeze(-2) - gt_cam_centres.unsqueeze(-3)  # (B, T, K, K, 3)
+                dist = diff.norm(dim=-1)  # (B, T, K, K)
+                valid_pair = cam_valid.unsqueeze(-1) & cam_valid.unsqueeze(-2)  # (B, T, K, K)
+                K_dim = cam_gt.shape[-2]
+                diag = torch.eye(K_dim, dtype=torch.bool, device=cam_gt.device)[None, None]
+                valid_pair = valid_pair & ~diag
+                if valid_pair.any():
+                    scene_scale = dist[valid_pair].mean().clamp(min=1e-3)
+                    loss = loss / (scene_scale ** 2)
 
         return loss
 
@@ -547,20 +563,30 @@ class CameraMSELoss(Loss):
         _, _, camera_pred, _ = preds[:4]
         cam_gt = targets["camera"]
 
-        cam_rot_w2c    = quaternion_to_matrix(camera_pred[..., :4].reshape(-1, 4)).reshape(*camera_pred.shape[:-1], 3, 3)
-        cam_transl_w2c = camera_pred[..., 4:7]
-        gt_cam_rot_w2c    = quaternion_to_matrix(cam_gt[..., :4].reshape(-1, 4)).reshape(*cam_gt.shape[:-1], 3, 3)
-        gt_cam_transl_w2c = cam_gt[..., 4:7]
+        # Only supervise cameras where GT is available (valid quaternion norm > 0.5).
+        # Cameras with no person detection stay at zero quaternion in gt_camera.
+        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
+        if not cam_valid.any():
+            return camera_pred.new_zeros([])
 
-        q      = matrix_to_quaternion(cam_rot_w2c.reshape(-1, 3, 3))
-        q_gt   = matrix_to_quaternion(gt_cam_rot_w2c.reshape(-1, 3, 3))
+        camera_pred_v = camera_pred[cam_valid]  # (N, 8)
+        cam_gt_v      = cam_gt[cam_valid]        # (N, 8)
+
+        cam_rot_w2c    = quaternion_to_matrix(camera_pred_v[..., :4])
+        cam_transl_w2c = camera_pred_v[..., 4:7]
+        gt_cam_rot_w2c    = quaternion_to_matrix(cam_gt_v[..., :4])
+        gt_cam_transl_w2c = cam_gt_v[..., 4:7]
+
+        q      = matrix_to_quaternion(cam_rot_w2c)
+        q_gt   = matrix_to_quaternion(gt_cam_rot_w2c)
 
         dot    = torch.clamp(torch.sum(q * q_gt, dim=-1), -1.0 + 1e-7, 1.0 - 1e-7)
         rot_loss   = (1 - torch.abs(dot)).mean()
 
         # Normalise by squared scene scale so trans_loss lives in [0, 1] like rot_loss.
-        gt_cam_centres = -torch.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)  # (..., K, 3)
-        diff = gt_cam_centres.unsqueeze(-2) - gt_cam_centres.unsqueeze(-3)  # (..., K, K, 3)
+        # gt_cam_rot_w2c: (N, 3, 3), gt_cam_transl_w2c: (N, 3) → centres: (N, 3)
+        gt_cam_centres = -torch.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
+        diff = gt_cam_centres.unsqueeze(-2) - gt_cam_centres.unsqueeze(-3)  # (N, N, 3)
         scene_scale = diff.norm(dim=-1).mean().clamp(min=1e-3)
         trans_loss = torch.norm(cam_transl_w2c - gt_cam_transl_w2c, dim=-1).pow(2).mean() / (scene_scale ** 2)
 

@@ -39,12 +39,20 @@ from typing import Dict, List, Sequence
 import numpy as np
 
 from utilities.metrics_utilities import (
-    umeyama,
+    umeyama as _umeyama,
     apply_alignment,
     geodesic_deg,
     batch_geodesic_deg,
     mean_rotation,
 )
+
+
+def umeyama(src, dst, with_scale=True):
+    """umeyama alignment; returns None if SVD does not converge (e.g. co-planar cameras)."""
+    try:
+        return _umeyama(src, dst, with_scale=with_scale)
+    except np.linalg.LinAlgError:
+        return None
 
 
 class Metric(ABC):
@@ -129,7 +137,10 @@ class WMPJPE(Metric):
         pred_cam_pos : (C, 3)     predicted camera centres.
         gt_cam_pos   : (C, 3)     ground-truth camera centres.
         """
-        R, t, _ = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        result = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        if result is None:
+            return
+        R, t, _ = result
         aligned = apply_alignment(pred_joints.reshape(-1, 3), R, t, 1.0)
         errs = np.linalg.norm(aligned - gt_joints.reshape(-1, 3), axis=-1)
         self._record(float(errs.mean()))
@@ -161,7 +172,10 @@ class GAMPJPE(Metric):
         """
         src = pred_joints.reshape(-1, 3)
         dst = gt_joints.reshape(-1, 3)
-        R, t, s = umeyama(src, dst, with_scale=True)
+        result = umeyama(src, dst, with_scale=True)
+        if result is None:
+            return
+        R, t, s = result
         aligned = apply_alignment(src, R, t, s)
         errs = np.linalg.norm(aligned - dst, axis=-1)
         self._record(float(errs.mean()))
@@ -196,11 +210,15 @@ class PAMPJPE(Metric):
         for person in range(P):
             src = pred_joints[person]   # (J, 3)
             dst = gt_joints[person]
-            R, t, s = umeyama(src, dst, with_scale=True)
+            result = umeyama(src, dst, with_scale=True)
+            if result is None:
+                continue
+            R, t, s = result
             aligned = apply_alignment(src, R, t, s)
             errs = np.linalg.norm(aligned - dst, axis=-1)
             scene_errs.append(float(errs.mean()))
-        self._record(float(np.mean(scene_errs)))
+        if scene_errs:
+            self._record(float(np.mean(scene_errs)))
 
     def compute(self) -> Dict[str, float]:
         return self._aggregate()
@@ -241,7 +259,10 @@ class WMPJRE(Metric):
         pred_cam_pos   : (C, 3)        predicted camera centres.
         gt_cam_pos     : (C, 3)        ground-truth camera centres.
         """
-        R_world, _, _ = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        result = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        if result is None:
+            return
+        R_world, _, _ = result
         pred_aligned = pred_rotations.copy()
         # Correct root orientation: (3,3) @ (P,3,3) broadcasts correctly
         pred_aligned[:, 0] = R_world @ pred_rotations[:, 0]
@@ -278,7 +299,10 @@ class GAMPJRE(Metric):
         """
         # R_diffs[p] = gt_root[p] @ pred_root[p]^T  →  (P, 3, 3)
         R_diffs = gt_rotations[:, 0] @ pred_rotations[:, 0].swapaxes(-1, -2)
-        R_align = mean_rotation(R_diffs)  # (3, 3)
+        try:
+            R_align = mean_rotation(R_diffs)  # (3, 3)
+        except np.linalg.LinAlgError:
+            return
         pred_aligned = pred_rotations.copy()
         pred_aligned[:, 0] = R_align @ pred_rotations[:, 0]
         errs = batch_geodesic_deg(pred_aligned, gt_rotations)  # (P, J)
@@ -348,7 +372,10 @@ class TranslationError(Metric):
         ----------
         pred_cam_pos, gt_cam_pos : ``(C, 3)``
         """
-        R, t, _ = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        result = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        if result is None:
+            return
+        R, t, _ = result
         aligned = apply_alignment(pred_cam_pos, R, t, 1.0)
         errs = np.linalg.norm(aligned - gt_cam_pos, axis=-1)
         self._record(float(errs.mean()))
@@ -373,7 +400,10 @@ class ScaledTranslationError(Metric):
         ----------
         pred_cam_pos, gt_cam_pos : ``(C, 3)``
         """
-        R, t, s = umeyama(pred_cam_pos, gt_cam_pos, with_scale=True)
+        result = umeyama(pred_cam_pos, gt_cam_pos, with_scale=True)
+        if result is None:
+            return
+        R, t, s = result
         aligned = apply_alignment(pred_cam_pos, R, t, s)
         errs = np.linalg.norm(aligned - gt_cam_pos, axis=-1)
         self._record(float(errs.mean()))
@@ -513,7 +543,10 @@ class CCA(Metric):
         ----------
         pred_cam_pos, gt_cam_pos : ``(C, 3)``
         """
-        R, t, _ = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        result = umeyama(pred_cam_pos, gt_cam_pos, with_scale=False)
+        if result is None:
+            return
+        R, t, _ = result
         aligned = apply_alignment(pred_cam_pos, R, t, 1.0)
 
         centroid = gt_cam_pos.mean(axis=0)
@@ -554,7 +587,10 @@ class ScaledCCA(Metric):
         ----------
         pred_cam_pos, gt_cam_pos : ``(C, 3)``
         """
-        R, t, s = umeyama(pred_cam_pos, gt_cam_pos, with_scale=True)
+        result = umeyama(pred_cam_pos, gt_cam_pos, with_scale=True)
+        if result is None:
+            return
+        R, t, s = result
         aligned = apply_alignment(pred_cam_pos, R, t, s)
 
         centroid = gt_cam_pos.mean(axis=0)

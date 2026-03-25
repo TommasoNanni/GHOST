@@ -34,6 +34,17 @@ def _get_smplx_model(batch_size: int, device: torch.device, dtype: torch.dtype):
     return _smplx_cache[key]
 
 
+def clear_smplx_cache() -> None:
+    """Release all cached SMPL-X model instances from GPU memory.
+
+    Each training sequence may have a different (B*T_chunk*P) batch size,
+    so without clearing the cache accumulates one model instance per unique
+    batch size seen — each instance holds GPU memory.  Call this once per
+    training step (after backward) to keep the cache at most one entry.
+    """
+    _smplx_cache.clear()
+
+
 def get_smplx_vertices(pose: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
     """
     Forward pass through SMPLX model to get vertices.

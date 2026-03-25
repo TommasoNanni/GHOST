@@ -15,6 +15,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from fusion.metric import MetricCollection
+from utilities.smplx_utilities import get_smplx_joints, clear_smplx_cache
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ class Trainer:
         use_wandb: bool = False,
         dtype: torch.dtype | None = None,
         prediction_save_path: str | None = None,
+        smplx_chunk_size: int = 32,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.dtype = dtype
@@ -110,6 +112,7 @@ class Trainer:
         self.metric_fn = metric_fn
         self.use_wandb = use_wandb
         self.prediction_save_path = Path(prediction_save_path) if prediction_save_path else None
+        self.smplx_chunk_size = smplx_chunk_size
 
         if self.metrics is not None and self.metric_fn is None:
             raise ValueError("metrics provided but metric_fn is None. "
@@ -336,6 +339,7 @@ class Trainer:
                 # Training step
                 with torch.amp.autocast('cuda', enabled=self.use_amp):
                     preds = self._forward(inputs)
+                    preds = self._append_smplx_joints(preds)
                     step_losses = {name: fn(preds, targets) for name, (fn, _) in self.losses.items()}
                 total_loss: torch.Tensor = torch.stack(
                     [w * step_losses[n] for n, (_, w) in self.losses.items()]
@@ -355,11 +359,13 @@ class Trainer:
                         nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
                     self.optimizer.step()
 
+                clear_smplx_cache()
                 self._step += 1
             else:
                 # Validation step
                 with torch.no_grad(), torch.amp.autocast('cuda', enabled=self.use_amp):
                     preds = self._forward(inputs)
+                    preds = self._append_smplx_joints(preds)
                     step_losses = {name: fn(preds, targets) for name, (fn, _) in self.losses.items()}
                     total_loss = torch.stack(
                         [w * step_losses[n] for n, (_, w) in self.losses.items()]
@@ -372,6 +378,10 @@ class Trainer:
             detached = {k: v.item() for k, v in step_losses.items()}
             detached["total"] = total_loss.item()
             acc.update(detached)
+
+            del preds, step_losses, total_loss
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
 
             # log every step
             pbar.set_postfix({k: f"{v:.4f}" for k, v in detached.items()}
@@ -396,6 +406,28 @@ class Trainer:
         if isinstance(inputs, (list, tuple)):
             return self.model(*inputs)
         return self.model(inputs)
+
+    def _append_smplx_joints(self, preds: Any) -> Any:
+        """Compute SMPL-X joints once and append as preds[7].
+
+        Both EpipolarLoss and BoneLengthLoss need world-frame joint positions.
+        Computing them here (once per step) instead of once per loss × camera-pair
+        reduces SMPL-X calls from K*(K-1)/2 * T/chunk to T/chunk.
+
+        joints_world: (B, T, P, Jsmplx, 3) — pelvis-centred + body_transl_world.
+        """
+        pose_aggr, shape_aggr, _, body_transl_world = preds[:4]
+        B, T, P = pose_aggr.shape[:3]
+        chunks = []
+        for t0 in range(0, T, self.smplx_chunk_size):
+            t1 = min(t0 + self.smplx_chunk_size, T)
+            t_chunk = t1 - t0
+            shape_chunk = shape_aggr.unsqueeze(1).expand(B, t_chunk, P, 10)
+            j = get_smplx_joints(pose_aggr[:, t0:t1], shape_chunk)          # (B, t_chunk, P, Jsmplx, 3)
+            j = j + body_transl_world[:, t0:t1].unsqueeze(-2)
+            chunks.append(j)
+        joints_world = torch.cat(chunks, dim=1)                              # (B, T, P, Jsmplx, 3)
+        return (*preds, joints_world)
 
     def _unpack_batch(self, batch: Any) -> tuple[Any, Any]:
         """

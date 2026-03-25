@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.fusion_module import SSTNetwork
+from fusion.fusion_module import SSTNetwork, WindowedTemporalAttention
 from fusion.loss import (
     BoneLengthconsistencyLoss,
     CameraMSELoss,
@@ -55,6 +55,10 @@ SCENES_ROOT = Path("test_outputs/rich10_segmentation_test")
 SKIP_SCENES: list[str] = [
     "ParkingLot2_008_pushup2",
     "Pavallion_003_018_tossball",
+    "ParkingLot2_008_pushup2",
+    "ParkingLot2_015_pushup1",
+    "ParkingLot1_002_burpee3",
+    "Pavallion_013_yoga2",
 ]
 # Last N scenes (alphabetically) are used for validation, rest for training.
 NUM_VAL_SCENES = 2
@@ -160,6 +164,15 @@ def main():
     )
     logger.info("\n" + model.summary())
 
+    # flex_attention requires torch.compile to use its sparse backward pass.
+    # Without it, the backward falls back to a dense O(T²) implementation that
+    # OOMs on long sequences (T=1157 tried to allocate 12.95 GiB).
+    # We compile only the LocalWindowTemporalAttention layers (not the whole model)
+    # to avoid breaking the cross-attention modules which fail with full compile.
+    for module in model.modules():
+        if isinstance(module, WindowedTemporalAttention):
+            module.forward = torch.compile(module.forward, dynamic=True)
+
     # ── Optimizer & scheduler ─────────────────────────────────────────────────
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     if scheduler_name == "cosine":
@@ -203,52 +216,71 @@ def main():
         RRA(threshold=15.0), CCA(threshold=15.0), ScaledCCA(threshold=15.0),
     ])
 
+    METRIC_STRIDE = 8  # evaluate every Nth frame to keep SMPL-X memory bounded
+
     def metric_fn(preds, targets, mc):
         pose_aggr, shape_aggr, camera_pred, _ = preds[:4]
         B, T, P = pose_aggr.shape[:3]
         K = camera_pred.shape[2]
-        t_mid = T // 2
+
+        # Subsample time axis to bound the two SMPL-X forward passes below
+        t_idx = torch.arange(0, T, METRIC_STRIDE, device=pose_aggr.device)
 
         with torch.no_grad():
-            shape_exp  = shape_aggr.unsqueeze(1).expand(B, T, P, 10)
-            pred_joints = get_smplx_joints(
-                pose_aggr.float(), shape_exp.float()
-            ).cpu().numpy()[..., :55, :]
-            gt_joints = get_smplx_joints(
-                targets["pose"].float(), targets["shape"].float()
-            ).cpu().numpy()[..., :55, :]
+            pose_sub   = pose_aggr[:, t_idx].float()
+            shape_sub  = shape_aggr.unsqueeze(1).expand(B, len(t_idx), P, 10).float()
+            pred_joints = get_smplx_joints(pose_sub, shape_sub).cpu().numpy()[..., :55, :]
 
-            pred_rotmats = rotation_6d_to_matrix(pose_aggr.float()).cpu().numpy()
-            gt_rotmats   = rotation_6d_to_matrix(targets["pose"].float()).cpu().numpy()
+            gt_pose_sub  = targets["pose"][:, t_idx].float()
+            gt_shape_sub = targets["shape"][:, t_idx].float()
+            gt_joints = get_smplx_joints(gt_pose_sub, gt_shape_sub).cpu().numpy()[..., :55, :]
 
+            pred_rotmats = rotation_6d_to_matrix(pose_aggr[:, t_idx].float()).cpu().numpy()
+            gt_rotmats   = rotation_6d_to_matrix(targets["pose"][:, t_idx].float()).cpu().numpy()
+
+            T_sub = len(t_idx)
             cam_rot_w2c    = quaternion_to_matrix(
-                camera_pred[..., :4].float().reshape(-1, 4)
-            ).reshape(B, T, K, 3, 3).cpu().numpy()
-            cam_transl_w2c = camera_pred[..., 4:7].float().cpu().numpy()
+                camera_pred[:, t_idx, :, :4].float().reshape(-1, 4)
+            ).reshape(B, T_sub, K, 3, 3).cpu().numpy()
+            cam_transl_w2c = camera_pred[:, t_idx, :, 4:7].float().cpu().numpy()
 
             gt_cam_rot_w2c    = quaternion_to_matrix(
-                targets["camera"][..., :4].float().reshape(-1, 4)
-            ).reshape(B, T, K, 3, 3).cpu().numpy()
-            gt_cam_transl_w2c = targets["camera"][..., 4:7].float().cpu().numpy()
+                targets["camera"][:, t_idx, :, :4].float().reshape(-1, 4)
+            ).reshape(B, T_sub, K, 3, 3).cpu().numpy()
+            gt_cam_transl_w2c = targets["camera"][:, t_idx, :, 4:7].float().cpu().numpy()
 
         cam_centres    = -np.einsum("...ji,...j->...i", cam_rot_w2c,    cam_transl_w2c)
         gt_cam_centres = -np.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
 
-        gt_valid_np = targets["gt_valid"].cpu().numpy() if "gt_valid" in targets else None
+        gt_valid_np = targets["gt_valid"][:, t_idx].cpu().numpy() if "gt_valid" in targets else None
 
+        # cam_valid: cameras where GT quaternion is a real rotation (norm > 0.5).
+        # Cameras with no person detection stay at zero quaternion → excluded.
+        cam_valid_np = (
+            targets["camera"][:, t_idx, :, :4].float().norm(dim=-1) > 0.5
+        ).cpu().numpy()  # (B, T_sub, K)
+
+        t_mid_sub = T_sub // 2
         for b in range(B):
-            Cp = cam_centres[b, t_mid]
-            Cg = gt_cam_centres[b, t_mid]
-            Rp = cam_rot_w2c[b, t_mid]
-            Rg = gt_cam_rot_w2c[b, t_mid]
-            mc["TE"].update(Cp, Cg)
-            mc["s-TE"].update(Cp, Cg)
-            mc["CCA@15"].update(Cp, Cg)
-            mc["s-CCA@15"].update(Cp, Cg)
-            mc["AE"].update(Rp, Rg)
-            mc["RRA@15"].update(Rp, Rg)
+            valid = cam_valid_np[b, t_mid_sub]  # (K,) bool
+            Cp = cam_centres[b, t_mid_sub][valid]
+            Cg = gt_cam_centres[b, t_mid_sub][valid]
+            Rp = cam_rot_w2c[b, t_mid_sub][valid]
+            Rg = gt_cam_rot_w2c[b, t_mid_sub][valid]
+            # umeyama requires ≥3 cameras and non-degenerate predicted positions.
+            # At early training the camera head outputs near-identity for all cameras
+            # → all Cp collapse to ~same point → covariance ≈ 0 → SVD fails.
+            pred_spread = float(np.linalg.norm(Cp - Cp.mean(0), axis=-1).max()) if valid.sum() >= 3 else 0.0
+            if valid.sum() >= 3 and pred_spread > 1e-3:
+                mc["TE"].update(Cp, Cg)
+                mc["s-TE"].update(Cp, Cg)
+                mc["CCA@15"].update(Cp, Cg)
+                mc["s-CCA@15"].update(Cp, Cg)
+            if valid.sum() >= 1:
+                mc["AE"].update(Rp, Rg)
+                mc["RRA@15"].update(Rp, Rg)
 
-            for t in range(T):
+            for t in range(T_sub):
                 if gt_valid_np is not None and not gt_valid_np[b, t].any():
                     continue
                 pj = pred_joints[b, t]

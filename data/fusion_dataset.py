@@ -265,9 +265,7 @@ class FusionDatapoint(Dataset, ABC):
         transl_out : writable view into targets["trans"][t, cam_idx, person_slot]
         """
 
-    # ------------------------------------------------------------------
     # Internal book-keeping (not overridden)
-    # ------------------------------------------------------------------
 
     def _compute_frame_range(self) -> None:
         """Determine [start, end) across all cameras and people."""
@@ -309,6 +307,7 @@ class FusionDatapoint(Dataset, ABC):
         body_transl_cam = np.zeros((T, K, P, 3), dtype=np.float32)  # body root in each camera's local frame
         shape = np.zeros((T, K, P, 10), dtype=np.float32)
         camera = np.zeros((T, K, 8), dtype=np.float32)
+        camera[:, :, 0] = 1.0  # identity quaternion (w=1); prevents NaN in model forward for undetected cameras
         joint_mask = np.zeros((T, K, P, J), dtype=np.float32)
         # Binary presence mask: 1 when person p was detected in camera k at frame t.
         # Stored as bool to save memory; shape (T, K, P).
@@ -319,6 +318,9 @@ class FusionDatapoint(Dataset, ABC):
         gt_body_pose = np.zeros_like(pose)                              # ground-truth body pose (T, K, P, J, 6)
         gt_body_shape = np.zeros_like(shape)                            # ground-truth SMPL-X betas (T, K, P, 10)
         gt_camera = np.zeros_like(camera)
+        # gt_camera stays at zero for cameras not filled by build_gt_targets.
+        # Zero quaternion (norm=0) is the "no GT" sentinel used by cam_valid
+        # checks (norm > 0.5) in all losses to skip unsupervised cameras.
         gt_kp3d = np.zeros_like(kp3d)
         gt_body_transl_world = np.zeros((T, K, P, 3), dtype=np.float32)  # ground-truth body root in world (cam-0) frame
 
@@ -371,9 +373,11 @@ class FusionDatapoint(Dataset, ABC):
                         )
 
                     # --- Translation ---
+                    # World frame translation
                     tr = pdata.get("smplx_transl")
                     if tr is not None:
                         translation[t, k, p_slot] = tr[li]
+                    # camera frame translation, the SAM3D output
                     pct = pdata.get("pred_cam_t")
                     if pct is not None:
                         body_transl_cam[t, k, p_slot] = pct[li]
@@ -435,15 +439,12 @@ class FusionDatapoint(Dataset, ABC):
             gt_kp3d = kp3d.copy()
 
         inputs = {
-            # pose_cam: joint 0 (root orient) in camera k's own frame;
-            # joints 1-54 are local kinematic rotations, identical to pose.
-            "pose": torch.from_numpy(pose_cam),
-            # body_transl_cam_in: body root position in camera k's local frame (from pred_cam_t).
-            "body_transl_cam_in": torch.from_numpy(body_transl_cam),
+            "pose": torch.from_numpy(pose_cam),                      # joint 0 (root orient) in camera k's own frame;
+            "body_transl_cam_in": torch.from_numpy(body_transl_cam), # body_transl_cam_in: body root position in camera k's local frame (from pred_cam_t).
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),
-            "person_mask": torch.from_numpy(person_mask),  # (T, K, P) bool
+            "person_mask": torch.from_numpy(person_mask),            # (T, K, P) bool
         }
         # gt_valid: True for frames that have real GT annotations.
         # Frames with all-zero gt_body_transl_world have no RICH annotation and must be
@@ -455,10 +456,10 @@ class FusionDatapoint(Dataset, ABC):
         targets = {
             "pose": torch.from_numpy(gt_body_pose[:, 0]),           # [T, P, J, 6]  ground-truth body pose
             "shape": torch.from_numpy(gt_body_shape[:, 0]),         # [T, P, 10]    ground-truth SMPL-X betas
-            "camera": torch.from_numpy(gt_camera),                   # [T, K, 8]
+            "camera": torch.from_numpy(gt_camera),                  # [T, K, 8]
             "keypoints_3d": torch.from_numpy(gt_kp3d[:, 0]),        # [T, P, 70, 3]
             "trans": torch.from_numpy(gt_body_transl_world_cam0),   # [T, P, 3]     ground-truth body root in world frame
-            "gt_valid": torch.from_numpy(gt_valid),                  # [T, P] bool
+            "gt_valid": torch.from_numpy(gt_valid),                 # [T, P] bool
         }
         return inputs, targets
 
