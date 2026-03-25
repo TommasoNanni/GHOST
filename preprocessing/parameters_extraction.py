@@ -536,65 +536,29 @@ class BodyParameterEstimator:
                 dtype=np.float32,
             )
 
-            # Build per-person binary mask crops for masked pooling in the hook.
-            # For each person we extract the region of frame_mask corresponding to
-            # their padded bbox and binarise it (foreground = pixels labelled with
-            # that person's ID).  None is stored when the global mask is unavailable.
-            _mask_crops_for_reid: list[np.ndarray | None] = []
-            for (_pid, _px1, _py1, _px2, _py2, *_rest) in valid_persons:
-                if frame_mask is not None:
-                    _crop = (frame_mask[_py1:_py2, _px1:_px2] == _pid).astype(np.float32)
-                    _mask_crops_for_reid.append(_crop)
-                else:
-                    _mask_crops_for_reid.append(None)
-
-            # Hook into the backbone to capture visual features for re-ID.
-            # The backbone runs first for the body pass (N_persons crops); we only
-            # want that first call — hand passes use different crops.
-            # Features are computed with masked average pooling: only foreground
-            # tokens (pixels inside the SAM segmentation mask) contribute to the
-            # descriptor, so background clutter is excluded.
+            # Hook into the DINOv3 ViT norm layer to capture the CLS token for re-ID.
+            # Dinov3Backbone.forward() calls encoder.get_intermediate_layers(..., norm=True)
+            # which applies encoder.norm to the full token sequence (B, N_tokens, D) before
+            # slicing off patch tokens.  Token 0 is always the CLS token in DINOv2/DINOv3 ViTs.
+            # We hook here (rather than on backbone itself) because the backbone's forward()
+            # discards the CLS token before returning, exposing only the patch tokens.
+            # We guard on _hook_feats to ignore subsequent calls from hand passes.
             _hook_feats: list[np.ndarray] = []
 
             def _backbone_hook(_module, _input, output):
                 if _hook_feats:   # ignore subsequent hand-branch calls
                     return
-                emb = output[-1] if isinstance(output, tuple) else output
-                emb_f = emb.float()  # (N, C, fH, fW)
-                fH, fW = emb_f.shape[-2], emb_f.shape[-1]
-                _erode_kernel = np.ones((3, 3), dtype=np.uint8)
-                feats = []
-                for _i in range(emb_f.shape[0]):
-                    _crop_mask = (
-                        _mask_crops_for_reid[_i]
-                        if _i < len(_mask_crops_for_reid)
-                        else None
-                    )
-                    _use_gap = True
-                    if _crop_mask is not None and _crop_mask.any():
-                        # Resize binary mask to backbone feature-map resolution.
-                        _m = cv2.resize(_crop_mask, (fW, fH), interpolation=cv2.INTER_NEAREST)
-                        # Erode to remove boundary tokens that straddle the
-                        # foreground/background edge.
-                        _m_eroded = cv2.erode(_m, _erode_kernel)
-                        # Fall back to uneroded mask if erosion removes everything.
-                        _m_use = _m_eroded if _m_eroded.any() else _m
-                        _m_t = torch.from_numpy(_m_use).to(emb_f.device).unsqueeze(0)  # (1, fH, fW)
-                        _count = _m_t.sum().clamp(min=1.0)
-                        _f = (emb_f[_i] * _m_t).sum(dim=(-2, -1)) / _count
-                        _use_gap = False
-                    if _use_gap:
-                        _f = emb_f[_i].mean(dim=(-2, -1))
-                    _f = _f / _f.norm().clamp(min=1e-8)
-                    feats.append(_f.detach().cpu().numpy())
-                _hook_feats.append(np.stack(feats, axis=0))
+                # output: (N_persons, N_tokens, D) — token 0 is CLS
+                cls = output[:, 0, :].float()  # (N_persons, D)
+                cls = cls / cls.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+                _hook_feats.append(cls.detach().cpu().numpy())
 
             try:
-                _hook_handle = estimator.model.backbone.register_forward_hook(
+                _hook_handle = estimator.model.backbone.encoder.norm.register_forward_hook(
                     _backbone_hook
                 )
             except AttributeError:
-                logging.error("estimator  doesn't have a model.backbone.register_forward_hook method")
+                logging.error("estimator doesn't have a model.backbone.encoder.norm module")
                 _hook_handle = None
 
             try:
