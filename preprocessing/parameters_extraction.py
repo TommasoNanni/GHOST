@@ -1151,8 +1151,8 @@ class BodyParameterEstimator:
                 # Falls back to the plain median when confidence is unavailable.
                 shape_feat: np.ndarray | None = None
                 with np.load(str(npz_path)) as pdata:
-                    if "shape_params" in pdata:
-                        shape_vecs = pdata["shape_params"]  # (N, 10)
+                    if "smplx_betas" in pdata:
+                        shape_vecs = pdata["smplx_betas"]  # (N, 10)
                         if len(shape_vecs) > 0:
                             conf = pdata.get("pred_joint_confidence")  # (N, J) or None
                             if conf is not None and len(conf) == len(shape_vecs):
