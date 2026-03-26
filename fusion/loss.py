@@ -425,7 +425,7 @@ class TriangulationLoss(Loss):
         rot_loss   = body_transl_world_per_cam.new_zeros([])
         num_pairs  = 0
 
-        from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_quaternion
+        from pytorch3d.transforms import rotation_6d_to_matrix
 
         for i in range(K):
             for j in range(i + 1, K):
@@ -445,10 +445,13 @@ class TriangulationLoss(Loss):
 
                 R_i = rotation_6d_to_matrix(body_orient_world_per_cam[:, :, i].reshape(-1, 6))  # (B*T*P, 3, 3)
                 R_j = rotation_6d_to_matrix(body_orient_world_per_cam[:, :, j].reshape(-1, 6))
-                q_i = matrix_to_quaternion(R_i)
-                q_j = matrix_to_quaternion(R_j)
-                dot = torch.clamp(torch.sum(q_i * q_j, dim=-1), -1.0 + 1e-7, 1.0 - 1e-7)
-                geodesic = 1 - torch.abs(dot)  # (B*T*P,)
+                # Trace-based geodesic: cos(theta) = (trace(R_i @ R_j^T) - 1) / 2.
+                # The old code used matrix_to_quaternion whose sqrt gradient is 1/(2√x) → ∞
+                # at near-identity rotations (common early in training).
+                # The gradient of trace(R_i @ R_j^T) w.r.t. R_i is R_j — constant, no singularity.
+                R_rel     = torch.bmm(R_i, R_j.transpose(-2, -1))
+                cos_angle = ((R_rel.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2).clamp(-1 + 1e-7, 1 - 1e-7)
+                geodesic  = (1 - cos_angle) / 2   # in [0, 1]; 0 = identical, 1 = 180° apart
                 if mask is not None:
                     rot_loss = rot_loss + (geodesic * mask.reshape(-1)).sum() / n
                 else:
@@ -572,16 +575,19 @@ class CameraMSELoss(Loss):
         camera_pred_v = camera_pred[cam_valid]  # (N, 8)
         cam_gt_v      = cam_gt[cam_valid]        # (N, 8)
 
-        cam_rot_w2c    = quaternion_to_matrix(camera_pred_v[..., :4])
-        cam_transl_w2c = camera_pred_v[..., 4:7]
-        gt_cam_rot_w2c    = quaternion_to_matrix(cam_gt_v[..., :4])
+        cam_transl_w2c    = camera_pred_v[..., 4:7]
+        gt_cam_rot_w2c    = quaternion_to_matrix(cam_gt_v[..., :4])  # needed for scene_scale below
         gt_cam_transl_w2c = cam_gt_v[..., 4:7]
 
-        q      = matrix_to_quaternion(cam_rot_w2c)
-        q_gt   = matrix_to_quaternion(gt_cam_rot_w2c)
+        # Compare quaternions directly — no matrix round-trip.
+        # The old code did quat → R → quat (via quaternion_to_matrix then matrix_to_quaternion)
+        # to "clean up" the predicted quaternion, but matrix_to_quaternion uses sqrt whose
+        # gradient is 1/(2√x) → ∞ at near-identity rotations.  F.normalize is sufficient.
+        q    = F.normalize(camera_pred_v[..., :4], dim=-1)
+        q_gt = F.normalize(cam_gt_v[..., :4], dim=-1)
 
-        dot    = torch.clamp(torch.sum(q * q_gt, dim=-1), -1.0 + 1e-7, 1.0 - 1e-7)
-        rot_loss   = (1 - torch.abs(dot)).mean()
+        dot      = torch.clamp(torch.sum(q * q_gt, dim=-1), -1.0 + 1e-7, 1.0 - 1e-7)
+        rot_loss = (1 - torch.abs(dot)).mean()
 
         # Normalise by squared scene scale so trans_loss lives in [0, 1] like rot_loss.
         # gt_cam_rot_w2c: (N, 3, 3), gt_cam_transl_w2c: (N, 3) → centres: (N, 3)

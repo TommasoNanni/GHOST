@@ -97,6 +97,11 @@ class FusionDatapoint(Dataset, ABC):
         self._cameras: list[dict[str, Any]] = []
         # _gt[cam_idx][person_id] = {arbitrary GT data}
         self._gt: list[dict[int, dict[str, np.ndarray]]] = []
+        # Ghost person IDs that were matched to a RICH GT person.
+        # None = inference mode (no GT loaded) → all ghost persons are included.
+        # Set[int] = training mode → only these PIDs enter the batch; background
+        # people (no GT annotation) are silently discarded.
+        self._gt_matched_ghost_pids: set[int] | None = None
 
         self.load_body_data(**kwargs)       # fills the _raw and the _cam_dirs fields
         self.load_cameras(**kwargs)         # fills the _cameras with predicted cameras
@@ -111,7 +116,10 @@ class FusionDatapoint(Dataset, ABC):
             )
 
         self.max_persons: int = (
-            max(len(cam) for cam in self._raw) if self._raw else 0
+            max(
+                sum(1 for pid in cam if self._gt_matched_ghost_pids is None or pid in self._gt_matched_ghost_pids)
+                for cam in self._raw
+            ) if self._raw else 0
         )
 
         self._frame_start: int = 0
@@ -282,7 +290,10 @@ class FusionDatapoint(Dataset, ABC):
     def _build_lookup(self) -> None:
         """Pre-build per-camera per-person frame -> local-npz-index maps."""
         for cam_idx, cam_persons in enumerate(self._raw):
-            pids = sorted(cam_persons.keys())
+            pids = [
+                pid for pid in sorted(cam_persons.keys())
+                if self._gt_matched_ghost_pids is None or pid in self._gt_matched_ghost_pids
+            ]
             self._pid_order.append(pids)
             cam_lookups: list[dict[int, int]] = []
             for pid in pids:
@@ -373,11 +384,9 @@ class FusionDatapoint(Dataset, ABC):
                         )
 
                     # --- Translation ---
-                    # World frame translation
                     tr = pdata.get("smplx_transl")
                     if tr is not None:
                         translation[t, k, p_slot] = tr[li]
-                    # camera frame translation, the SAM3D output
                     pct = pdata.get("pred_cam_t")
                     if pct is not None:
                         body_transl_cam[t, k, p_slot] = pct[li]
@@ -719,6 +728,8 @@ class RICHFusionDatapoint(FusionDatapoint):
         self._cameras = []
         self._gt_camera_vecs: list[np.ndarray] = []  # (8,) per camera
         valid_cam_indices: list[int] = []             # indices into self._cam_dirs with valid GT calibration
+
+        # STEP 1: Load GT cameras in rich world frame coordinates
         for i, cam_dir in enumerate(self._cam_dirs):
             # Extract camera number from directory name (e.g. "cam_10" → 10 → "010.xml")
             # rather than using the sequential index, which would give the wrong file
@@ -737,7 +748,7 @@ class RICHFusionDatapoint(FusionDatapoint):
                     from scipy.spatial.transform import Rotation as R
                     q_xyzw = R.from_matrix(ext[:3, :3]).as_quat()  # scipy [qx,qy,qz,qw]
                     vec = np.zeros(8, dtype=np.float32)
-                    vec[:4] = q_xyzw[[3, 0, 1, 2]]  # → pytorch3d [qw,qx,qy,qz]
+                    vec[:4] = q_xyzw[[3, 0, 1, 2]]  # pytorch3d [qw,qx,qy,qz]
                     vec[4:7] = ext[:3, 3]
                     intr = calib.get("intrinsics")
                     vec[7] = float(intr[0, 0]) if intr is not None else 1000.0
@@ -759,12 +770,13 @@ class RICHFusionDatapoint(FusionDatapoint):
             self._cam_dirs = [self._cam_dirs[i] for i in valid_cam_indices]
             self._raw      = [self._raw[i]      for i in valid_cam_indices]
 
+        # STEP 2: 
         # Re-express GT camera vectors relative to cam-0 so that they are in
         # the same frame as the body predictions (which are mapped to cam-0 in
         # _transform_to_world_frame).  The cam-0→cam-i relative transform is:
         #   R_rel = R_i @ R_0^T
         #   t_rel = t_i - R_rel @ t_0
-        # For i=0 this reduces to identity, as expected.
+
         ext0 = self._cameras[0].get("extrinsics") if self._cameras else None
         if ext0 is not None:
             from scipy.spatial.transform import Rotation as SciR
@@ -782,12 +794,15 @@ class RICHFusionDatapoint(FusionDatapoint):
                 self._gt_camera_vecs[i][:4] = q_rel_xyzw[[3, 0, 1, 2]].astype(np.float32)  # → pytorch3d [qw,qx,qy,qz]
                 self._gt_camera_vecs[i][4:7] = t_rel.astype(np.float32)
 
+        # STEP 3:
         # Load estimated camera poses from camera_alignment.npz (produced by
         # CameraAlignment.estimate in the preprocessing pipeline).
         # These are pairwise Kabsch-estimated transforms x_b = R @ x_a + t,
         # mapping joints in cam-a frame to joints in cam-b frame.
         # We chain each pair to cam-0 to get one cam-0→cam-i transform per camera,
         # stored in self._cameras[i]["estimated_extrinsics"] as a (3, 4) matrix.
+        # self._cameras[i] already contains the xml-parsed cameras in "exitrinsics"
+        # and "intrinsics" fields
         align_path = self.scene_dir / "camera_alignment.npz"
         if align_path.exists():
             from preprocessing.camera_alignment import CameraAlignment
@@ -824,7 +839,7 @@ class RICHFusionDatapoint(FusionDatapoint):
         scene_name = self.scene_dir.name
         gt_root = rich_data_root / "train_body" / scene_name
 
-        # gt_accum[person_id][field] = list of per-frame arrays
+        # gt_accum[person_id][field] = list of per-frame arrays with information
         gt_accum: dict[int, dict[str, list]] = {}
 
         if gt_root.is_dir():
@@ -867,113 +882,48 @@ class RICHFusionDatapoint(FusionDatapoint):
             for pid in gt_final
         }
 
-        # GT is world-space -- replicate the same dict across all cameras.
-        n_cams = max(len(self._cam_dirs), 1)
-        self._gt = [gt_final] * n_cams
+        # GT is world-space — no camera dimension needed. Single entry list keeps
+        # the same self._gt[0] indexing pattern used throughout the class.
+        self._gt = [gt_final]
 
-    # ------------------------------------------------------------------
-    # World-frame transform
-    # ------------------------------------------------------------------
 
     def _transform_to_world_frame(self) -> None:
-        """Re-express all body parameters in camera-0's coordinate frame.
+        """Re-express GT body parameters in camera-0's coordinate frame.
 
-        Camera-0 is treated as the world origin.  For each camera i the
-        extrinsic ``[R_i | t_i]`` maps true-world → cam-i.  The transform
-        to cam-0 (= world) is:
+        Camera-0 is our world origin. GT (RICH) is in true world coordinates,
+        so it maps as:
+            x_cam0 = R_0 @ x_true_world + t_0
 
-            x_world = R_0 @ R_i^T @ (x_cami - t_i) + t_0
-
-        For rotations (axis-angle):
-
-            R_body_world = R_0 @ R_i^T @ R_body_cami
-
-        GT (RICH) is in true world coordinates so it maps as:
-
-            x_world = R_0 @ x_true_world + t_0
-
-        Fields transformed in ``self._raw``:
-            ``smplx_global_orient``, ``smplx_transl``, ``pred_keypoints_3d``
+        Predictions stay in their native cam-i frame. The cam-i → cam-0
+        transform is applied locally inside _match_persons_to_gt() where it
+        is actually needed (person proximity matching).
 
         Fields transformed in ``self._gt``:
             ``global_orient``, ``transl``
         """
         from scipy.spatial.transform import Rotation as SciR
 
-        if not self._cameras:
+        if not self._cameras or not self._gt:
             return
 
-        ext0 = self._cameras[0].get("extrinsics")   # (3, 4) world→cam0
+        ext0 = self._cameras[0].get("extrinsics")  # (3, 4) true-world → cam-0
         if ext0 is None:
             return
-        R0 = ext0[:3, :3].astype(np.float64)        # (3, 3)
-        t0 = ext0[:3, 3].astype(np.float64)         # (3,)
+        R0 = ext0[:3, :3].astype(np.float64)  # true world → cam-0
+        t0 = ext0[:3, 3].astype(np.float64)
 
-        # ---- Predictions: cam-i → cam-0 --------------------------------
-        for cam_idx, (cam_calib, persons) in enumerate(
-            zip(self._cameras, self._raw)
-        ):
-            ext_i = cam_calib.get("extrinsics")
-            if ext_i is None:
-                continue
-            R_i = ext_i[:3, :3].astype(np.float64)
-            t_i = ext_i[:3, 3].astype(np.float64)
-
-            # Affine: x_world = R_i2w @ x_cami + d_i
-            R_i2w = R0 @ R_i.T             # (3, 3)
-            d_i = t0 - R_i2w @ t_i        # (3,)
-
-            for pdata in persons.values():
-                # smplx_global_orient: (N, 3) axis-angle
-                go = pdata.get("smplx_global_orient")
-                if go is not None:
-                    # Snapshot camera-frame orient before overwriting with world frame.
-                    # Used as frozen KV in cam→pose cross-attention.
-                    pdata["smplx_global_orient_cam"] = go.copy()
-
-                    R_body = SciR.from_rotvec(
-                        go.astype(np.float64)
-                    ).as_matrix()                              # (N, 3, 3)
-                    R_body_w = R_i2w[None] @ R_body            # (N, 3, 3)
-                    pdata["smplx_global_orient"] = (
-                        SciR.from_matrix(R_body_w)
-                        .as_rotvec()
-                        .astype(np.float32)
-                    )
-
-                # smplx_transl: (N, 3)
-                tr = pdata.get("smplx_transl")
-                if tr is not None:
-                    pdata["smplx_transl"] = (
-                        tr.astype(np.float64) @ R_i2w.T + d_i
-                    ).astype(np.float32)
-
-                # pred_keypoints_3d: (N, J, 3)
-                # Note: assumes keypoints are in absolute camera space
-                # (not root-relative).  Adjust if SAM3D outputs root-relative.
-                kp = pdata.get("pred_keypoints_3d")
-                if kp is not None:
-                    pdata["pred_keypoints_3d"] = (
-                        kp.astype(np.float64) @ R_i2w.T + d_i
-                    ).astype(np.float32)
-
-        # ---- GT: true world → cam-0 ------------------------------------
-        # self._gt is a list of references to the same dict object, so
-        # transforming self._gt[0] covers all camera slots at once.
-        if not self._gt:
-            return
-        gt_dict = self._gt[0]   # {pid: {field: array}}
-
+        # self._gt is a list of references to the same dict, so transforming
+        # self._gt[0] covers all camera slots at once.
+        gt_dict = self._gt[0]  # {pid: {field: array}}
         for gt in gt_dict.values():
             # global_orient: (N, 3) axis-angle in true world space
             go = gt.get("global_orient")
             if go is not None:
                 R_body = SciR.from_rotvec(
                     go.astype(np.float64).reshape(-1, 3)
-                ).as_matrix()                                  # (N, 3, 3)
-                R_body_w = R0[None] @ R_body                   # (N, 3, 3)
+                ).as_matrix()                          # (N, 3, 3)
                 gt["global_orient"] = (
-                    SciR.from_matrix(R_body_w)
+                    SciR.from_matrix(R0[None] @ R_body)
                     .as_rotvec()
                     .astype(np.float32)
                     .reshape(go.shape)
@@ -1044,11 +994,18 @@ class RICHFusionDatapoint(FusionDatapoint):
         if not rich_pids:
             return
 
-        # Collect world-frame translations for every ghost person across ALL cameras.
-        # After _transform_to_world_frame() all cameras share the same world frame,
-        # so we can aggregate across cameras to get a robust position estimate and
-        # to catch persons that are only visible in non-cam-0 cameras.
-        # ghost_transl[ghost_pid][frame_idx] = mean world-translation across cameras
+        # Collect cam-0-frame translations for every ghost person across ALL cameras.
+        # Predictions are in cam-i frame; transform locally here using GT extrinsics.
+        # Using GT cameras for matching is acceptable: this is a one-time preprocessing
+        # step, not model input.
+        if not self._cameras:
+            return
+        ext0 = self._cameras[0].get("extrinsics")  # (3, 4) true-world → cam-0
+        if ext0 is None:
+            return
+        R0 = ext0[:3, :3].astype(np.float64)
+        t0 = ext0[:3, 3].astype(np.float64)
+
         all_ghost_pids: set[int] = set()
         for cam_persons in self._raw:
             all_ghost_pids.update(cam_persons.keys())
@@ -1056,16 +1013,24 @@ class RICHFusionDatapoint(FusionDatapoint):
         if not ghost_pids:
             return
 
-        # accum[ghost_pid][frame_idx] = list of (3,) translations (one per camera)
+        # accum[ghost_pid][frame_idx] = list of (3,) translations in cam-0 frame (one per camera)
         accum: dict[int, dict[int, list[np.ndarray]]] = {gpid: {} for gpid in ghost_pids}
-        for cam_persons in self._raw:
+        for cam_idx, cam_persons in enumerate(self._raw):
+            ext_i = self._cameras[cam_idx].get("extrinsics") if cam_idx < len(self._cameras) else None
+            if ext_i is None:
+                continue
+            R_i = ext_i[:3, :3].astype(np.float64)
+            t_i = ext_i[:3, 3].astype(np.float64)
+            R_i2w = R0 @ R_i.T       # cam-i → cam-0 rotation
+            d_i   = t0 - R_i2w @ t_i  # cam-i → cam-0 translation offset
             for gpid, pdata in cam_persons.items():
-                tr = pdata.get("smplx_transl")   # (N, 3) world frame
+                tr = pdata.get("smplx_transl")   # (N, 3) cam-i frame
                 fi = pdata.get("frame_indices")  # (N,)
                 if tr is None or fi is None:
                     continue
+                tr_cam0 = (tr.astype(np.float64) @ R_i2w.T + d_i).astype(np.float32)
                 for i, f in enumerate(fi):
-                    accum[gpid].setdefault(int(f), []).append(tr[i])
+                    accum[gpid].setdefault(int(f), []).append(tr_cam0[i])
 
         # Average across cameras per frame
         ghost_transl: dict[int, dict[int, np.ndarray]] = {}
@@ -1116,15 +1081,15 @@ class RICHFusionDatapoint(FusionDatapoint):
             rich_to_ghost[rpid]: self._gt_frame_lut[rpid]
             for rpid in rich_to_ghost
         }
-        n_cams = len(self._gt)
-        self._gt = [new_gt_dict] * n_cams
+        self._gt = [new_gt_dict]
         self._gt_frame_lut = new_lut
+        self._gt_matched_ghost_pids = set(new_gt_dict.keys())
 
         unmatched = set(ghost_pids) - set(rich_to_ghost.values())
         if unmatched:
             logger.info(
                 f"Ghost persons {sorted(unmatched)} have no GT match "
-                f"— targets will be zero (masked by gt_valid)"
+                f"— excluded from batch"
             )
 
     def build_gt_targets(
@@ -1230,11 +1195,6 @@ class RICHFusionDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         return self._datapoints[idx]._build_sample()
-
-
-# ======================================================================
-# Helper
-# ======================================================================
 
 def build_fusion_dataloader(
     dataset_type: str,

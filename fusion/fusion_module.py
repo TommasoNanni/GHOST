@@ -661,31 +661,43 @@ class SSTOutputHeads(nn.Module):
 
     def forward(
         self,
-        spatial_stream: torch.Tensor,    # (B, T, K, P, 2, D)
-        kin_stream: torch.Tensor,        # (B, T, K, P, 54, D)
-        shape_stream: torch.Tensor,      # (B, T, K, P, D)
-        camera_stream: torch.Tensor,     # (B, T, K, D)
-        pose_input: torch.Tensor,        # (B, T, K, P, 55, 6) — joint 0 in camera frame
+        spatial_stream: torch.Tensor,     # (B, T, K, P, 2, D)
+        kin_stream: torch.Tensor,         # (B, T, K, P, 54, D)
+        shape_stream: torch.Tensor,       # (B, T, K, P, D)
+        camera_stream: torch.Tensor,      # (B, T, K, D)
+        pose_input: torch.Tensor,         # (B, T, K, P, 55, 6) — joint 0 in camera frame
         body_transl_cam_in: torch.Tensor, # (B, T, K, P, 3)     — in camera frame
-        camera_input: torch.Tensor,      # (B, T, K, 8)
-        shape_input: torch.Tensor,       # (B, T, K, P, 10) raw input betas
-        person_visible: torch.Tensor,    # (B, T, K, P) float: 1 = visible, 0 = absent
+        camera_input: torch.Tensor,       # (B, T, K, 8)
+        shape_input: torch.Tensor,        # (B, T, K, P, 10) raw input betas
+        person_visible: torch.Tensor,     # (B, T, K, P) float: 1 = visible, 0 = absent
         B: int, T: int, K: int, P: int, J: int, D: int,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         from pytorch3d.transforms import quaternion_to_matrix, rotation_6d_to_matrix
 
         BTK = B * T * K
 
-        # Extract camera rotation matrices once — used for both root and translation.
-        # Convention: v_cam = cam_rot_w2c @ v_world + cam_transl_w2c
-        cam_rot_w2c   = quaternion_to_matrix(camera_input[..., :4].reshape(BTK, 4))  # (BTK, 3, 3)
-        cam_transl_w2c = camera_input[..., 4:7]                                       # (B, T, K, 3)
-
         # Confidence weights for the mean: (B, T, K, P) → (B, T, P, 1) denominator.
         w_sum = person_visible.sum(dim=2, keepdim=True).clamp(min=1e-8)  # (B, T, 1, P)
-        w_sum = w_sum.squeeze(2).unsqueeze(-1)                            # (B, T, P, 1)
+        w_sum = w_sum.squeeze(2).unsqueeze(-1)                           # (B, T, P, 1)
 
-        # Kinematic joints 1-54
+        # STEP 1: Camera — decoded first so the predicted extrinsics are used for back-projection.
+        camera = self.camera_norm(camera_stream)
+        camera_flat = camera.reshape(BTK, D)
+        rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
+        # Camera 0 is the world origin — anchor it to identity rotation + zero translation.
+        rot_trans_delta[:, :, 0, :] = 0.0
+        # Focal length (position 7) is the GT focal from calibration — pass through unchanged.
+        camera_out = torch.cat([
+            camera_input[..., :7] + rot_trans_delta,
+            camera_input[..., 7:8],
+        ], dim=-1)
+
+        # Extract rotation and translation from the predicted camera.
+        # Convention: v_cam = cam_rot_w2c @ v_world + cam_transl_w2c
+        cam_rot_w2c    = quaternion_to_matrix(camera_out[..., :4].reshape(BTK, 4))  # (BTK, 3, 3)
+        cam_transl_w2c = camera_out[..., 4:7]                                       # (B, T, K, 3)
+
+        # STEP 2: Kinematic joints 1-54
         # Camera-independent local rotations: pool across K then decode delta.
         kin = self.pose_norm(kin_stream)                          # (B, T, K, P, 54, D)
         kin_pooled = self.pose_pool(kin, k_dim=2)                 # (B, T, P, 54, D)
@@ -693,9 +705,9 @@ class SSTOutputHeads(nn.Module):
             kin_pooled.reshape(B * T * P * 54, D)
         ).reshape(B, T, P, 54, 6)
         # Mean across K is valid for camera-independent joints.
-        kin_aggr = pose_input[:, :, :, :, 1:, :].mean(dim=2) + kin_delta  # (B, T, P, 54, 6)
+        kin_aggr = pose_input[:, :, :, :, 1:, :].mean(dim=2) + kin_delta  # (B, T, P, 54, 6), final pose for joints 1:55
 
-        # Root orient (joint 0): per-camera → back-project → mean
+        # STEP 3: Root orient (joint 0): per-camera → back-project → mean
         # Decode per-camera delta in camera frame (no pooling).
         root_feat = spatial_stream[:, :, :, :, 0, :]             # (B, T, K, P, D)
         root_cam_delta = self.root_head(
@@ -704,11 +716,10 @@ class SSTOutputHeads(nn.Module):
         root_cam_6d = pose_input[:, :, :, :, 0, :] + root_cam_delta  # (B, T, K, P, 6)
 
         # 6D → rotation matrix, then back-project: R_world = cam_rot_w2c^T @ R_body_cam.
-        R_body_cam = rotation_6d_to_matrix(root_cam_6d.reshape(BTK * P, 6))          # (BTK*P, 3, 3)
+        R_body_cam      = rotation_6d_to_matrix(root_cam_6d.reshape(BTK * P, 6))          # (BTK*P, 3, 3)
         cam_rot_w2c_exp = cam_rot_w2c.unsqueeze(1).expand(BTK, P, 3, 3).reshape(BTK * P, 3, 3)
-        R_body_world = cam_rot_w2c_exp.transpose(-1, -2) @ R_body_cam                # (BTK*P, 3, 3)
+        R_body_world    = cam_rot_w2c_exp.transpose(-1, -2) @ R_body_cam                  # (BTK*P, 3, 3)
 
-        # Rotation matrix → 6D: take first two rows of R (pytorch3d convention).
         body_orient_world_per_cam = torch.cat(
             [R_body_world[:, 0, :], R_body_world[:, 1, :]], dim=-1
         ).reshape(B, T, K, P, 6)
@@ -718,7 +729,7 @@ class SSTOutputHeads(nn.Module):
             (body_orient_world_per_cam * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
         )  # (B, T, P, 6)
 
-        # Translation: per-camera → back-project → mean
+        # STEP 4: Translation: per-camera → back-project → mean
         trans_feat = spatial_stream[:, :, :, :, 1, :]            # (B, T, K, P, D)
         body_transl_cam_delta = self.trans_head(
             trans_feat.reshape(BTK * P, D)
@@ -736,12 +747,12 @@ class SSTOutputHeads(nn.Module):
         # Confidence-weighted mean across cameras.
         body_transl_world = (
             (body_transl_world_per_cam * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
-        )  # (B, T, P, 3)
+        )  # (B, T, P, 3) final translation in world frame
 
-        # 4. Concatenate root + kinematic → full world-frame pose
+        # Concatenate root + kinematic → full world-frame pose
         pose_aggr = torch.cat([root_aggr.unsqueeze(-2), kin_aggr], dim=-2)  # (B, T, P, 55, 6)
 
-        # Shape 
+        # STEP 5: Shape 
         visible_flat = person_visible.reshape(B, T * K, P)
         shape = self.shape_norm(shape_stream)
         shape_all = self.shape_head(
@@ -753,18 +764,6 @@ class SSTOutputHeads(nn.Module):
         input_flat[visible_flat.unsqueeze(-1).expand_as(input_flat) == 0] = float('nan')
         input_median = torch.nanmedian(input_flat, dim=1).values.nan_to_num(0.0)
         shape_aggr = torch.where(shape_aggr.isnan(), input_median, shape_aggr)
-
-        # Camera
-        camera = self.camera_norm(camera_stream)
-        camera_flat = camera.reshape(BTK, D)
-        rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
-        # Camera 0 is the world origin — anchor it to identity rotation + zero translation.
-        rot_trans_delta[:, :, 0, :] = 0.0
-        # Focal length (position 7) is the GT focal from calibration — pass through unchanged.
-        camera_out = torch.cat([
-            camera_input[..., :7] + rot_trans_delta,
-            camera_input[..., 7:8],
-        ], dim=-1)
 
         # body_orient_world_per_cam and body_transl_world_per_cam are the per-camera world-frame estimates
         # before aggregation — exposed for the triangulation loss.

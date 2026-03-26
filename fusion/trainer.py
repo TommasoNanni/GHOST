@@ -354,7 +354,14 @@ class Trainer:
                     self._scaler.step(self.optimizer)
                     self._scaler.update()
                 else:
-                    total_loss.backward()
+                    # Anomaly detection is enabled for the first step only so that if a NaN
+                    # gradient survives, the traceback in the log shows exactly which op caused it.
+                    # It is disabled afterwards because it is slow (disables in-place ops).
+                    if self._step == 0:
+                        with torch.autograd.detect_anomaly():
+                            total_loss.backward()
+                    else:
+                        total_loss.backward()
                     if self.grad_clip:
                         nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
                     self.optimizer.step()
