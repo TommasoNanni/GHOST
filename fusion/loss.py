@@ -112,6 +112,7 @@ class EpipolarLoss(Loss):
         total_loss = pose_aggr.new_zeros([])
         img_diag2 = float(self.img_size[0] ** 2 + self.img_size[1] ** 2)
 
+
         for i in range(K):
             for j in range(i + 1, K):
                 R_i, t_i, K_i = extract_cameras(camera[:, :, i], self.img_size)  # (B, T, 3, 3/3/3x3)
@@ -314,10 +315,16 @@ class VPoserLoss(Loss):
         pose_aggr, _, _, _ = preds[:4]
         if next(self.vposer.parameters()).device != pose_aggr.device:
             self.vposer = self.vposer.to(pose_aggr.device)
-        # 6D rotation → rotation matrix → axis-angle
-        rot_mat    = rotation_6d_to_matrix(pose_aggr)                        # (B, T, P, J, 3, 3)
-        axis_angle = matrix_to_axis_angle(rot_mat.reshape(-1, 3, 3))         # (B*T*P*J, 3)
-        pose       = axis_angle.reshape(*pose_aggr.shape[:-1], 3)            # (B, T, P, J, 3)
+        # 6D rotation → rotation matrix → axis-angle via atan2 (no acos singularity at identity)
+        rot_mat = rotation_6d_to_matrix(pose_aggr)                           # (B, T, P, J, 3, 3)
+        R_flat  = rot_mat.reshape(-1, 3, 3)                                  # (N, 3, 3)
+        # quaternion from R, then atan2-based axis-angle
+        q = matrix_to_quaternion(R_flat)                                     # (N, 4) [w,x,y,z]
+        xyz   = q[:, 1:]                                                     # (N, 3)
+        w     = q[:, :1]                                                     # (N, 1)
+        angle = 2.0 * torch.atan2(xyz.norm(dim=-1, keepdim=True), w)        # (N, 1)
+        axis_angle = F.normalize(xyz, dim=-1) * angle                        # (N, 3)
+        pose = axis_angle.reshape(*pose_aggr.shape[:-1], 3)                  # (B, T, P, J, 3)
 
         # slice body joints 1-22 (skip root, skip hands/face), flatten to (N, 21*3=63)
         smpl_pose = pose[..., 1:22, :].reshape(-1, 63).float()  # VPoser is float32
@@ -443,8 +450,12 @@ class TriangulationLoss(Loss):
                 else:
                     trans_loss = trans_loss + diff_t.pow(2).mean()
 
-                R_i = rotation_6d_to_matrix(body_orient_world_per_cam[:, :, i].reshape(-1, 6))  # (B*T*P, 3, 3)
-                R_j = rotation_6d_to_matrix(body_orient_world_per_cam[:, :, j].reshape(-1, 6))
+                identity_6d = body_orient_world_per_cam.new_tensor([1., 0., 0., 0., 1., 0.])
+                def _safe_6d(x6d, vis):  # vis: (B, T, P)
+                    absent = (vis == 0).unsqueeze(-1).expand_as(x6d)
+                    return torch.where(absent, identity_6d.expand_as(x6d), x6d)
+                R_i = rotation_6d_to_matrix(_safe_6d(body_orient_world_per_cam[:, :, i], person_visible[:, :, i] if person_visible is not None else torch.ones_like(body_orient_world_per_cam[:, :, i, 0])).reshape(-1, 6))
+                R_j = rotation_6d_to_matrix(_safe_6d(body_orient_world_per_cam[:, :, j], person_visible[:, :, j] if person_visible is not None else torch.ones_like(body_orient_world_per_cam[:, :, j, 0])).reshape(-1, 6))
                 # Trace-based geodesic: cos(theta) = (trace(R_i @ R_j^T) - 1) / 2.
                 # The old code used matrix_to_quaternion whose sqrt gradient is 1/(2√x) → ∞
                 # at near-identity rotations (common early in training).

@@ -371,7 +371,7 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
-    ds.scenes = [ds.scenes[0]]
+
     for scene in ds.scenes:
         # Re-instantiate per scene so no Python-level instance state (gallery
         # EMA, cached model handles, etc.) leaks from one scene into the next.

@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --time=4:00:00
+#SBATCH --time=24:00:00
 #SBATCH --account=ls_polle
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=15
 #SBATCH --mem-per-cpu=8G
-#SBATCH --gpus=1
+#SBATCH --gpus=2
 #SBATCH --gres=gpumem:40G 
 #SBATCH --job-name=rich_pipeline
 #SBATCH --output=logs/%x_%j.out

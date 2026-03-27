@@ -118,12 +118,11 @@ class Trainer:
             raise ValueError("metrics provided but metric_fn is None. "
                              "Provide a metric_fn(preds, targets, metrics) callable.")
 
-        # bfloat16 has the same dynamic range as float32 — no GradScaler needed
-        self._scaler = (
-            torch.amp.GradScaler('cuda')
-            if self.use_amp and dtype is not torch.bfloat16
-            else None
-        )
+        # torch.autocast on CUDA defaults to bfloat16, which has the same dynamic
+        # range as float32 and never needs gradient scaling. GradScaler is only
+        # beneficial for float16. Using it with torch.compile + flex_attention
+        # causes CUDA illegal memory access, so we never create it.
+        self._scaler = None
         self._epoch = 0
         self._step = 0
         self._best_val_loss: float | None = None
@@ -346,25 +345,24 @@ class Trainer:
                 ).sum()
 
                 self.optimizer.zero_grad()
-                if self._scaler:
-                    self._scaler.scale(total_loss).backward()
-                    if self.grad_clip:
-                        self._scaler.unscale_(self.optimizer)
-                        nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-                    self._scaler.step(self.optimizer)
-                    self._scaler.update()
-                else:
-                    # Anomaly detection is enabled for the first step only so that if a NaN
-                    # gradient survives, the traceback in the log shows exactly which op caused it.
-                    # It is disabled afterwards because it is slow (disables in-place ops).
-                    if self._step == 0:
-                        with torch.autograd.detect_anomaly():
-                            total_loss.backward()
-                    else:
-                        total_loss.backward()
-                    if self.grad_clip:
-                        nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-                    self.optimizer.step()
+                if self._step == 0:
+                    import torch._functorch.config as _fc
+                    _fc.donated_buffer = False
+                    _loss_vals = {n: step_losses[n] * w for n, (_, w) in self.losses.items()}
+                    for _name, _loss in _loss_vals.items():
+                        self.optimizer.zero_grad()
+                        _loss.backward(retain_graph=True)
+                        _has_nan = any(
+                            p.grad is not None and not p.grad.isfinite().all()
+                            for p in self.model.parameters()
+                        )
+                        logger.info(f"[GRAD-CHECK] {_name}: loss={float(_loss):.6f}, nan_grad={_has_nan}")
+                    self.optimizer.zero_grad()
+                    raise SystemExit(0)
+                total_loss.backward()
+                if self.grad_clip:
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                self.optimizer.step()
 
                 clear_smplx_cache()
                 self._step += 1

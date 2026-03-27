@@ -183,12 +183,17 @@ class WindowedTemporalAttention(nn.Module):
         if confidence is not None:
             conf = confidence  # captured by closure; shape (N, T)
             def _score_mod(score, b, h, q_idx, kv_idx):  # noqa: E306
-                return score + torch.log(conf[b, q_idx] * conf[b, kv_idx])
+                return score + torch.log(conf[b, q_idx] * conf[b, kv_idx] + 1e-7)
             score_mod = _score_mod
 
         # flex_attention runs FlashAttention with the sparse block_mask.
         # Output shape: (N, H, T, Dh).
-        out: torch.Tensor = flex_attention(q, k, v, score_mod=score_mod, block_mask=block_mask)  # type: ignore[assignment]
+        # Use _safe_flex_attention when confidence is provided: dead frames
+        # (conf == 0) would make all logits -inf → softmax NaN.
+        if confidence is not None:
+            out: torch.Tensor = _safe_flex_attention(flex_attention, q, k, v, score_mod, block_mask, confidence)  # type: ignore[assignment]
+        else:
+            out = flex_attention(q, k, v, score_mod=score_mod, block_mask=block_mask)  # type: ignore[assignment]
 
         # Merge heads back and project to D.
         out = out.transpose(1, 2).reshape(N, T, D)
@@ -225,6 +230,51 @@ def _safe_mha(
         out = out.masked_fill(dead.unsqueeze(-1), 0.0)
     else:
         out, _ = module(query, key, value, attn_mask=attn_mask)
+    return out
+
+
+def _safe_flex_attention(
+    flex_attention_fn,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    score_mod,
+    block_mask,
+    confidence: torch.Tensor,  # (N, T)
+) -> torch.Tensor:
+    """Run flex_attention with NaN-safe confidence score_mod.
+
+    When confidence[n, t] == 0 for a query frame, every logit in that row is
+    log(0 * ...) = -inf, and softmax(-inf, ...) = NaN.  The fix mirrors
+    _safe_mha: temporarily replace dead-query confidences with 1.0 so softmax
+    stays finite, run attention, then zero the output for those rows so dead
+    frames contribute nothing to the residual stream.
+
+    Parameters
+    ----------
+    flex_attention_fn : the flex_attention callable (imported inside forward).
+    q, k, v          : (N, H, T, Dh) query/key/value tensors.
+    score_mod        : callable built from the safe confidence (passed in).
+    block_mask       : local-window block mask.
+    confidence       : (N, T) original confidence values in [0, 1].
+
+    Returns
+    -------
+    (N, H, T, Dh)
+    """
+    dead = confidence == 0  # (N, T) — frames with no detection
+    if dead.any():
+        safe_conf = confidence.clone()
+        safe_conf[dead] = 1.0  # non-zero → log(1*...) finite → softmax well-defined
+
+        def _safe_score_mod(score, b, h, q_idx, kv_idx):
+            return score + torch.log(safe_conf[b, q_idx] * safe_conf[b, kv_idx] + 1e-7)
+
+        out = flex_attention_fn(q, k, v, score_mod=_safe_score_mod, block_mask=block_mask)
+        # Zero out dead query positions: (N, T) → (N, 1, T, 1) for broadcast over H, Dh
+        out = out.masked_fill(dead.unsqueeze(1).unsqueeze(-1), 0.0)
+    else:
+        out = flex_attention_fn(q, k, v, score_mod=score_mod, block_mask=block_mask)
     return out
 
 
@@ -386,15 +436,17 @@ class CameraPoseEncoding(nn.Module):
         -------
         (B, T, K, D)
         """
-        from pytorch3d.transforms import quaternion_to_matrix, matrix_to_axis_angle
-
         B, T, K, _ = camera.shape
-        quat  = camera[..., :4]   # (B, T, K, 4)
+        quat  = camera[..., :4]   # (B, T, K, 4)  [w, x, y, z]
         trans = camera[..., 4:7]  # (B, T, K, 3)
 
-        # quat → rotation matrix → axis-angle (Lie algebra of SO(3))
-        R  = quaternion_to_matrix(quat.reshape(B * T * K, 4))  # (B*T*K, 3, 3)
-        aa = matrix_to_axis_angle(R)                           # (B*T*K, 3)
+        # quat → axis-angle via atan2 (Lie algebra of SO(3), no acos singularity)
+        # angle = 2 * atan2(||xyz||, w) — stable at identity (atan2(0,1)=0)
+        # axis  = xyz / ||xyz||         — F.normalize uses eps so safe at 0
+        xyz = quat[..., 1:].reshape(B * T * K, 3)          # (BTK, 3)
+        w   = quat[..., :1].reshape(B * T * K, 1)           # (BTK, 1)
+        angle = 2.0 * torch.atan2(xyz.norm(dim=-1, keepdim=True), w)  # (BTK, 1)
+        aa = F.normalize(xyz, dim=-1) * angle               # (BTK, 3)
 
         # 6D geometric descriptor: [axis-angle | translation]
         geom = torch.cat([aa, trans.reshape(B * T * K, 3)], dim=-1)  # (B*T*K, 6)
@@ -591,15 +643,26 @@ class KinToSpatialAttention(nn.Module):
 
     def forward(
         self,
-        spatial: torch.Tensor,    # (B, T, K, P, 2, D)
-        kinematic: torch.Tensor,  # (B, T, K, P, 54, D)
+        spatial: torch.Tensor,                   # (B, T, K, P, 2, D)
+        kinematic: torch.Tensor,                 # (B, T, K, P, 54, D)
+        kin_conf: torch.Tensor | None = None,    # (B, T, K, P, 54) confidence
     ) -> torch.Tensor:
         B, T, K, P, J_sp, D = spatial.shape
         J_kin = kinematic.shape[4]
         N = B * T * K * P
         q  = self.norm_q(spatial).reshape(N, J_sp, D)
         kv = self.norm_kv(kinematic).reshape(N, J_kin, D)
-        out, _ = self.attn(q, kv, kv)
+
+        attn_mask = None
+        if kin_conf is not None:
+            # Soft mask: log(conf_k + 1e-7) broadcast over J_sp query positions
+            # shape: (N, 1, J_kin) → (N*H, J_sp, J_kin)
+            H = self.attn.num_heads
+            log_conf = torch.log(kin_conf.reshape(N, J_kin) + 1e-7)      # (N, J_kin)
+            attn_mask = log_conf.unsqueeze(1).expand(-1, J_sp, -1)        # (N, J_sp, J_kin)
+            attn_mask = attn_mask.unsqueeze(1).expand(-1, H, -1, -1).reshape(N * H, J_sp, J_kin)
+
+        out = _safe_mha(self.attn, q, kv, kv, attn_mask, self.attn.num_heads)
         return spatial + out.reshape(B, T, K, P, J_sp, D)
 
 
@@ -680,6 +743,11 @@ class SSTOutputHeads(nn.Module):
         w_sum = person_visible.sum(dim=2, keepdim=True).clamp(min=1e-8)  # (B, T, 1, P)
         w_sum = w_sum.squeeze(2).unsqueeze(-1)                           # (B, T, P, 1)
 
+        def _nan_check(name, t):
+            if not torch.isfinite(t).all():
+                print(f"[NaN] {name}: {(~torch.isfinite(t)).sum().item()} non-finite "
+                      f"out of {t.numel()} (shape={tuple(t.shape)})")
+
         # STEP 1: Camera — decoded first so the predicted extrinsics are used for back-projection.
         camera = self.camera_norm(camera_stream)
         camera_flat = camera.reshape(BTK, D)
@@ -691,11 +759,24 @@ class SSTOutputHeads(nn.Module):
             camera_input[..., :7] + rot_trans_delta,
             camera_input[..., 7:8],
         ], dim=-1)
+        _nan_check("camera_stream", camera_stream)
+        _nan_check("camera_out", camera_out)
 
         # Extract rotation and translation from the predicted camera.
         # Convention: v_cam = cam_rot_w2c @ v_world + cam_transl_w2c
-        cam_rot_w2c    = quaternion_to_matrix(camera_out[..., :4].reshape(BTK, 4))  # (BTK, 3, 3)
+        # Guard: replace near-zero quaternions (unfilled camera slots) with identity
+        # so quaternion_to_matrix never divides by ~0. These slots are already
+        # zeroed out in person_visible (see SSTNetwork.forward), so their
+        # back-projected translations never enter any loss.
+        q = camera_out[..., :4].reshape(BTK, 4)
+        q_safe = torch.where(
+            (q.pow(2).sum(dim=-1, keepdim=True) > 0.01),
+            q,
+            q.new_tensor([1., 0., 0., 0.]).expand_as(q),
+        )
+        cam_rot_w2c    = quaternion_to_matrix(q_safe)  # (BTK, 3, 3)
         cam_transl_w2c = camera_out[..., 4:7]                                       # (B, T, K, 3)
+        _nan_check("cam_rot_w2c", cam_rot_w2c)
 
         # STEP 2: Kinematic joints 1-54
         # Camera-independent local rotations: pool across K then decode delta.
@@ -704,8 +785,13 @@ class SSTOutputHeads(nn.Module):
         kin_delta = self.pose_head_aggr(
             kin_pooled.reshape(B * T * P * 54, D)
         ).reshape(B, T, P, 54, 6)
-        # Mean across K is valid for camera-independent joints.
-        kin_aggr = pose_input[:, :, :, :, 1:, :].mean(dim=2) + kin_delta  # (B, T, P, 54, 6), final pose for joints 1:55
+        # Visibility-weighted mean across K (excludes absent cameras).
+        vis = person_visible.unsqueeze(-1).unsqueeze(-1)          # (B, T, K, P, 1, 1)
+        vis_sum = vis.sum(dim=2).clamp(min=1e-8)                  # (B, T, P, 1, 1)
+        kin_input_mean = (pose_input[:, :, :, :, 1:, :] * vis).sum(dim=2) / vis_sum  # (B, T, P, 54, 6)
+        kin_aggr = kin_input_mean + kin_delta
+        _nan_check("kin_stream", kin_stream)
+        _nan_check("kin_aggr", kin_aggr)
 
         # STEP 3: Root orient (joint 0): per-camera → back-project → mean
         # Decode per-camera delta in camera frame (no pooling).
@@ -714,11 +800,22 @@ class SSTOutputHeads(nn.Module):
             root_feat.reshape(BTK * P, D)
         ).reshape(B, T, K, P, 6)
         root_cam_6d = pose_input[:, :, :, :, 0, :] + root_cam_delta  # (B, T, K, P, 6)
+        _nan_check("spatial_stream", spatial_stream)
+        _nan_check("root_cam_6d", root_cam_6d)
+
+        # Guard: absent cameras have zero 6D input → rotation_6d_to_matrix would NaN.
+        # Replace with identity 6D [1,0,0, 0,1,0] for those slots; they are masked
+        # out by person_visible in the weighted mean below so output is unaffected.
+        identity_6d = root_cam_6d.new_tensor([1., 0., 0., 0., 1., 0.])
+        absent = (person_visible == 0).unsqueeze(-1).expand_as(root_cam_6d)  # (B,T,K,P,6)
+        root_cam_6d = torch.where(absent, identity_6d.expand_as(root_cam_6d), root_cam_6d)
 
         # 6D → rotation matrix, then back-project: R_world = cam_rot_w2c^T @ R_body_cam.
         R_body_cam      = rotation_6d_to_matrix(root_cam_6d.reshape(BTK * P, 6))          # (BTK*P, 3, 3)
         cam_rot_w2c_exp = cam_rot_w2c.unsqueeze(1).expand(BTK, P, 3, 3).reshape(BTK * P, 3, 3)
         R_body_world    = cam_rot_w2c_exp.transpose(-1, -2) @ R_body_cam                  # (BTK*P, 3, 3)
+        _nan_check("R_body_cam", R_body_cam)
+        _nan_check("R_body_world", R_body_world)
 
         body_orient_world_per_cam = torch.cat(
             [R_body_world[:, 0, :], R_body_world[:, 1, :]], dim=-1
@@ -728,6 +825,7 @@ class SSTOutputHeads(nn.Module):
         root_aggr = (
             (body_orient_world_per_cam * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
         )  # (B, T, P, 6)
+        _nan_check("root_aggr", root_aggr)
 
         # STEP 4: Translation: per-camera → back-project → mean
         trans_feat = spatial_stream[:, :, :, :, 1, :]            # (B, T, K, P, D)
@@ -743,6 +841,8 @@ class SSTOutputHeads(nn.Module):
         body_transl_world_per_cam = torch.bmm(
             body_transl_cam_flat - cam_transl_w2c_flat, cam_rot_w2c
         ).reshape(B, T, K, P, 3)
+        _nan_check("body_transl_cam", body_transl_cam)
+        _nan_check("body_transl_world_per_cam", body_transl_world_per_cam)
 
         # Confidence-weighted mean across cameras.
         body_transl_world = (
@@ -751,6 +851,8 @@ class SSTOutputHeads(nn.Module):
 
         # Concatenate root + kinematic → full world-frame pose
         pose_aggr = torch.cat([root_aggr.unsqueeze(-2), kin_aggr], dim=-2)  # (B, T, P, 55, 6)
+        _nan_check("pose_aggr", pose_aggr)
+        _nan_check("body_transl_world", body_transl_world)
 
         # STEP 5: Shape 
         visible_flat = person_visible.reshape(B, T * K, P)
@@ -851,9 +953,18 @@ class SSTNetwork(nn.Module):
 
         Entries where either token has zero confidence (absent) become -inf,
         which hard-excludes them from softmax.
+
+        Edge case: when ALL tokens in a row are absent (e.g. a joint occluded
+        in every camera at a frame), every entry is -inf and softmax produces
+        NaN.  Those rows are set to 0 instead — the attention output is
+        meaningless but will be zeroed out downstream by _safe_flex_attention
+        (kin_temporal_conf is also 0 for the same positions).
         """
         outer = torch.einsum("bi, bj -> bij", flat, flat)
-        mask = torch.log(outer)
+        mask = torch.log(outer + 1e-7)
+        all_dead = flat.sum(dim=-1) == 0  # (N,) rows with no visible tokens
+        if all_dead.any():
+            mask[all_dead] = 0.0
         return mask.unsqueeze(1).expand(-1, num_heads, -1, -1).reshape(
             flat.shape[0] * num_heads, flat.shape[1], flat.shape[1]
         )
@@ -904,10 +1015,26 @@ class SSTNetwork(nn.Module):
         assert pose.shape[:4] == person_mask.shape
         assert pose.shape[:4] == body_transl_cam_in.shape[:4]
 
+        def _nc(name, t):
+            if not torch.isfinite(t).all():
+                print(f"[NaN] {name}: {(~torch.isfinite(t)).sum().item()}/{t.numel()} "
+                      f"non-finite (shape={tuple(t.shape)})")
+
+        _nc("input/pose", pose)
+        _nc("input/shape", shape)
+        _nc("input/camera", camera)
+        _nc("input/joint_mask", joint_mask)
+        _nc("input/body_transl_cam_in", body_transl_cam_in)
+
         pose_emb, shape_emb, camera_emb, trans_emb = self.encoder(
             pose, shape, camera, body_transl_cam_in
         )
         B, T, K, P, J, D = pose_emb.shape
+
+        _nc("emb/pose_emb", pose_emb)
+        _nc("emb/shape_emb", shape_emb)
+        _nc("emb/camera_emb", camera_emb)
+        _nc("emb/trans_emb", trans_emb)
 
         # Spatial stream: [root_orient(0), translation(1)] — attend cameras.
         spatial_stream = torch.cat([
@@ -922,6 +1049,9 @@ class SSTNetwork(nn.Module):
         H = self.num_heads
 
         # person_visible: (B, T, K, P) float — 1 present, 0 absent.
+        # Also mask out cameras whose input quaternion is zero (no observation for
+        # that frame): those slots produce garbage back-projections and must be
+        # excluded from aggregation and all losses.
         person_visible = person_mask.to(pose_emb.dtype)
 
         # --- Pose-stream masks ---
@@ -978,6 +1108,7 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
             )
+            _nc(f"layer{layer_idx}/kin_stream", kin_stream)
 
             # Spatial stream: root + translation attend each other, cameras, time.
             spatial_stream = self.spatial_layers[layer_idx](
@@ -988,20 +1119,26 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
             )
+            _nc(f"layer{layer_idx}/spatial_stream", spatial_stream)
+
             camera_stream = self.camera_layers[layer_idx](
                 camera_stream, B, T, K, D,
                 pe=pe,
                 dropout=self.dropout,
                 temporal_conf=camera_temporal_conf,
             )
+            _nc(f"layer{layer_idx}/camera_stream", camera_stream)
 
             spatial_stream, camera_stream = self.spatial_cam_attns[layer_idx](
                 spatial_stream, camera_stream, spatial_stream,
                 B, T, K, P, 2, D, self.dropout,
             )
+            _nc(f"layer{layer_idx}/spatial_stream_post_cam_attn", spatial_stream)
+            _nc(f"layer{layer_idx}/camera_stream_post_cam_attn", camera_stream)
 
             # One-directional: kinematic joints inform spatial tokens (not reverse).
-            spatial_stream = self.kin_to_spatial_attns[layer_idx](spatial_stream, kin_stream)
+            spatial_stream = self.kin_to_spatial_attns[layer_idx](spatial_stream, kin_stream, kin_conf=kin_mask)
+            _nc(f"layer{layer_idx}/spatial_stream_post_kin2sp", spatial_stream)
 
             shape_stream = self.shape_layers[layer_idx](
                 shape_stream, B, T, K, P, D,
@@ -1010,6 +1147,7 @@ class SSTNetwork(nn.Module):
                 view_mask=person_cross_view_mask,
                 temporal_conf=person_temporal_conf,
             )
+            _nc(f"layer{layer_idx}/shape_stream", shape_stream)
 
 
         # decode
