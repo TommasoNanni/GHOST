@@ -18,12 +18,14 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch3d.transforms import matrix_to_quaternion, rotation_6d_to_matrix, matrix_to_axis_angle, quaternion_to_matrix
+from pytorch3d.transforms import rotation_6d_to_matrix, quaternion_to_matrix
 
 from utilities.camera_utilities import extract_cameras
 from utilities.geometry import project_to_2d, skew_symmetric
 from configuration import CONFIG
 from utilities.smplx_utilities import PARENTS_TABLE
+
+logger = logging.getLogger(__name__)
 
 class Loss(ABC):
     """Base class for all fusion training losses.
@@ -124,19 +126,45 @@ class EpipolarLoss(Loss):
                 vj_cam = (torch.bmm(flat_world, R_j.reshape(B * T, 3, 3).transpose(-2, -1))
                           + t_j.reshape(B * T, 1, 3)).reshape(B, T, P, Jsmplx, 3)
 
-                x_i = project_to_2d(vi_cam, K_i)
-                x_j = project_to_2d(vj_cam, K_j)
+                behind_i = vi_cam[..., 2] <= 0
+                behind_j = vj_cam[..., 2] <= 0
+
+                # Clamp z to a minimum depth before projection so that behind-camera
+                # joints produce finite (not inf/NaN) 2D coordinates.  The clamp
+                # gradient is 0 for clamped joints, so they receive no gradient —
+                # same effect as masking, but without the 0 × inf = NaN problem that
+                # torch.where causes when the unmasked values are already infinite.
+                # Use cat (out-of-place) to avoid inplace modification of graph tensors.
+                vi_cam_safe = torch.cat([vi_cam[..., :2], vi_cam[..., 2:3].clamp(min=1e-2)], dim=-1)
+                vj_cam_safe = torch.cat([vj_cam[..., :2], vj_cam[..., 2:3].clamp(min=1e-2)], dim=-1)
+
+                x_i = project_to_2d(vi_cam_safe, K_i)
+                x_j = project_to_2d(vj_cam_safe, K_j)
 
                 errors  = self.compute_epipolar_errors(x_i, x_j, F)
-                visible = (vi_cam[..., 2] > 0) & (vj_cam[..., 2] > 0)
+                visible  = ~behind_i & ~behind_j
 
+                n_behind = int((behind_i | behind_j).sum().item())
+                if n_behind > 0:
+                    logger.warning(
+                        f"[EpipolarLoss] cam pair ({i},{j}): {n_behind} joints behind camera "
+                        f"(cam{i}: {int(behind_i.sum())}, cam{j}: {int(behind_j.sum())}) — "
+                        f"excluded from loss. This should not happen with well-initialised cameras."
+                    )
+
+                # Use torch.where instead of multiplying by the mask: avoids 0 × inf = NaN
+                # when joints project behind a camera (z ≤ 0 → huge projection → inf error).
+                safe_errors = torch.where(visible, errors, errors.new_zeros([]))
                 total_loss = total_loss + (
-                    (errors / img_diag2 * visible.to(errors.dtype)).sum()
+                    safe_errors.sum() / img_diag2
                     / (visible.sum() + 1e-8)
                 )
                 num_pairs += 1
 
-        return total_loss / num_pairs
+        result = total_loss / num_pairs
+        if not result.isfinite():
+            logger.warning(f"[EpipolarLoss] loss is non-finite: {result.item()}")
+        return result
 
 
     def compute_fundamental_matrix(self, R_i, t_i, R_j, t_j, K_i, K_j):
@@ -315,16 +343,10 @@ class VPoserLoss(Loss):
         pose_aggr, _, _, _ = preds[:4]
         if next(self.vposer.parameters()).device != pose_aggr.device:
             self.vposer = self.vposer.to(pose_aggr.device)
-        # 6D rotation → rotation matrix → axis-angle via atan2 (no acos singularity at identity)
+        # 6D rotation → rotation matrix → axis-angle (safe: atan2 + safe norm, no acos/sqrt(0) singularity)
+        from utilities.smplx_utilities import _rot_matrix_to_axis_angle_safe
         rot_mat = rotation_6d_to_matrix(pose_aggr)                           # (B, T, P, J, 3, 3)
-        R_flat  = rot_mat.reshape(-1, 3, 3)                                  # (N, 3, 3)
-        # quaternion from R, then atan2-based axis-angle
-        q = matrix_to_quaternion(R_flat)                                     # (N, 4) [w,x,y,z]
-        xyz   = q[:, 1:]                                                     # (N, 3)
-        w     = q[:, :1]                                                     # (N, 1)
-        angle = 2.0 * torch.atan2(xyz.norm(dim=-1, keepdim=True), w)        # (N, 1)
-        axis_angle = F.normalize(xyz, dim=-1) * angle                        # (N, 3)
-        pose = axis_angle.reshape(*pose_aggr.shape[:-1], 3)                  # (B, T, P, J, 3)
+        pose = _rot_matrix_to_axis_angle_safe(rot_mat)                       # (B, T, P, J, 3)
 
         # slice body joints 1-22 (skip root, skip hands/face), flatten to (N, 21*3=63)
         smpl_pose = pose[..., 1:22, :].reshape(-1, 63).float()  # VPoser is float32
@@ -377,7 +399,7 @@ class BoneLengthconsistencyLoss(Loss):
         parents = parent_mapping[0, :]
         parent_joints = joints[..., parents, :]                       # (B, T, P, J, 3)
 
-        bone_lengths = torch.norm(joints - parent_joints, p=2, dim=-1)  # (B, T, P, J)
+        bone_lengths = (joints - parent_joints).pow(2).sum(-1).add(1e-8).sqrt()  # (B, T, P, J) — safe at root (zero-vector)
         indices = torch.arange(len(parents), device=joints.device)
         mask = parents != indices                                      # (55,) — False for root joints
         valid_lengths = bone_lengths[..., mask]                       # (B, T, P, J_valid)
@@ -470,7 +492,10 @@ class TriangulationLoss(Loss):
 
                 num_pairs += 1
 
-        return (trans_loss + rot_loss) / num_pairs
+        result = (trans_loss + rot_loss) / num_pairs
+        if not result.isfinite():
+            logger.warning(f"[TriangulationLoss] loss is non-finite: {result.item()}")
+        return result
 
 
 class TranslationMSELoss(Loss):
@@ -603,8 +628,12 @@ class CameraMSELoss(Loss):
         # Normalise by squared scene scale so trans_loss lives in [0, 1] like rot_loss.
         # gt_cam_rot_w2c: (N, 3, 3), gt_cam_transl_w2c: (N, 3) → centres: (N, 3)
         gt_cam_centres = -torch.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
-        diff = gt_cam_centres.unsqueeze(-2) - gt_cam_centres.unsqueeze(-3)  # (N, N, 3)
-        scene_scale = diff.norm(dim=-1).mean().clamp(min=1e-3)
-        trans_loss = torch.norm(cam_transl_w2c - gt_cam_transl_w2c, dim=-1).pow(2).mean() / (scene_scale ** 2)
+        # scene_scale only needs the K camera positions at one time step — using all T*K
+        # observations builds an (N, N, 3) tensor with N=T*K which OOMs at large T.
+        K = cam_valid.shape[-1]
+        centres_one_step = gt_cam_centres[:K]                                      # (K, 3)
+        diff = centres_one_step.unsqueeze(-2) - centres_one_step.unsqueeze(-3)     # (K, K, 3)
+        scene_scale = diff.pow(2).sum(-1).add(1e-8).sqrt().mean().clamp(min=1e-3).detach()
+        trans_loss = (cam_transl_w2c - gt_cam_transl_w2c).pow(2).sum(-1).mean() / (scene_scale ** 2)
 
         return rot_loss + trans_loss

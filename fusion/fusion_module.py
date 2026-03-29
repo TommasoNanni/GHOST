@@ -123,6 +123,14 @@ class WindowedTemporalAttention(nn.Module):
         # (which triggers a torch.compile) runs only once per sequence length.
         self._block_mask_cache: dict = {}
 
+        # Compile flex_attention with dynamic=False so that T-specific static
+        # Triton kernels are generated.  The default dynamic=True kernel has a
+        # backward NaN bug for large T (≥ 904) in bfloat16 (job 61715548).
+        # First call for each distinct T triggers a ~30 s recompilation; after
+        # that the kernel is cached for the rest of the run.
+        from torch.nn.attention.flex_attention import flex_attention as _raw_flex
+        self._flex_attention = torch.compile(_raw_flex, dynamic=False)
+
     def _get_block_mask(self, T: int, device: torch.device):
         """Return (cached) local-window block_mask for length T on device."""
         from torch.nn.attention.flex_attention import create_block_mask
@@ -159,7 +167,7 @@ class WindowedTemporalAttention(nn.Module):
         -------
         (N, T, D)
         """
-        from torch.nn.attention.flex_attention import flex_attention
+        flex_attention = self._flex_attention
 
         N, T, D = x.shape
         H, Dh   = self.num_heads, self.head_dim
@@ -276,6 +284,138 @@ def _safe_flex_attention(
     else:
         out = flex_attention_fn(q, k, v, score_mod=score_mod, block_mask=block_mask)
     return out
+
+
+class WindowedTemporalAttentionSDPA(nn.Module):
+    """Windowed temporal self-attention via explicit query chunking.
+
+    Avoids flex_attention (Triton backward NaN/crash for large T, jobs
+    61712668/61716218) and SDPA with float mask (materialises T×T in float32,
+    OOM for T≥1166, job 61718955).
+
+    Instead, we loop over query chunks of size `chunk_size`.  For each chunk
+    we only load the key/value slice that falls inside the ±W window, so the
+    largest intermediate tensor is (N, H, chunk_size, 2W+chunk_size) — a few
+    hundred KB regardless of T.  Only standard torch.matmul / softmax / masked_fill
+    are used; no Triton, no xformers.
+
+    Memory per chunk: (1, 8, 64, 320) × 2 bytes ≈ 327 KB at W=128, chunk=64.
+    """
+
+    def __init__(
+        self,
+        embedding_dim: int,
+        num_heads: int,
+        temporal_window: int = 128,
+        dropout: float = 0.0,
+        chunk_size: int = 64,
+        name: str = "?",
+    ):
+        super().__init__()
+        assert embedding_dim % num_heads == 0
+        self.num_heads = num_heads
+        self.head_dim = embedding_dim // num_heads
+        self.temporal_window = temporal_window
+        self.chunk_size = chunk_size
+        self.attn_name = name  # stream/layer identity for logging
+
+        self.q_proj   = nn.Linear(embedding_dim, embedding_dim, bias=False)
+        self.k_proj   = nn.Linear(embedding_dim, embedding_dim, bias=False)
+        self.v_proj   = nn.Linear(embedding_dim, embedding_dim, bias=False)
+        self.out_proj = nn.Linear(embedding_dim, embedding_dim)
+        self.drop     = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        confidence: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        x          : (N, T, D)
+        confidence : (N, T) per-frame confidence in [0, 1], or None.
+
+        Returns
+        -------
+        (N, T, D)
+        """
+        N, T, D = x.shape
+        H, Dh   = self.num_heads, self.head_dim
+        W       = self.temporal_window
+        scale   = Dh ** -0.5
+
+        def _proj(linear):
+            return linear(x).reshape(N, T, H, Dh).transpose(1, 2)  # (N, H, T, Dh)
+
+        q, k, v = _proj(self.q_proj), _proj(self.k_proj), _proj(self.v_proj)
+
+        # Pre-compute log-confidence once before the loop.
+        if confidence is not None:
+            dead      = confidence == 0          # (N, T)
+            safe_conf = confidence.clone()
+            safe_conf[dead] = 1.0                # avoid log(0) for dead query rows
+            log_conf  = torch.log(safe_conf + 1e-7)  # (N, T)
+        else:
+            dead     = None
+            log_conf = None
+
+        chunks = []
+
+        for t_start in range(0, T, self.chunk_size):
+            t_end   = min(t_start + self.chunk_size, T)
+            k_start = max(0, t_start - W)
+            k_end   = min(T, t_end   + W)
+
+            q_c = q[:, :, t_start:t_end, :]   # (N, H, C, Dh)
+            k_c = k[:, :, k_start:k_end, :]   # (N, H, kW, Dh)
+            v_c = v[:, :, k_start:k_end, :]   # (N, H, kW, Dh)
+
+            # Logits: (N, H, C, kW)
+            attn = torch.matmul(q_c, k_c.transpose(-2, -1)) * scale
+
+            # Mask (query, key) pairs outside ±W.
+            q_idx = torch.arange(t_start, t_end, device=x.device).unsqueeze(1)
+            k_idx = torch.arange(k_start, k_end, device=x.device).unsqueeze(0)
+            out_of_window = (q_idx - k_idx).abs() > W                  # (C, kW)
+            attn = attn.masked_fill(out_of_window.unsqueeze(0).unsqueeze(0), float('-inf'))
+
+            # Additive log-confidence bias.
+            if log_conf is not None:
+                lq = log_conf[:, t_start:t_end]                        # (N, C)
+                lk = log_conf[:, k_start:k_end]                        # (N, kW)
+                cb = lq.unsqueeze(2) + lk.unsqueeze(1)                 # (N, C, kW)
+                dead_k = dead[:, k_start:k_end]                        # (N, kW)
+                cb = cb.masked_fill(dead_k.unsqueeze(1).expand_as(cb), float('-inf'))
+                attn = attn + cb.unsqueeze(1)                          # broadcast over H
+
+            # All-masked rows: every key is -inf when a joint has confidence==0
+            # for the entire window (e.g. occluded for >W frames).
+            # softmax([-inf,...]) = NaN, and NaN * 0 = NaN in the softmax
+            # backward, corrupting grad_q/grad_k.
+            # Fix: replace -inf rows with 0 → uniform (finite) softmax, then
+            # zero the output for those rows so they add nothing downstream.
+            all_masked = attn.isinf().all(dim=-1, keepdim=True)        # (N, H, C, 1)
+            if all_masked.any():
+                attn = attn.masked_fill(all_masked, 0.0)
+
+            attn = attn.softmax(dim=-1)
+
+            out_c = torch.matmul(attn, v_c)                            # (N, H, C, Dh)
+            if all_masked.any():
+                out_c = out_c.masked_fill(all_masked, 0.0)
+
+            chunks.append(out_c)
+
+        # torch.cat preserves requires_grad so gradients flow to q/k/v projections.
+        out = torch.cat(chunks, dim=2)                                  # (N, H, T, Dh)
+
+        # Zero dead query rows so they add nothing to the residual stream.
+        if dead is not None:
+            out = out.masked_fill(dead.unsqueeze(1).unsqueeze(-1), 0.0)
+
+        out = out.transpose(1, 2).reshape(N, T, D)
+        return self.drop(self.out_proj(out))
 
 
 class JointSelfAttention(nn.Module):
@@ -420,7 +560,7 @@ class CameraPoseEncoding(nn.Module):
         super().__init__()
         self.embedding_dim = embedding_dim
         self.mlp = nn.Sequential(
-            nn.Linear(6, 2 * embedding_dim),
+            nn.Linear(7, 2 * embedding_dim),
             nn.ReLU(),
             nn.Linear(2 * embedding_dim, embedding_dim),
         )
@@ -440,16 +580,10 @@ class CameraPoseEncoding(nn.Module):
         quat  = camera[..., :4]   # (B, T, K, 4)  [w, x, y, z]
         trans = camera[..., 4:7]  # (B, T, K, 3)
 
-        # quat → axis-angle via atan2 (Lie algebra of SO(3), no acos singularity)
-        # angle = 2 * atan2(||xyz||, w) — stable at identity (atan2(0,1)=0)
-        # axis  = xyz / ||xyz||         — F.normalize uses eps so safe at 0
-        xyz = quat[..., 1:].reshape(B * T * K, 3)          # (BTK, 3)
-        w   = quat[..., :1].reshape(B * T * K, 1)           # (BTK, 1)
-        angle = 2.0 * torch.atan2(xyz.norm(dim=-1, keepdim=True), w)  # (BTK, 1)
-        aa = F.normalize(xyz, dim=-1) * angle               # (BTK, 3)
-
-        # 6D geometric descriptor: [axis-angle | translation]
-        geom = torch.cat([aa, trans.reshape(B * T * K, 3)], dim=-1)  # (B*T*K, 6)
+        # Feed quaternion + translation directly — no singularity anywhere.
+        # Axis-angle conversion was singular at identity (reference camera always
+        # has quat=[1,0,0,0]), producing NaN/infinite gradients.
+        geom = torch.cat([quat, trans], dim=-1).reshape(B * T * K, 7)  # (BTK, 7)
 
         return self.mlp(geom).reshape(B, T, K, self.embedding_dim)   # (B, T, K, D)
 
@@ -473,12 +607,12 @@ class FeedForward(nn.Module):
 class PoseStreamLayer(nn.Module):
     """One layer of the pose stream: joint attn → cross-view attn → windowed temporal attn → FFN."""
 
-    def __init__(self, embedding_dim: int, num_heads: int, temporal_window: int, dropout: float):
+    def __init__(self, embedding_dim: int, num_heads: int, temporal_window: int, dropout: float, name: str = "pose"):
         super().__init__()
         self.joint_attn = JointSelfAttention(embedding_dim, num_heads, dropout)
         self.view_attn = CrossViewAttention(embedding_dim, num_heads, dropout)
         self.temporal_norm = nn.LayerNorm(embedding_dim)
-        self.temporal_attn = WindowedTemporalAttention(embedding_dim, num_heads, temporal_window, dropout)
+        self.temporal_attn = WindowedTemporalAttentionSDPA(embedding_dim, num_heads, temporal_window, dropout, name=name)
         self.ff = FeedForward(embedding_dim)
 
     def forward(
@@ -531,11 +665,11 @@ class PoseStreamLayer(nn.Module):
 class ShapeStreamLayer(nn.Module):
     """One layer of the shape stream: cross-view attn → windowed temporal attn → FFN."""
 
-    def __init__(self, embedding_dim: int, num_heads: int, temporal_window: int, dropout: float):
+    def __init__(self, embedding_dim: int, num_heads: int, temporal_window: int, dropout: float, name: str = "shape"):
         super().__init__()
         self.view_attn = CrossViewAttention(embedding_dim, num_heads, dropout)
         self.temporal_norm = nn.LayerNorm(embedding_dim)
-        self.temporal_attn = WindowedTemporalAttention(embedding_dim, num_heads, temporal_window, dropout)
+        self.temporal_attn = WindowedTemporalAttentionSDPA(embedding_dim, num_heads, temporal_window, dropout, name=name)
         self.ff = FeedForward(embedding_dim)
 
     def forward(
@@ -578,10 +712,10 @@ class ShapeStreamLayer(nn.Module):
 class CameraStreamLayer(nn.Module):
     """One layer of the camera stream: windowed temporal attn → FFN."""
 
-    def __init__(self, embedding_dim: int, num_heads: int, temporal_window: int, dropout: float):
+    def __init__(self, embedding_dim: int, num_heads: int, temporal_window: int, dropout: float, name: str = "camera"):
         super().__init__()
         self.temporal_norm = nn.LayerNorm(embedding_dim)
-        self.temporal_attn = WindowedTemporalAttention(embedding_dim, num_heads, temporal_window, dropout)
+        self.temporal_attn = WindowedTemporalAttentionSDPA(embedding_dim, num_heads, temporal_window, dropout, name=name)
         self.ff = FeedForward(embedding_dim)
 
     def forward(
@@ -713,14 +847,24 @@ class SSTOutputHeads(nn.Module):
         self.trans_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim), nn.ReLU(), nn.Linear(embedding_dim, 3),
         )
-        # Small-random init for all residual last layers: delta ≈ 0 at start.
+        # Near-zero init for all residual heads so delta ≈ 0 at start.
+        # All layers (including last) use std=1e-2 so gradients are not killed.
+        #
+        # History of tuning:
+        #  - kaiming (std≈0.088): delta≈0.14 → ~16° camera rotation at init → NaN epipolar.
+        #  - intermediate=1e-2, last=1e-3: delta≈0.0013 but gradient to kin_layers ≈ 2.6e-7
+        #    (killed by 1/K pooling + 1e-3 last layer) → kin_layers never updated → NaN at step 1.
+        #  - all=1e-2: delta = 1e-2² × D ≈ 0.0128 → ~1.5° rotation at init (acceptable).
+        #    Gradient to kin_layers ≈ 2.6e-6 — representable in float32, allows learning.
         with torch.no_grad():
             for head in [self.pose_head_aggr,
                          self.root_head,
                          self.trans_head,
                          self.camera_rot_trans_head]:
-                nn.init.normal_(head[-1].weight, std=1e-3)
-                nn.init.zeros_(head[-1].bias)
+                for layer in head:
+                    if isinstance(layer, nn.Linear):
+                        nn.init.normal_(layer.weight, std=1e-2)
+                        nn.init.zeros_(layer.bias)
 
     def forward(
         self,
@@ -755,10 +899,12 @@ class SSTOutputHeads(nn.Module):
         # Camera 0 is the world origin — anchor it to identity rotation + zero translation.
         rot_trans_delta[:, :, 0, :] = 0.0
         # Focal length (position 7) is the GT focal from calibration — pass through unchanged.
-        camera_out = torch.cat([
-            camera_input[..., :7] + rot_trans_delta,
-            camera_input[..., 7:8],
-        ], dim=-1)
+        # Normalize the quaternion after adding the delta: input_quat + delta is not unit,
+        # and a non-unit quaternion in quaternion_to_matrix produces a non-orthogonal matrix
+        # that scales z-coordinates, potentially putting joints behind cameras.
+        quat_out  = F.normalize(camera_input[..., :4] + rot_trans_delta[..., :4], dim=-1)
+        trans_out = camera_input[..., 4:7] + rot_trans_delta[..., 4:7]
+        camera_out = torch.cat([quat_out, trans_out, camera_input[..., 7:8]], dim=-1)
         _nan_check("camera_stream", camera_stream)
         _nan_check("camera_out", camera_out)
 
@@ -917,13 +1063,13 @@ class SSTNetwork(nn.Module):
 
         # Kinematic stream: joint self-attn + cross-view + temporal (no camera cross-attn).
         self.kin_layers = nn.ModuleList([
-            PoseStreamLayer(embedding_dim, num_heads, temporal_window, dropout)
-            for _ in range(num_layers)
+            PoseStreamLayer(embedding_dim, num_heads, temporal_window, dropout, name=f"kin_L{i}")
+            for i in range(num_layers)
         ])
         # Spatial stream: root orient + translation tokens, same layer type (J=2).
         self.spatial_layers = nn.ModuleList([
-            PoseStreamLayer(embedding_dim, num_heads, temporal_window, dropout)
-            for _ in range(num_layers)
+            PoseStreamLayer(embedding_dim, num_heads, temporal_window, dropout, name=f"spatial_L{i}")
+            for i in range(num_layers)
         ])
         # Camera cross-attention only for the spatial stream.
         self.spatial_cam_attns = nn.ModuleList([
@@ -936,12 +1082,12 @@ class SSTNetwork(nn.Module):
             for _ in range(num_layers)
         ])
         self.shape_layers = nn.ModuleList([
-            ShapeStreamLayer(embedding_dim, num_heads, temporal_window, dropout)
-            for _ in range(num_layers)
+            ShapeStreamLayer(embedding_dim, num_heads, temporal_window, dropout, name=f"shape_L{i}")
+            for i in range(num_layers)
         ])
         self.camera_layers = nn.ModuleList([
-            CameraStreamLayer(embedding_dim, num_heads, temporal_window, dropout)
-            for _ in range(num_layers)
+            CameraStreamLayer(embedding_dim, num_heads, temporal_window, dropout, name=f"camera_L{i}")
+            for i in range(num_layers)
         ])
         self.output_heads = SSTOutputHeads(embedding_dim)
 

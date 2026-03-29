@@ -469,6 +469,7 @@ class FusionDatapoint(Dataset, ABC):
             "keypoints_3d": torch.from_numpy(gt_kp3d[:, 0]),        # [T, P, 70, 3]
             "trans": torch.from_numpy(gt_body_transl_world_cam0),   # [T, P, 3]     ground-truth body root in world frame
             "gt_valid": torch.from_numpy(gt_valid),                 # [T, P] bool
+            "scene_name": self.scene_dir.name,                      # str — for logging
         }
         return inputs, targets
 

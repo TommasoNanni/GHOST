@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --time=06:00:00
+#SBATCH --time=00:30:00
 #SBATCH --account=ls_polle
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=8G
 #SBATCH --gpus=1
-#SBATCH --gres=gpumem:40G
+#SBATCH --gres=gpumem:32G
 #SBATCH --job-name=train_rich
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
@@ -26,7 +26,7 @@ echo "GPUs:         $SLURM_GPUS"
 echo "Start:        $(date)"
 echo ""
 
-pixi run python -m scripts.train_rich
+CUDA_LAUNCH_BLOCKING=1 pixi run python -m scripts.train_rich
 
 echo ""
 echo "Done: $(date)"

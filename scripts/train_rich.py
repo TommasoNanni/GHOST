@@ -62,6 +62,10 @@ SKIP_SCENES: list[str] = [
 ]
 # Last N scenes (alphabetically) are used for validation, rest for training.
 NUM_VAL_SCENES = 2
+# Losses to skip during training — add names here to ablate one at a time.
+# Valid names: "pose", "shape", "epipolar", "temporal", "bone",
+#              "camera_mse", "triangulation", "translation_mse", "vposer"
+DISABLED_LOSSES: list[str] = []
 
 
 def load_datapoints(scenes: list[Path]) -> list[RICHFusionDatapoint]:
@@ -195,7 +199,7 @@ def main():
         logger.warning(f"VPoserLoss unavailable ({e}); skipping.")
         vposer_loss = None
 
-    losses = {
+    _all_losses = {
         "pose":            (PoseMSELoss(),                       pose_mse_weight),
         "shape":           (ShapeMSELoss(),                      shape_mse_weight),
         "epipolar":        (EpipolarLoss(img_size=img_size),     epipolar_weight),
@@ -206,6 +210,9 @@ def main():
         "translation_mse": (TranslationMSELoss(),                translation_mse_weight),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
+    losses = {k: v for k, v in _all_losses.items() if k not in DISABLED_LOSSES}
+    if DISABLED_LOSSES:
+        logger.info(f"Disabled losses: {DISABLED_LOSSES}")
 
     # ── Metrics ───────────────────────────────────────────────────────────────
     metrics = MetricCollection([
@@ -309,6 +316,17 @@ def main():
             },
         )
 
+    # ── Curriculum schedule ───────────────────────────────────────────────────
+    # Epoch 0:   MSE losses only (safe, no geometric instability)
+    # Epoch 50:  add regularisation (temporal smoothness, bone length, VPoser)
+    # Epoch 100: add geometric losses (epipolar, triangulation) — only once
+    #            poses and cameras are already roughly aligned
+    curriculum_schedule = {
+        0:   ["pose", "shape", "camera_mse", "translation_mse"],
+        50:  ["temporal", "bone", "vposer"],
+        100: ["epipolar", "triangulation"],
+    }
+
     # ── Trainer ───────────────────────────────────────────────────────────────
     trainer = Trainer(
         model=model,
@@ -326,6 +344,7 @@ def main():
         metrics=metrics,
         metric_fn=metric_fn,
         prediction_save_path=CONFIG.data.fusion_output_dir,
+        curriculum_schedule=curriculum_schedule,
     )
 
     trainer.train()

@@ -93,6 +93,7 @@ class Trainer:
         dtype: torch.dtype | None = None,
         prediction_save_path: str | None = None,
         smplx_chunk_size: int = 32,
+        curriculum_schedule: dict[int, list[str]] | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.dtype = dtype
@@ -103,6 +104,7 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.losses = losses
+        self.curriculum_schedule = curriculum_schedule or {}
         self.scheduler = scheduler
         self.max_epochs = max_epochs
         self.grad_clip = grad_clip
@@ -145,8 +147,17 @@ class Trainer:
         """
         logger.info(f"Training on {self.device} | losses: {list(self.losses)}")
 
+        _prev_active: set[str] = set()
         for epoch in range(self._epoch, self.max_epochs):
             self._epoch = epoch
+
+            # Log curriculum stage changes
+            if self.curriculum_schedule:
+                cur_active = set(self._active_losses())
+                new_losses = cur_active - _prev_active
+                if new_losses:
+                    logger.info(f"[CURRICULUM] Epoch {epoch}: activating losses {sorted(new_losses)}")
+                _prev_active = cur_active
 
             train_stats, train_metrics = self._run_epoch(train=True)
             val_stats, val_metrics = self._run_epoch(train=False) if self.val_loader else ({}, {})
@@ -313,6 +324,21 @@ class Trainer:
             step=epoch,
         )
 
+    def _active_losses(self) -> dict[str, tuple[Callable, float]]:
+        """Return the subset of losses active at the current epoch per curriculum_schedule.
+
+        curriculum_schedule maps epoch thresholds to the list of loss names that become
+        active at that epoch (cumulative — each stage adds to the previous set).
+        If no schedule is provided, all losses are always active.
+        """
+        if not self.curriculum_schedule:
+            return self.losses
+        active: set[str] = set()
+        for epoch_threshold in sorted(self.curriculum_schedule):
+            if self._epoch >= epoch_threshold:
+                active.update(self.curriculum_schedule[epoch_threshold])
+        return {k: v for k, v in self.losses.items() if k in active}
+
     def _run_epoch(
         self, train: bool
     ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
@@ -327,6 +353,7 @@ class Trainer:
         tag = "train" if train else "val"
         self.model.train(train)
         acc = LossAccumulator()
+        active_losses = self._active_losses() if train else self.losses
 
         pbar = tqdm(loader, desc=f"Epoch {self._epoch:04d} [{tag}]",
                     dynamic_ncols=True, leave=False)
@@ -334,32 +361,110 @@ class Trainer:
         for batch in pbar:
             inputs, targets = self._unpack_batch(batch)
 
+            # ── per-batch diagnostics ─────────────────────────────────────────
+            scene_names = targets.get("scene_name", ["?"])
+            scene = scene_names[0] if isinstance(scene_names, list) else scene_names
+            pmask = inputs.get("person_mask")   # (B, T, K, P) bool after collation
+            if pmask is not None:
+                pm = pmask[0]                   # (T, K, P)
+                T_dim, K_dim, _ = pm.shape
+                valid_cams   = int(pm.any(0).any(-1).sum().item())
+                per_cam_ppl  = [int(pm[:, k, :].any(0).sum().item()) for k in range(K_dim)]
+                missing_per_cam = [int((~pm[:, k, :].any(-1)).sum().item()) for k in range(K_dim)]
+                logger.info(
+                    f"[batch] {scene}  T={T_dim}  valid_cams={valid_cams}/{K_dim}  "
+                    f"people_per_cam={per_cam_ppl}  missing_frames={missing_per_cam}"
+                )
+            # ─────────────────────────────────────────────────────────────────
+
             if train:
-                # Training step
-                with torch.amp.autocast('cuda', enabled=self.use_amp):
+                # Training step — wrap step 0 in detect_anomaly (forward+backward)
+                # so that DivBackward0 / other NaN ops are traced to their source.
+                _detect = self._step == 0
+                with torch.autograd.detect_anomaly(check_nan=_detect), \
+                     torch.amp.autocast('cuda', enabled=self.use_amp):
                     preds = self._forward(inputs)
                     preds = self._append_smplx_joints(preds)
-                    step_losses = {name: fn(preds, targets) for name, (fn, _) in self.losses.items()}
+
+                    # ── pred tensor sanity check ──────────────────────────────
+                    _pred_labels = ["pose_aggr", "shape_aggr", "camera_pred",
+                                    "body_transl_world", "orient_per_cam",
+                                    "transl_per_cam", "person_visible", "joints_world"]
+                    for _pi, _pt in enumerate(preds):
+                        if isinstance(_pt, torch.Tensor) and not _pt.isfinite().all():
+                            _lbl = _pred_labels[_pi] if _pi < len(_pred_labels) else f"preds[{_pi}]"
+                            logger.warning(
+                                f"[PRED NaN] {scene}  step={self._step}  "
+                                f"{_lbl}  shape={tuple(_pt.shape)}  "
+                                f"n_bad={(~_pt.isfinite()).sum().item()}"
+                            )
+                    # body_transl_world range (always log for first step to confirm init)
+                    if self._step == 0 and len(preds) > 2 and isinstance(preds[2], torch.Tensor):
+                        _cp = preds[2]   # (B, T, K, 8)
+                        _qnorm = _cp[..., :4].norm(dim=-1)
+                        _tmag  = _cp[..., 4:7].norm(dim=-1)
+                        logger.info(
+                            f"[INIT] camera_pred  quat_norm min={_qnorm.min().item():.3f} "
+                            f"max={_qnorm.max().item():.3f}  "
+                            f"transl_mag min={_tmag.min().item():.3f} "
+                            f"max={_tmag.max().item():.3f}"
+                        )
+                    if self._step == 0 and len(preds) > 3 and isinstance(preds[3], torch.Tensor):
+                        _tw = preds[3]
+                        logger.info(
+                            f"[INIT] body_transl_world  min={_tw.min().item():.2f}  "
+                            f"max={_tw.max().item():.2f}  mean={_tw.mean().item():.2f}"
+                        )
+                    if self._step == 0 and len(preds) > 7 and isinstance(preds[7], torch.Tensor):
+                        _jw = preds[7]
+                        logger.info(
+                            f"[INIT] joints_world  min={_jw.min().item():.2f}  "
+                            f"max={_jw.max().item():.2f}  mean={_jw.mean().item():.2f}"
+                        )
+                    # ─────────────────────────────────────────────────────────
+
+                    step_losses = {name: fn(preds, targets) for name, (fn, _) in active_losses.items()}
+
+                # ── forward NaN/inf check ─────────────────────────────────────
+                for _lname, _lval in step_losses.items():
+                    if not _lval.isfinite():
+                        logger.warning(
+                            f"[FORWARD NaN] {scene}  step={self._step}  "
+                            f"loss={_lname}  value={_lval.item()}"
+                        )
+                # ─────────────────────────────────────────────────────────────
+
                 total_loss: torch.Tensor = torch.stack(
-                    [w * step_losses[n] for n, (_, w) in self.losses.items()]
+                    [w * step_losses[n] for n, (_, w) in active_losses.items()]
                 ).sum()
 
                 self.optimizer.zero_grad()
-                if self._step == 0:
-                    import torch._functorch.config as _fc
-                    _fc.donated_buffer = False
-                    _loss_vals = {n: step_losses[n] * w for n, (_, w) in self.losses.items()}
-                    for _name, _loss in _loss_vals.items():
-                        self.optimizer.zero_grad()
-                        _loss.backward(retain_graph=True)
-                        _has_nan = any(
-                            p.grad is not None and not p.grad.isfinite().all()
-                            for p in self.model.parameters()
-                        )
-                        logger.info(f"[GRAD-CHECK] {_name}: loss={float(_loss):.6f}, nan_grad={_has_nan}")
-                    self.optimizer.zero_grad()
-                    raise SystemExit(0)
                 total_loss.backward()
+
+                # ── backward NaN/inf check + gradient norm log ───────────────
+                nan_modules: set[str] = set()
+                module_grad_norms: dict[str, float] = {}
+                for _pname, _p in self.model.named_parameters():
+                    top = _pname.split(".")[0]
+                    if _p.grad is not None:
+                        gnorm = float(_p.grad.float().norm().item())
+                        prev = module_grad_norms.get(top, 0.0)
+                        module_grad_norms[top] = max(prev, gnorm)
+                        if not _p.grad.isfinite().all():
+                            nan_modules.add(top)
+                if nan_modules:
+                    logger.warning(
+                        f"[BACKWARD NaN] {scene}  step={self._step}  "
+                        f"modules={sorted(nan_modules)}"
+                    )
+                # Always log grad norms for the first 3 steps for diagnostics
+                if self._step < 3:
+                    norm_str = "  ".join(
+                        f"{m}={v:.3e}" for m, v in sorted(module_grad_norms.items())
+                    )
+                    logger.info(f"[GRAD NORMS] step={self._step}  {norm_str}")
+                # ─────────────────────────────────────────────────────────────
+
                 if self.grad_clip:
                     nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
                 self.optimizer.step()
@@ -371,9 +476,9 @@ class Trainer:
                 with torch.no_grad(), torch.amp.autocast('cuda', enabled=self.use_amp):
                     preds = self._forward(inputs)
                     preds = self._append_smplx_joints(preds)
-                    step_losses = {name: fn(preds, targets) for name, (fn, _) in self.losses.items()}
+                    step_losses = {name: fn(preds, targets) for name, (fn, _) in active_losses.items()}
                     total_loss = torch.stack(
-                        [w * step_losses[n] for n, (_, w) in self.losses.items()]
+                        [w * step_losses[n] for n, (_, w) in active_losses.items()]
                     ).sum()
 
             if self.metric_fn is not None and self.metrics is not None:
@@ -447,6 +552,8 @@ class Trainer:
         """
         Move to device the data
         """
+        if isinstance(data, str):
+            return data
         if isinstance(data, torch.Tensor):
             t = data.to(self.device, non_blocking=True)
             if self.dtype is not None and t.is_floating_point():

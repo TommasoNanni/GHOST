@@ -1,9 +1,32 @@
 import smplx
 import pickle
 import torch
+import torch.nn.functional as F
 from configuration import CONFIG
-from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_axis_angle
+from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_quaternion
 import numpy as np
+
+
+def _rot_matrix_to_axis_angle_safe(R_flat: torch.Tensor) -> torch.Tensor:
+    """Convert rotation matrices to axis-angle without acos singularity.
+
+    Uses matrix_to_quaternion (polynomial, no sqrt) then atan2-based angle
+    with a safe norm so the backward is finite even at the identity rotation.
+
+    Parameters
+    ----------
+    R_flat : (..., 3, 3)
+
+    Returns
+    -------
+    axis_angle : (..., 3)
+    """
+    q        = matrix_to_quaternion(R_flat)               # (..., 4) [w, x, y, z]
+    xyz      = q[..., 1:]                                 # (..., 3) imaginary part
+    w        = q[..., :1].abs()                           # (..., 1) real part, keep w≥0
+    xyz_norm = xyz.pow(2).sum(-1, keepdim=True).add(1e-8).sqrt()   # safe norm
+    angle    = 2.0 * torch.atan2(xyz_norm, w)             # (..., 1) in [0, π]
+    return (xyz / xyz_norm) * angle                       # (..., 3)
 
 _smplx_cache: dict = {}
 
@@ -74,7 +97,7 @@ def get_smplx_vertices(pose: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
 
     N = pose.shape[0]  # B*T*K or B*T
 
-    pose_aa = matrix_to_axis_angle(
+    pose_aa = _rot_matrix_to_axis_angle_safe(
         rotation_6d_to_matrix(pose.reshape(N*P*J, 6))
     ).reshape(N*P, J*3)
 
@@ -125,7 +148,7 @@ def get_smplx_joints(pose: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
 
     N = pose.shape[0]
 
-    pose_aa = matrix_to_axis_angle(
+    pose_aa = _rot_matrix_to_axis_angle_safe(
         rotation_6d_to_matrix(pose.reshape(N*P*J, 6))
     ).reshape(N*P, J*3)
 
