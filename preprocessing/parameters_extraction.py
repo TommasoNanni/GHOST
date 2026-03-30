@@ -118,6 +118,15 @@ class BodyParameterEstimator:
         self._estimator: object | None = None
         self._converter: object | None = None
 
+    @staticmethod
+    def _is_estimated(video_dir: Path) -> bool:
+        """Return True if body estimation has already been run for this video.
+
+        Uses ``appearance_gallery.npz`` as the completion marker because it is
+        written last in ``_process_video_core``.
+        """
+        return (Path(video_dir) / "body_data" / "appearance_gallery.npz").exists()
+
     def _init_sam3d(self) -> None:
         """Lazy-load the SAM3D Body estimator."""
         if self._estimator is not None:
@@ -190,6 +199,9 @@ class BodyParameterEstimator:
             converter = self._create_converter(self.mhr_model_path, self.smplx_model_path)
             for video in tqdm(scene.videos, desc="SAM3D Body estimation"):
                 video_dir = video_dirs[video.video_id]
+                if BodyParameterEstimator._is_estimated(video_dir):
+                    logging.info(f"  {video.video_id}: body data already exists, skipping")
+                    continue
                 BodyParameterEstimator._process_video_core(
                     self._estimator,
                     video.video_id,
@@ -218,11 +230,19 @@ class BodyParameterEstimator:
         mp.set_start_method("spawn", force=True)
         task_queue: mp.Queue = mp.Queue()
         for video in scene.videos:
+            if BodyParameterEstimator._is_estimated(video_dirs[video.video_id]):
+                logging.info(f"  {video.video_id}: body data already exists, skipping")
+                continue
             task_queue.put((
                 video.video_id,
                 str(video_dirs[video.video_id]),
                 str(video.frames_home) if video.frames_home else None,
             ))
+        # If every video was already estimated, nothing to do
+        if task_queue.empty():
+            logging.info("All videos already estimated — skipping body estimation workers")
+            return
+
         # One sentinel per worker signals end of work
         num_workers = min(num_gpus, num_videos)
         for _ in range(num_workers):
@@ -1072,6 +1092,7 @@ class BodyParameterEstimator:
     def _match_persons_across_views_static(
         video_dirs: dict[str, Path],
         scene_id: str,
+        scene_dir: Path,
         cross_view_reid_threshold: float = 0.4,
         appearance_weight: float = 0.7,
         shape_weight: float = 0.3,
@@ -1578,7 +1599,6 @@ class BodyParameterEstimator:
                 f"Scene {scene_id}: all local IDs are already globally "
                 f"consistent, no remap needed"
             )
-            return
 
         # ── 6. Apply remaps to body_data, masks, and JSON ─────────────────
         for vid_id, remap in global_remap.items():
@@ -1649,6 +1669,16 @@ class BodyParameterEstimator:
                 f"  {vid_id}: cross-view re-ID — "
                 f"{len(remap)} ID remap(s): {remap}"
             )
+
+        # Write scene-level summary. This file also serves as the completion
+        # marker checked by match_across_views to skip already-processed scenes.
+        reid_summary_path = scene_dir / "cross_view_reid.json"
+        reid_summary = {
+            vid_id: {str(k): v for k, v in remap.items()}
+            for vid_id, remap in global_remap.items()
+        }
+        with open(reid_summary_path, "w") as _f:
+            json.dump(reid_summary, _f, indent=2)
 
     @staticmethod
     def _apply_reid_remap(
@@ -1845,9 +1875,16 @@ class CrossViewReidentifier:
         video_dirs: dict[str, Path],
     ) -> None:
         """Assign consistent global person IDs across all camera views in a scene."""
+        scene_dir = Path(next(iter(video_dirs.values()))).parent
+
+        if (scene_dir / "cross_view_reid.json").exists():
+            logging.info(f"  Scene {scene.scene_id}: cross-view ReID already done, skipping")
+            return
+
         BodyParameterEstimator._match_persons_across_views_static(
             video_dirs=video_dirs,
             scene_id=scene.scene_id,
+            scene_dir=scene_dir,
             cross_view_reid_threshold=self.threshold,
             appearance_weight=self.appearance_weight,
             shape_weight=self.shape_weight,
