@@ -840,6 +840,24 @@ class RICHFusionDatapoint(FusionDatapoint):
         scene_name = self.scene_dir.name
         gt_root = rich_data_root / "train_body" / scene_name
 
+        # Load SMPL-X hand PCA basis so 12-dim GT hand coefficients can be
+        # decoded to 45-dim axis-angle (15 joints × 3).
+        from configuration import CONFIG as _CONFIG
+        smplx_model_path = kwargs.get("smplx_model_path", _CONFIG.data.smplx_model_path)
+        self._hand_pca: dict[str, np.ndarray] = {}
+        try:
+            with open(smplx_model_path, "rb") as _f:
+                _smplx = pickle.load(_f, encoding="latin1")
+            self._hand_pca = {
+                "mean_l":       np.asarray(_smplx["hands_meanl"],       dtype=np.float32),   # (45,)
+                "mean_r":       np.asarray(_smplx["hands_meanr"],       dtype=np.float32),   # (45,)
+                "components_l": np.asarray(_smplx["hands_componentsl"], dtype=np.float32),   # (45, 45)
+                "components_r": np.asarray(_smplx["hands_componentsr"], dtype=np.float32),   # (45, 45)
+            }
+        except Exception as e:
+            logger.warning(f"Could not load SMPL-X hand PCA from {smplx_model_path}: {e}. "
+                           f"Hand GT will remain zeros.")
+
         # gt_accum[person_id][field] = list of per-frame arrays with information
         gt_accum: dict[int, dict[str, list]] = {}
 
@@ -1153,9 +1171,20 @@ class RICHFusionDatapoint(FusionDatapoint):
             go = gt["global_orient"][gt_idx].reshape(1, 3)   # (1, 3)
             bp = gt["body_pose"][gt_idx].reshape(-1, 3)       # (21, 3)
             parts = [go, bp]
-            for key in ("left_hand_pose", "right_hand_pose"):
+            for key, pca_mean_key, pca_comp_key in (
+                ("left_hand_pose",  "mean_l", "components_l"),
+                ("right_hand_pose", "mean_r", "components_r"),
+            ):
                 if key in gt:
-                    parts.append(gt[key][gt_idx].reshape(-1, 3))  # (15, 3)
+                    raw = gt[key][gt_idx].reshape(-1)   # (12,) PCA or (45,) axis-angle
+                    if raw.shape[0] != 45 and self._hand_pca:
+                        # Decode PCA coefficients → 45-dim axis-angle
+                        n = raw.shape[0]
+                        aa45 = (self._hand_pca[pca_mean_key]
+                                + self._hand_pca[pca_comp_key][:n].T @ raw)  # (45,)
+                        parts.append(aa45.reshape(15, 3))
+                    else:
+                        parts.append(raw.reshape(-1, 3))  # (15, 3)
             for key in ("jaw_pose", "leye_pose", "reye_pose"):
                 if key in gt:
                     parts.append(gt[key][gt_idx].reshape(-1, 3))   # (1, 3)
