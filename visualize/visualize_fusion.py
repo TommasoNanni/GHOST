@@ -5,7 +5,7 @@ frustums textured with the original video frames.
 
 Usage
 -----
-    pixi run python scripts/visualize_fusion.py \\
+    pixi run python visualize/visualize_fusion.py \\
         --predictions fusion_outputs/60980456_predictions.npz \\
         --scene_dir   test_outputs/rich10_segmentation_test/BBQ_001_guitar \\
         --frame_start 0 \\
@@ -56,7 +56,6 @@ import numpy as np
 import torch
 import tyro
 import viser
-import viser.transforms as vtf
 import cv2
 from scipy.spatial.transform import Rotation as SciR
 from pytorch3d.transforms import (
@@ -85,8 +84,8 @@ _ROT180 = np.diag([1., -1., -1.])
 def _6d_to_aa(pose_6d: np.ndarray) -> np.ndarray:
     """(*, 6) float32 6D rotation → (*, 3) axis-angle."""
     t = torch.from_numpy(pose_6d.astype(np.float32))
-    mat = rotation_6d_to_matrix(t)          # (*, 3, 3)
-    aa  = matrix_to_axis_angle(mat)         # (*, 3)
+    mat = rotation_6d_to_matrix(t)
+    aa  = matrix_to_axis_angle(mat)
     return aa.numpy()
 
 
@@ -107,12 +106,9 @@ def _build_smplx_vertices(
 
     T, P, J, _ = pose.shape
 
-    # Normalise shape to (T, P, 10)
     if shape.ndim == 2:           # (P, 10) — constant over time
         shape = np.broadcast_to(shape[None], (T, P, 10)).copy()
 
-    # Load model (neutral, no PCA for hands)
-    # Support passing either a directory or a direct file path (pkl/npz)
     _p = smplx_model_dir
     _create_kwargs: dict = {"model_type": "smplx"}
     if _p.is_file():
@@ -130,24 +126,23 @@ def _build_smplx_vertices(
     )
     model.eval()
 
-    # Convert 6D → axis-angle
-    global_orient_aa = _6d_to_aa(pose[:, :, 0, :])    # (T, P, 3)
-    body_pose_aa     = _6d_to_aa(pose[:, :, 1:22, :]) # (T, P, 21, 3)
+    global_orient_aa = _6d_to_aa(pose[:, :, 0, :])
+    body_pose_aa     = _6d_to_aa(pose[:, :, 1:22, :])
 
     def _t(x): return torch.from_numpy(x.reshape(T * P, -1).astype(np.float32))
 
     with torch.no_grad():
         out = model(
-            global_orient = _t(global_orient_aa),            # (T*P, 3)
-            body_pose     = _t(body_pose_aa),                # (T*P, 63)
-            betas         = _t(shape),                       # (T*P, 10)
-            transl        = _t(trans),                       # (T*P, 3)
+            global_orient = _t(global_orient_aa),
+            body_pose     = _t(body_pose_aa),
+            betas         = _t(shape),
+            transl        = _t(trans),
             return_verts  = True,
         )
 
     V = out.vertices.shape[1]
-    verts = out.vertices.numpy().reshape(T, P, V, 3)   # (T, P, V, 3)
-    faces = model.faces.copy()                          # (F, 3)
+    verts = out.vertices.numpy().reshape(T, P, V, 3)
+    faces = model.faces.copy()
     return verts, faces
 
 
@@ -159,16 +154,16 @@ def _load_rich_frame(
 ) -> np.ndarray | None:
     """Load one RICH frame as BGR uint8, or None if not found."""
     cam_dir = rich_data_root / scene_name / f"cam_{cam_idx:02d}"
-    p = cam_dir / f"{rich_frame_idx:05d}_00.jpg"
-    if not p.exists():
-        # try without the _00 suffix
-        for ext in (".jpg", ".png", ".bmp"):
-            q = cam_dir / f"{rich_frame_idx:05d}{ext}"
-            if q.exists():
-                p = q
-                break
-    img = cv2.imread(str(p))
-    return img   # None if still not found
+    # Filename suffix matches camera index: 00000_01.jpg for cam_01
+    search_dirs = [cam_dir, cam_dir / "frames"]
+    for stem_suffix in (f"{rich_frame_idx:05d}_{cam_idx:02d}", f"{rich_frame_idx:05d}"):
+        for search_dir in search_dirs:
+            for ext in (".jpg", ".png", ".bmp"):
+                q = search_dir / f"{stem_suffix}{ext}"
+                if q.exists():
+                    img = cv2.imread(str(q))
+                    return img
+    return None
 
 
 def _cam_to_viser(
@@ -177,13 +172,13 @@ def _cam_to_viser(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Convert world-to-camera [R|t] to viser wxyz quaternion + position.
 
-    Viser expects the camera-to-world transform, Y-up convention.
+    Returns the camera-to-world pose in viser's Y-up convention.
+    The returned wxyz is also suitable for client.camera.wxyz (same convention).
     """
-    # cam-to-world
     R_c2w = R_w2c.T
     t_c2w = -(R_w2c.T @ t_w2c)
 
-    # apply Y-flip to match viser's Y-up convention
+    # Apply Y-flip to match viser's Y-up convention
     R_vis = _ROT180 @ R_c2w
     t_vis = _ROT180 @ t_c2w
 
@@ -209,7 +204,6 @@ def run(
     ----------
     predictions     : path to the *_predictions.npz saved by the trainer
     scene_dir       : ghost output directory for the scene
-                      (e.g. test_outputs/rich10_segmentation_test/BBQ_001_guitar)
     rich_data_root  : root of the RICH dataset (contains cam_XX subdirs)
     smplx_model_dir : directory that contains SMPLX_NEUTRAL.pkl (or smplx/ subdir)
     frame_start     : first RICH frame index (used to load correct images)
@@ -231,26 +225,24 @@ def run(
 
     print(f"  T={T} frames, P={P} persons, K={K} cameras")
 
-    # Optionally load GT for side-by-side comparison
-    gt_body_pose          = d.get("gt_body_pose")          # (T, P, J, 6) or None
-    gt_body_shape         = d.get("gt_body_shape")         # (T, P, 10) or None
-    gt_body_transl_world  = d.get("gt_body_transl_world")  # (T, P, 3)  or None — may be absent
+    # Optional GT
+    gt_body_pose         = d.get("gt_body_pose")
+    gt_body_shape        = d.get("gt_body_shape")
+    gt_body_transl_world = d.get("gt_body_transl_world")
 
-    # Frames where gt_body_transl_world is all-zero have no RICH annotation — hide GT there.
     if gt_body_transl_world is not None:
-        gt_valid = ~np.all(gt_body_transl_world.reshape(T, -1) == 0, axis=-1)  # (T,) bool
+        gt_valid = ~np.all(gt_body_transl_world.reshape(T, -1) == 0, axis=-1)
         first_valid = int(gt_valid.argmax()) if gt_valid.any() else 0
         n_missing = int((~gt_valid).sum())
         if n_missing:
-            print(f"  {n_missing} frames have no GT annotation (gt_body_transl_world=0) — GT body hidden there.")
+            print(f"  {n_missing} frames have no GT annotation — GT body hidden there.")
     else:
-        gt_valid = np.zeros(T, dtype=bool)
+        gt_valid  = np.zeros(T, dtype=bool)
         first_valid = 0
 
     # ── build SMPL-X meshes ───────────────────────────────────────────────────
     print("Running SMPL-X forward pass for predictions …")
     pred_verts, faces = _build_smplx_vertices(pose, shape, body_transl_world, smplx_model_dir)
-    # pred_verts: (T, P, V, 3) in world (cam-0) space
 
     gt_verts = None
     if show_gt and gt_body_pose is not None and gt_body_transl_world is not None:
@@ -259,23 +251,21 @@ def run(
         gt_verts, _ = _build_smplx_vertices(gt_body_pose, gt_shape_arr, gt_body_transl_world, smplx_model_dir)
 
     # Apply Y-flip for viser convention
-    pred_verts_vis = pred_verts @ _ROT180.T   # (T, P, V, 3)
+    pred_verts_vis = pred_verts @ _ROT180.T
     gt_verts_vis   = gt_verts   @ _ROT180.T if gt_verts is not None else None
 
     # ── decode predicted cameras ──────────────────────────────────────────────
-    # camera: (T, K, 8)  quat is wxyz, not unit (q_in + Δq stored raw)
-    quat_raw = camera[..., :4]                              # (T, K, 4)
-    # normalise
-    norms = np.linalg.norm(quat_raw, axis=-1, keepdims=True).clip(1e-8)
-    quat_n = quat_raw / norms                               # (T, K, 4) unit wxyz
-    R_w2c  = quaternion_to_matrix(
+    quat_raw = camera[..., :4]
+    norms    = np.linalg.norm(quat_raw, axis=-1, keepdims=True).clip(1e-8)
+    quat_n   = quat_raw / norms
+    R_w2c    = quaternion_to_matrix(
         torch.from_numpy(quat_n.reshape(-1, 4).astype(np.float32))
     ).numpy().reshape(T, K, 3, 3)
-    t_w2c  = camera[..., 4:7]                              # (T, K, 3)
-    focal  = camera[0, :, 7]                               # (K,) constant
+    t_w2c    = camera[..., 4:7]
+    focal    = camera[0, :, 7]
 
     # ── decode GT cameras (if available) ─────────────────────────────────────
-    gt_camera_data = d.get("gt_camera")                    # (T, K, 8) or None
+    gt_camera_data = d.get("gt_camera")
     gt_R_w2c = gt_t_w2c = gt_focal = None
     if gt_camera_data is not None:
         gt_quat_raw = gt_camera_data[..., :4]
@@ -284,10 +274,10 @@ def run(
         gt_R_w2c    = quaternion_to_matrix(
             torch.from_numpy(gt_quat_n.reshape(-1, 4).astype(np.float32))
         ).numpy().reshape(T, K, 3, 3)
-        gt_t_w2c    = gt_camera_data[..., 4:7]             # (T, K, 3)
-        gt_focal    = gt_camera_data[0, :, 7]              # (K,) constant
+        gt_t_w2c    = gt_camera_data[..., 4:7]
+        gt_focal    = gt_camera_data[0, :, 7]
 
-    # Image size from first available frame
+    # ── image size from first available frame ─────────────────────────────────
     sample_img = _load_rich_frame(rich_data_root, scene_name, 0, frame_start)
     if sample_img is not None:
         H, W = sample_img.shape[:2]
@@ -295,22 +285,64 @@ def run(
         H, W = 1080, 1920
     aspect = W / H
 
+    # ── pre-load all video frames into RAM (parallel, ds=4 ~270×480) ──────────
+    # All K cameras are loaded concurrently with threads (I/O bound).
+    # On a network filesystem (cluster) this gives ~K× speedup.
+    _DS = 4
+    frames_cache: list[list[np.ndarray | None]] = [[None] * T for _ in range(K)]
+
+    def _load_one(args: tuple[int, int]) -> tuple[int, int, np.ndarray | None]:
+        k, t_idx = args
+        img = _load_rich_frame(rich_data_root, scene_name, k, frame_start + t_idx)
+        if img is not None:
+            img = img[::_DS, ::_DS]
+            return k, t_idx, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        return k, t_idx, None
+
+    all_tasks = [(k, t_idx) for k in range(K) for t_idx in range(T)]
+    total = len(all_tasks)
+    print(f"Pre-loading {T} frames × {K} cameras at 1/{_DS} resolution (parallel) …")
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    n_workers = min(64, total)
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futs = {pool.submit(_load_one, task): task for task in all_tasks}
+        done = 0
+        for fut in as_completed(futs):
+            k, t_idx, img = fut.result()
+            frames_cache[k][t_idx] = img
+            done += 1
+            if done % max(1, total // 10) == 0:
+                print(f"  {done}/{total} frames loaded …")
+
+    for k in range(K):
+        n_found = sum(f is not None for f in frames_cache[k])
+        print(f"  cam {k}: {n_found}/{T} frames")
+    print("Pre-loading complete.\n")
+
+    # Placeholder black image for the background widget when not watching
+    _BG_H, _BG_W = H // _DS, W // _DS
+    _BLACK = np.zeros((_BG_H, _BG_W, 3), dtype=np.uint8)
+
     # ── start viser ──────────────────────────────────────────────────────────
     server = viser.ViserServer(port=port)
     server.scene.world_axes.visible = True
     server.scene.set_up_direction("+y")
-    print(f"\nViser viewer ready → http://localhost:{port}")
+    print(f"Viser viewer ready → http://localhost:{port}")
     print(f"On a cluster run:    ssh -L {port}:localhost:{port} <host>\n")
 
-    # ── GUI controls ──────────────────────────────────────────────────────────
-    _playing = False   # mutable state for play/pause toggle
+    # ── mutable state ─────────────────────────────────────────────────────────
+    _playing     = False
+    _last_frame  = [-1]          # list so inner functions can mutate it
+    _clients: dict[int, viser.ClientHandle] = {}
 
+    # ── GUI controls ──────────────────────────────────────────────────────────
     with server.gui.add_folder("Playback"):
-        gui_frame        = server.gui.add_slider("Frame", min=0, max=T - 1,
-                                                 step=1, initial_value=first_valid)
-        gui_play_button  = server.gui.add_button("▶  Play")
-        gui_fps          = server.gui.add_slider("FPS", min=1, max=60,
-                                                 step=1, initial_value=15)
+        gui_frame       = server.gui.add_slider("Frame", min=0, max=T - 1,
+                                                step=1, initial_value=first_valid)
+        gui_play_button = server.gui.add_button("▶  Play")
+        gui_fps         = server.gui.add_slider("FPS", min=1, max=60,
+                                                step=1, initial_value=15)
 
     @gui_play_button.on_click
     def _toggle_play(_):
@@ -322,71 +354,87 @@ def run(
         gui_show_pred       = server.gui.add_checkbox("Predicted body", True)
         gui_show_gt         = server.gui.add_checkbox("GT body", True)
         gui_show_frustum    = server.gui.add_checkbox("Camera frustums", True)
-        gui_show_gt_frustum = server.gui.add_checkbox("GT camera frustums", gt_R_w2c is not None)
-        gui_show_frames     = server.gui.add_checkbox("Video frames", True)
+        gui_show_gt_frustum = server.gui.add_checkbox("GT camera frustums",
+                                                       gt_R_w2c is not None)
+        gui_show_frames     = server.gui.add_checkbox("Video frames in frustums", False)
 
     with server.gui.add_folder("Frustum"):
-        gui_frustum_scale    = server.gui.add_slider(
-            "Scale", min=0.05, max=2.0, step=0.01, initial_value=0.3)
-        gui_line_width       = server.gui.add_slider(
+        gui_frustum_scale = server.gui.add_slider(
+            "Scale", min=0.05, max=5.0, step=0.05, initial_value=0.15)
+        gui_line_width    = server.gui.add_slider(
             "Line width", min=0.5, max=5.0, step=0.1, initial_value=1.5)
-        gui_frame_downsample = server.gui.add_slider(
-            "Frame downsample", min=1, max=16, step=1, initial_value=4)
-        gui_video_cam        = server.gui.add_dropdown(
-            "Video camera", options=["all", "none"] + [str(k) for k in range(K)],
-            initial_value="all")
+        # "all" moved to end — selecting one camera is the recommended path
+        gui_video_cam     = server.gui.add_dropdown(
+            "Video camera (frustum texture)",
+            options=["none"] + [str(k) for k in range(K)] + ["all"],
+            initial_value="none",
+        )
 
-    # ── pre-load all video frames into RAM ───────────────────────────────────
-    # Eliminates per-frame disk I/O so update_frame() only does memory lookups.
-    # frames_cache[cam_idx][t_idx] = RGB uint8 ndarray, or None if frame missing.
-    frames_cache: list[list[np.ndarray | None]] = [[] for _ in range(K)]
-    if rich_data_root is not None:
-        ds_pre = max(1, int(gui_frame_downsample.value))
-        print(f"Pre-loading {T} frames × {K} cameras at 1/{ds_pre} resolution …")
-        for k in range(K):
-            for t_idx in range(T):
-                img_bgr = _load_rich_frame(
-                    rich_data_root, scene_name, k, frame_start + t_idx)
-                if img_bgr is not None:
-                    if ds_pre > 1:
-                        img_bgr = img_bgr[::ds_pre, ::ds_pre]
-                    frames_cache[k].append(
-                        cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-                else:
-                    frames_cache[k].append(None)
-            n_found = sum(f is not None for f in frames_cache[k])
-            print(f"  cam {k}: {n_found}/{T} frames loaded")
-        print("Pre-loading complete.\n")
+    # "Watch from camera" — snaps the viewer to a RICH camera each frame and
+    # shows the live video feed as a sidebar background image.
+    _watch_cam_options = ["Free"] + [f"pred cam {k}" for k in range(K)]
+    if gt_R_w2c is not None:
+        _watch_cam_options += [f"GT cam {k}" for k in range(K)]
 
-    # ── mesh handles (created once, updated per frame) ────────────────────────
-    pred_mesh_handles = []
+    with server.gui.add_folder("Watch from Camera"):
+        gui_watch_cam = server.gui.add_dropdown(
+            "Camera", options=_watch_cam_options, initial_value="Free")
+        gui_watch_info = server.gui.add_markdown(
+            "Select a camera above to snap the viewer to it and show a live video feed below.")
+        gui_bg_image = server.gui.add_image(
+            _BLACK,
+            label="Live feed  (updated each frame)",
+            format="jpeg",
+        )
+
+    # ── frustum style callbacks ───────────────────────────────────────────────
+    @gui_frustum_scale.on_update
+    def _(_):
+        for fh in _frustum_handles + _gt_frustum_handles:
+            fh.scale = gui_frustum_scale.value
+
+    @gui_line_width.on_update
+    def _(_):
+        for fh in _frustum_handles + _gt_frustum_handles:
+            fh.line_width = gui_line_width.value
+
+    @gui_show_frames.on_update
+    def _(_):
+        update_frame(gui_frame.value, force=True)
+
+    @gui_video_cam.on_update
+    def _(_):
+        update_frame(gui_frame.value, force=True)
+
+    # ── scene objects (created once, updated per frame) ───────────────────────
+    _pred_mesh_handles = []
     for p in range(P):
         color = _PALETTE[p % len(_PALETTE)]
         h = server.scene.add_mesh_simple(
             f"/world/person_{p}/pred",
-            vertices  = pred_verts_vis[0, p],
-            faces     = faces,
+            vertices     = pred_verts_vis[0, p],
+            faces        = faces,
             flat_shading = False,
-            color     = color,
+            color        = color,
         )
-        pred_mesh_handles.append(h)
+        _pred_mesh_handles.append(h)
 
-    gt_mesh_handles = []
+    _gt_mesh_handles = []
     if gt_verts_vis is not None:
         for p in range(P):
-            color = _PALETTE[p % len(_PALETTE)]
+            color = (220, 220, 220)  # GT = light grey wireframe; pred uses _PALETTE
             h = server.scene.add_mesh_simple(
                 f"/world/person_{p}/gt",
-                vertices  = gt_verts_vis[0, p],
-                faces     = faces,
+                vertices     = gt_verts_vis[0, p],
+                faces        = faces,
                 flat_shading = False,
                 wireframe    = True,
-                color     = color,
+                color        = color,
             )
-            gt_mesh_handles.append(h)
+            _gt_mesh_handles.append(h)
 
-    # ── frustum handles (updated per frame because cameras may be time-varying) ─
-    frustum_handles = []
+    # Predicted camera frustums
+    _frustum_handles = []
     for k in range(K):
         vfov = 2 * np.arctan(H / 2 / max(focal[k], 1.0))
         wxyz, pos = _cam_to_viser(R_w2c[0, k], t_w2c[0, k])
@@ -399,10 +447,10 @@ def run(
             wxyz       = wxyz,
             position   = pos,
         )
-        frustum_handles.append(fh)
+        _frustum_handles.append(fh)
 
-    # GT camera frustums — green, static (GT extrinsics don't change over time)
-    gt_frustum_handles = []
+    # GT camera frustums — green
+    _gt_frustum_handles = []
     if gt_R_w2c is not None:
         for k in range(K):
             vfov_gt = 2 * np.arctan(H / 2 / max(gt_focal[k], 1.0))
@@ -418,67 +466,118 @@ def run(
                 position   = pos_gt,
                 visible    = gui_show_gt_frustum.value,
             )
-            gt_frustum_handles.append(fh_gt)
+            _gt_frustum_handles.append(fh_gt)
 
-    # ── frustum style callbacks ───────────────────────────────────────────────
-    @gui_frustum_scale.on_update
-    def _(_):
-        for fh in frustum_handles + gt_frustum_handles:
-            fh.scale = gui_frustum_scale.value
+    # ── helpers for watch-from-camera mode ────────────────────────────────────
+    def _parse_watch_cam() -> tuple[str, int] | None:
+        """Parse gui_watch_cam.value → ('pred'|'gt', cam_idx) or None."""
+        v = gui_watch_cam.value
+        if v == "Free":
+            return None
+        if v.startswith("pred cam "):
+            return ("pred", int(v.split()[-1]))
+        if v.startswith("GT cam "):
+            return ("gt", int(v.split()[-1]))
+        return None
 
-    @gui_line_width.on_update
-    def _(_):
-        for fh in frustum_handles + gt_frustum_handles:
-            fh.line_width = gui_line_width.value
+    def _snap_client_to_cam(client: viser.ClientHandle, t_idx: int) -> None:
+        """Push this client's viewer to the selected RICH camera."""
+        info = _parse_watch_cam()
+        if info is None:
+            return
+        src, k = info
+        if src == "pred":
+            R, t, f_k = R_w2c[t_idx, k], t_w2c[t_idx, k], focal[k]
+        else:
+            if gt_R_w2c is None:
+                return
+            R, t, f_k = gt_R_w2c[t_idx, k], gt_t_w2c[t_idx, k], gt_focal[k]
+        wxyz, pos = _cam_to_viser(R, t)
+        vfov_k = float(2 * np.arctan(H / 2 / max(f_k, 1.0)))
+        client.camera.wxyz     = wxyz
+        client.camera.position = pos
+        client.camera.fov      = vfov_k
+
+    # ── client tracking ───────────────────────────────────────────────────────
+    @server.on_client_connect
+    def _(client: viser.ClientHandle) -> None:
+        _clients[client.client_id] = client
+        # Snap new client to the currently selected camera immediately
+        _snap_client_to_cam(client, gui_frame.value)
+
+    @server.on_client_disconnect
+    def _(client: viser.ClientHandle) -> None:
+        _clients.pop(client.client_id, None)
 
     # ── per-frame update ──────────────────────────────────────────────────────
-    last_frame = -1
-
-    def update_frame(t_idx: int) -> None:
-        nonlocal last_frame
-        if t_idx == last_frame:
+    def update_frame(t_idx: int, force: bool = False) -> None:
+        if t_idx == _last_frame[0] and not force:
             return
-        last_frame = t_idx
+        _last_frame[0] = t_idx
 
-        rich_frame_idx = frame_start + t_idx
+        watch_info  = _parse_watch_cam()
+        watching    = watch_info is not None
+        vid_cam_str = gui_video_cam.value
+        show_all    = vid_cam_str == "all"
+        show_none   = vid_cam_str == "none"
+        vid_cam_idx = -1 if vid_cam_str in ("all", "none") else int(vid_cam_str)
 
         with server.atomic():
-            # Bodies
-            for p, h in enumerate(pred_mesh_handles):
+            # ── bodies ───────────────────────────────────────────────────────
+            for p, h in enumerate(_pred_mesh_handles):
                 h.vertices = pred_verts_vis[t_idx, p]
                 h.visible  = gui_show_pred.value
-            for p, h in enumerate(gt_mesh_handles):
+            for p, h in enumerate(_gt_mesh_handles):
                 h.vertices = gt_verts_vis[t_idx, p]
                 h.visible  = gui_show_gt.value and show_gt and bool(gt_valid[t_idx])
 
-            # Predicted cameras + images (served from RAM cache — no disk I/O here)
-            vid_cam_str = gui_video_cam.value
-            show_all    = vid_cam_str == "all"
-            vid_cam_idx = -1 if vid_cam_str in ("all", "none") else int(vid_cam_str)
-
-            for k, fh in enumerate(frustum_handles):
+            # ── predicted camera frustums + optional frame texture ────────────
+            for k, fh in enumerate(_frustum_handles):
                 wxyz, pos = _cam_to_viser(R_w2c[t_idx, k], t_w2c[t_idx, k])
                 fh.wxyz    = wxyz
                 fh.position = pos
                 fh.visible  = gui_show_frustum.value
 
-                if gui_show_frames.value and (show_all or k == vid_cam_idx):
-                    fh.image = frames_cache[k][t_idx] if frames_cache[k] else None
+                # Only send an image if explicitly requested (perf-sensitive)
+                if gui_show_frames.value and not show_none:
+                    if show_all or k == vid_cam_idx:
+                        fh.image = frames_cache[k][t_idx] if frames_cache[k] else None
+                    else:
+                        fh.image = None
                 else:
                     fh.image = None
 
-            # GT cameras — position is static; only toggle visibility
-            for fh_gt in gt_frustum_handles:
+            # ── GT frustums (static pose, only toggle visibility) ─────────────
+            for fh_gt in _gt_frustum_handles:
                 fh_gt.visible = gui_show_gt_frustum.value
 
-    # first render — start at first annotated frame
-    update_frame(first_valid)
+            # ── background image for "watch from camera" mode ─────────────────
+            if watching:
+                src, k = watch_info
+                cache_k = frames_cache[k]
+                frame_img = cache_k[t_idx] if cache_k else None
+                gui_bg_image.image = frame_img if frame_img is not None else _BLACK
+            else:
+                gui_bg_image.image = _BLACK
 
-    # ── event loop ────────────────────────────────────────────────────────────
+    # Snap all clients when the user explicitly picks a camera — not every frame,
+    # so the user can freely look around while the background image still updates.
+    @gui_watch_cam.on_update
+    def _(_):
+        t_idx = gui_frame.value
+        for client in list(_clients.values()):
+            _snap_client_to_cam(client, t_idx)
+        update_frame(t_idx, force=True)
+
+    # Initial render
+    update_frame(first_valid, force=True)
+
+    # ── frame slider callback ─────────────────────────────────────────────────
     @gui_frame.on_update
     def _(_):
         update_frame(gui_frame.value)
 
+    # ── event loop ────────────────────────────────────────────────────────────
     last_tick = time.time()
     try:
         while True:
