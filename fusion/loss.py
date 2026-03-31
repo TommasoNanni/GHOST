@@ -255,21 +255,85 @@ class EpipolarLoss(Loss):
         sampson = (algebraic ** 2) / denom              # (N,)
         return sampson.reshape(B, T, P, V)
 
+class ShapeRegularizationLoss(Loss):
+    """L2 regularization on predicted SMPL-X betas (pushes toward mean shape).
+
+    Prevents the shape head from memorizing per-subject betas on the training
+    set, which causes val/shape to remain high while train/shape collapses to 0.
+    """
+
+    def __init__(self, name: str = "Shape Regularization Loss", weight: float = 1.0) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        _, shape_aggr, _, _ = preds[:4]   # (B, P, 10)
+        return shape_aggr.pow(2).mean()
+
+
+class TranslationSmoothnessLoss(Loss):
+    """Acceleration smoothness on the aggregated world-frame root translation.
+
+    Mirrors TemporalSmoothnessLoss but operates on body_transl_world (preds[3])
+    instead of pose, encouraging the predicted trajectory to be physically smooth.
+    """
+
+    def __init__(self, name: str = "Translation Smoothness Loss", weight: float = 1.0) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        body_transl_world = preds[3]   # (B, T, P, 3)
+        if body_transl_world.shape[1] < 3:
+            return body_transl_world.new_zeros([])
+        accel = body_transl_world[:, 2:] - 2 * body_transl_world[:, 1:-1] + body_transl_world[:, :-2]
+        return accel.pow(2).mean()
+
+
 class PoseMSELoss(Loss):
+    """Geodesic rotation loss on the predicted 6-D body pose.
+
+    Converts both predicted and GT 6-D rotations to SO(3) matrices via
+    Gram-Schmidt (rotation_6d_to_matrix), then computes the trace-based
+    chordal distance:
+
+        loss = (3 - trace(R_pred^T @ R_gt)) / 2
+
+    This equals (1 - cos θ) where θ is the geodesic angle between the two
+    rotations — 0 when identical, 1 when 90° apart, 2 when 180° apart.
+    Gradient always points along the geodesic on SO(3), unlike 6-D MSE whose
+    gradient direction can diverge from the shortest rotation path.
+
+    NaN safety: uses only matrix multiply + trace — no acos, no sqrt on
+    potentially-zero inputs. rotation_6d_to_matrix uses F.normalize with
+    eps=1e-8 internally, so degenerate 6-D inputs give large-but-finite
+    gradients. Result is clamped to [0, 2] against floating-point drift.
+    """
+
     def __init__(self, name: str = "Pose MSE Loss", weight: float = 1.0) -> None:
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        pose_aggr    = preds[0]                       # (B, T, P, J, 6)
-        gt_body_pose = targets["pose"]                # (B, T, P, J, 6)
+        pose_aggr    = preds[0]         # (B, T, P, J, 6)
+        gt_body_pose = targets["pose"]  # (B, T, P, J, 6)
+
         if "gt_valid" in targets:
-            mask = targets["gt_valid"]             # (B, T, P)
+            mask = targets["gt_valid"]  # (B, T, P)
             if not mask.any():
                 return pose_aggr.new_zeros([])
-            # expand mask to (B, T, P, J, 6) and index
-            m = mask.unsqueeze(-1).unsqueeze(-1).expand_as(pose_aggr)
-            return F.mse_loss(pose_aggr[m], gt_body_pose[m])
-        return F.mse_loss(pose_aggr, gt_body_pose)
+        else:
+            mask = None
+
+        shape = pose_aggr.shape[:-1]    # (B, T, P, J)
+        R_pred = rotation_6d_to_matrix(pose_aggr.reshape(-1, 6)).reshape(*shape, 3, 3)
+        R_gt   = rotation_6d_to_matrix(gt_body_pose.reshape(-1, 6)).reshape(*shape, 3, 3)
+
+        # trace(R_pred^T @ R_gt) — batched via einsum, avoids explicit matmul reshape
+        trace = torch.einsum("...ij,...ij->...", R_pred, R_gt)          # (B, T, P, J)
+        loss_per_joint = (3.0 - trace).clamp(min=0.0) / 2.0            # (B, T, P, J)
+
+        if mask is not None:
+            m = mask.unsqueeze(-1).expand_as(loss_per_joint)            # (B, T, P, J)
+            return loss_per_joint[m].mean()
+        return loss_per_joint.mean()
 
 
 class ShapeMSELoss(Loss):

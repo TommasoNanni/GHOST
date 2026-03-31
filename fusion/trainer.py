@@ -244,46 +244,36 @@ class Trainer:
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        out_file = path / "2predictions.npz"
 
         self.model.eval()
 
-        all_pose, all_shape, all_camera, all_body_transl_world = [], [], [], []
-        all_gt_body_pose, all_gt_body_shape, all_gt_camera, all_gt_body_transl_world = [], [], [], []
-
         for batch in loader:
             inputs, targets = self._unpack_batch(batch)
+            scene_name = targets.get("scene_name", ["unknown"])[0] \
+                         if isinstance(targets, dict) else "unknown"
             with torch.amp.autocast('cuda', enabled=self.use_amp):
                 preds = self._forward(inputs)
             pose_aggr, shape_aggr, camera_pred, body_transl_world = preds[:4]
-            all_pose.append(pose_aggr.float().cpu())
-            all_shape.append(shape_aggr.float().cpu())
-            all_camera.append(camera_pred.float().cpu())
-            all_body_transl_world.append(body_transl_world.float().cpu())
+
+            def _sq(t): return t.squeeze(0).float().cpu().numpy().astype(np.float32)
+
+            arrays: dict[str, np.ndarray] = {
+                "pose":              _sq(pose_aggr),
+                "shape":             _sq(shape_aggr),
+                "camera":            _sq(camera_pred),
+                "body_transl_world": _sq(body_transl_world),
+            }
             if isinstance(targets, dict):
-                if "pose"   in targets: all_gt_body_pose.append(targets["pose"].float().cpu())
-                if "shape"  in targets: all_gt_body_shape.append(targets["shape"].float().cpu())
-                if "camera" in targets: all_gt_camera.append(targets["camera"].float().cpu())
-                if "trans"  in targets: all_gt_body_transl_world.append(targets["trans"].float().cpu())
+                if "pose"   in targets: arrays["gt_body_pose"]         = _sq(targets["pose"])
+                if "shape"  in targets: arrays["gt_body_shape"]        = _sq(targets["shape"])
+                if "camera" in targets: arrays["gt_camera"]            = _sq(targets["camera"])
+                if "trans"  in targets: arrays["gt_body_transl_world"] = _sq(targets["trans"])
 
-        def _cat_squeeze(lst):
-            t = torch.cat(lst, dim=0)
-            return t.squeeze(0).numpy().astype(np.float32)
+            out_file = path / f"{scene_name}.npz"
+            np.savez_compressed(str(out_file), **arrays)
+            logger.info(f"Predictions saved → {out_file}  (keys: {list(arrays)})")
 
-        arrays: dict[str, np.ndarray] = {
-            "pose":                 _cat_squeeze(all_pose),
-            "shape":                _cat_squeeze(all_shape),
-            "camera":               _cat_squeeze(all_camera),
-            "body_transl_world":    _cat_squeeze(all_body_transl_world),
-        }
-        if all_gt_body_pose:          arrays["gt_body_pose"]         = _cat_squeeze(all_gt_body_pose)
-        if all_gt_body_shape:         arrays["gt_body_shape"]        = _cat_squeeze(all_gt_body_shape)
-        if all_gt_camera:             arrays["gt_camera"]            = _cat_squeeze(all_gt_camera)
-        if all_gt_body_transl_world:  arrays["gt_body_transl_world"] = _cat_squeeze(all_gt_body_transl_world)
-
-        np.savez_compressed(str(out_file), **arrays)
-        logger.info(f"Predictions saved → {out_file}  (keys: {list(arrays)})")
-        return out_file
+        return path
 
     def log_losses_to_wandb(
         self,

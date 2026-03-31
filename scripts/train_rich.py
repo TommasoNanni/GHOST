@@ -33,8 +33,10 @@ from fusion.loss import (
     EpipolarLoss,
     PoseMSELoss,
     ShapeMSELoss,
+    ShapeRegularizationLoss,
     TemporalSmoothnessLoss,
     TranslationMSELoss,
+    TranslationSmoothnessLoss,
     TriangulationLoss,
     VPoserLoss,
 )
@@ -141,8 +143,10 @@ def main():
     bone_length_weight     = CONFIG.fusion.loss.bone_length_weight
     camera_mse_weight      = CONFIG.fusion.loss.camera_mse_weight
     triangulation_weight   = CONFIG.fusion.loss.triangulation_weight
-    translation_mse_weight = CONFIG.fusion.loss.translation_mse_weight
-    vposer_weight          = CONFIG.fusion.loss.vposer_weight
+    translation_mse_weight      = CONFIG.fusion.loss.translation_mse_weight
+    shape_reg_weight            = CONFIG.fusion.loss.shape_reg_weight
+    translation_temporal_weight = CONFIG.fusion.loss.translation_temporal_weight
+    vposer_weight               = CONFIG.fusion.loss.vposer_weight
 
     # ── Training params ───────────────────────────────────────────────────────
     lr             = CONFIG.fusion.training.lr
@@ -207,7 +211,9 @@ def main():
         "bone":            (BoneLengthconsistencyLoss(),         bone_length_weight),
         "camera_mse":      (CameraMSELoss(img_size=img_size),    camera_mse_weight),
         "triangulation":   (TriangulationLoss(),                 triangulation_weight),
-        "translation_mse": (TranslationMSELoss(),                translation_mse_weight),
+        "translation_mse":      (TranslationMSELoss(),                translation_mse_weight),
+        "shape_reg":            (ShapeRegularizationLoss(),           shape_reg_weight),
+        "translation_temporal": (TranslationSmoothnessLoss(),         translation_temporal_weight),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
     losses = {k: v for k, v in _all_losses.items() if k not in DISABLED_LOSSES}
@@ -226,7 +232,7 @@ def main():
     METRIC_STRIDE = 8  # evaluate every Nth frame to keep SMPL-X memory bounded
 
     def metric_fn(preds, targets, mc):
-        pose_aggr, shape_aggr, camera_pred, _ = preds[:4]
+        pose_aggr, shape_aggr, camera_pred, body_transl_world = preds[:4]
         B, T, P = pose_aggr.shape[:3]
         K = camera_pred.shape[2]
 
@@ -236,11 +242,24 @@ def main():
         with torch.no_grad():
             pose_sub   = pose_aggr[:, t_idx].float()
             shape_sub  = shape_aggr.unsqueeze(1).expand(B, len(t_idx), P, 10).float()
-            pred_joints = get_smplx_joints(pose_sub, shape_sub).cpu().numpy()[..., :55, :]
+            # Root-relative joints from SMPL-X forward kinematics
+            pred_joints_rel = get_smplx_joints(pose_sub, shape_sub).cpu().numpy()[..., :55, :]
 
             gt_pose_sub  = targets["pose"][:, t_idx].float()
             gt_shape_sub = targets["shape"][:, t_idx].float()
-            gt_joints = get_smplx_joints(gt_pose_sub, gt_shape_sub).cpu().numpy()[..., :55, :]
+            gt_joints_rel = get_smplx_joints(gt_pose_sub, gt_shape_sub).cpu().numpy()[..., :55, :]
+
+            # World-frame joints: add root translation so cameras and joints
+            # live in the same coordinate system (fixes W-MPJPE alignment).
+            # transl shape: (B, T_sub, P, 3) → broadcast over J → (B, T_sub, P, 1, 3)
+            pred_transl = body_transl_world[:, t_idx].float().cpu().numpy()   # (B, T_sub, P, 3)
+            pred_joints  = pred_joints_rel + pred_transl[:, :, :, None, :]   # (B, T_sub, P, J, 3)
+
+            if "trans" in targets:
+                gt_transl   = targets["trans"][:, t_idx].float().cpu().numpy()  # (B, T_sub, P, 3)
+                gt_joints   = gt_joints_rel + gt_transl[:, :, :, None, :]
+            else:
+                gt_joints   = gt_joints_rel
 
             pred_rotmats = rotation_6d_to_matrix(pose_aggr[:, t_idx].float()).cpu().numpy()
             gt_rotmats   = rotation_6d_to_matrix(targets["pose"][:, t_idx].float()).cpu().numpy()
@@ -322,8 +341,8 @@ def main():
     # Epoch 100: add geometric losses (epipolar, triangulation) — only once
     #            poses and cameras are already roughly aligned
     curriculum_schedule = {
-        0:   ["pose", "shape", "camera_mse", "translation_mse"],
-        50:  ["temporal", "bone", "vposer"],
+        0:   ["pose", "shape", "camera_mse", "shape_reg", "translation_temporal"],
+        25:  ["translation_mse", "temporal", "bone", "vposer"],
         100: ["epipolar", "triangulation"],
     }
 
@@ -341,6 +360,7 @@ def main():
         grad_clip=grad_clip,
         scheduler=scheduler,
         early_stopping_patience=patience,
+        checkpoint_dir=CONFIG.fusion.checkpoint_dir,
         metrics=metrics,
         metric_fn=metric_fn,
         prediction_save_path=CONFIG.data.fusion_output_dir,
