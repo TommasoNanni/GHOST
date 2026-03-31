@@ -11,9 +11,12 @@ J = number of joints
 D = embedding dimension
 """
 
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 
 class PositionalEncoding(nn.Module):
@@ -103,6 +106,7 @@ class WindowedTemporalAttention(nn.Module):
         num_heads: int,
         temporal_window: int = 128,
         dropout: float = 0.0,
+        name: str = "?",
     ):
         super().__init__()
         assert embedding_dim % num_heads == 0, \
@@ -318,6 +322,10 @@ class WindowedTemporalAttentionSDPA(nn.Module):
         self.temporal_window = temporal_window
         self.chunk_size = chunk_size
         self.attn_name = name  # stream/layer identity for logging
+        logger.info(
+            f"WindowedTemporalAttentionSDPA[{name}]: gradient checkpointing ENABLED "
+            f"(chunk_size={chunk_size}, window={temporal_window})"
+        )
 
         self.q_proj   = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.k_proj   = nn.Linear(embedding_dim, embedding_dim, bias=False)
@@ -371,41 +379,42 @@ class WindowedTemporalAttentionSDPA(nn.Module):
             k_c = k[:, :, k_start:k_end, :]   # (N, H, kW, Dh)
             v_c = v[:, :, k_start:k_end, :]   # (N, H, kW, Dh)
 
-            # Logits: (N, H, C, kW)
-            attn = torch.matmul(q_c, k_c.transpose(-2, -1)) * scale
+            # Pre-compute masks outside the checkpointed function (no grad needed).
+            _q_idx = torch.arange(t_start, t_end, device=x.device).unsqueeze(1)
+            _k_idx = torch.arange(k_start, k_end, device=x.device).unsqueeze(0)
+            _oow   = (_q_idx - _k_idx).abs() > W                       # (C, kW) bool
+            _lq    = log_conf[:, t_start:t_end] if log_conf is not None else None
+            _lk    = log_conf[:, k_start:k_end] if log_conf is not None else None
+            _dk    = dead[:, k_start:k_end]     if dead    is not None else None
 
-            # Mask (query, key) pairs outside ±W.
-            q_idx = torch.arange(t_start, t_end, device=x.device).unsqueeze(1)
-            k_idx = torch.arange(k_start, k_end, device=x.device).unsqueeze(0)
-            out_of_window = (q_idx - k_idx).abs() > W                  # (C, kW)
-            attn = attn.masked_fill(out_of_window.unsqueeze(0).unsqueeze(0), float('-inf'))
+            # Default-arg capture binds the current iteration's values at definition
+            # time, avoiding the Python loop-closure bug where a late-binding closure
+            # would see the last iteration's values during the backward recompute.
+            def _chunk(q_c, k_c, v_c,
+                       _oow=_oow, _lq=_lq, _lk=_lk, _dk=_dk):
+                attn = torch.matmul(q_c, k_c.transpose(-2, -1)) * scale
+                attn = attn.masked_fill(_oow.unsqueeze(0).unsqueeze(0), float('-inf'))
+                if _lq is not None:
+                    cb = _lq.unsqueeze(2) + _lk.unsqueeze(1)
+                    cb = cb.masked_fill(_dk.unsqueeze(1).expand_as(cb), float('-inf'))
+                    attn = attn + cb.unsqueeze(1)
+                all_masked = attn.isinf().all(dim=-1, keepdim=True)    # (N, H, C, 1)
+                if all_masked.any():
+                    attn = attn.masked_fill(all_masked, 0.0)
+                attn = attn.softmax(dim=-1)
+                out_c = torch.matmul(attn, v_c)
+                if all_masked.any():
+                    out_c = out_c.masked_fill(all_masked, 0.0)
+                return out_c
 
-            # Additive log-confidence bias.
-            if log_conf is not None:
-                lq = log_conf[:, t_start:t_end]                        # (N, C)
-                lk = log_conf[:, k_start:k_end]                        # (N, kW)
-                cb = lq.unsqueeze(2) + lk.unsqueeze(1)                 # (N, C, kW)
-                dead_k = dead[:, k_start:k_end]                        # (N, kW)
-                cb = cb.masked_fill(dead_k.unsqueeze(1).expand_as(cb), float('-inf'))
-                attn = attn + cb.unsqueeze(1)                          # broadcast over H
-
-            # All-masked rows: every key is -inf when a joint has confidence==0
-            # for the entire window (e.g. occluded for >W frames).
-            # softmax([-inf,...]) = NaN, and NaN * 0 = NaN in the softmax
-            # backward, corrupting grad_q/grad_k.
-            # Fix: replace -inf rows with 0 → uniform (finite) softmax, then
-            # zero the output for those rows so they add nothing downstream.
-            all_masked = attn.isinf().all(dim=-1, keepdim=True)        # (N, H, C, 1)
-            if all_masked.any():
-                attn = attn.masked_fill(all_masked, 0.0)
-
-            attn = attn.softmax(dim=-1)
-
-            out_c = torch.matmul(attn, v_c)                            # (N, H, C, Dh)
-            if all_masked.any():
-                out_c = out_c.masked_fill(all_masked, 0.0)
-
-            chunks.append(out_c)
+            # Gradient checkpointing: recompute attn during backward instead of
+            # storing all chunk attn tensors simultaneously.  For T=1166, W=128,
+            # chunk=64 this drops ~22 GB → ~1 GB for kin_layer attention.
+            chunks.append(
+                torch.utils.checkpoint.checkpoint(
+                    _chunk, q_c, k_c, v_c, use_reentrant=False,
+                )
+            )
 
         # torch.cat preserves requires_grad so gradients flow to q/k/v projections.
         out = torch.cat(chunks, dim=2)                                  # (N, H, T, Dh)
@@ -503,6 +512,7 @@ class PoseCameraCrossAttention(nn.Module):
         pose_cam_kv: torch.Tensor,
         B: int, T: int, K: int, P: int, J: int, D: int,
         dropout: nn.Dropout,
+        cam_vis: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Parameters
@@ -512,11 +522,17 @@ class PoseCameraCrossAttention(nn.Module):
         pose_cam_kv   : (B, T, K, P, J, D)  — camera-frame pose, frozen input
                         used as KV in cam→pose direction so each camera attends
                         to its own view of the body (distinct per camera).
+        cam_vis       : (B, T, K) float — 1 if camera active, 0 if absent.
+                        When provided, absent cameras are hard-masked (-inf) as
+                        KV keys in the pose→camera direction so body tokens do
+                        not absorb signal from cameras that detected nothing.
 
         Returns
         -------
         pose_stream, camera_stream (same shapes, updated)
         """
+        H = self.pose_to_cam_attn.num_heads
+
         # Pose → Camera: each joint queries all K camera tokens
         x = self.pose_to_cam_norm(pose_stream)
         x = x.permute(0, 1, 3, 4, 2, 5).contiguous().reshape(B * T * P * J, K, D)
@@ -526,7 +542,25 @@ class PoseCameraCrossAttention(nn.Module):
             .expand(B, T, P, J, K, D)
             .reshape(B * T * P * J, K, D)
         )
-        x, _ = self.pose_to_cam_attn(x, cam_kv, cam_kv)
+
+        if cam_vis is not None:
+            # Build (B*T*P*J, K) hard key mask: 0 for present, -inf for absent.
+            # Broadcast camera presence over (P, J) — every body token sees the
+            # same set of active cameras.
+            flat = cam_vis[:, :, None, None, :].expand(B, T, P, J, K)  # (B,T,P,J,K)
+            key_mask = flat.reshape(B * T * P * J, K).new_zeros(B * T * P * J, K)
+            key_mask = key_mask.masked_fill(
+                flat.reshape(B * T * P * J, K) == 0, float('-inf')
+            )
+            # Expand to (N*H, K_q, K_kv): same key mask for every query position.
+            attn_mask = (
+                key_mask.unsqueeze(1).expand(-1, K, -1)   # (N, K_q, K_kv)
+                .unsqueeze(1).expand(-1, H, -1, -1)        # (N, H, K_q, K_kv)
+                .reshape(B * T * P * J * H, K, K)
+            )
+            x = _safe_mha(self.pose_to_cam_attn, x, cam_kv, cam_kv, attn_mask, H)
+        else:
+            x, _ = self.pose_to_cam_attn(x, cam_kv, cam_kv)
         x = x.reshape(B, T, P, J, K, D).permute(0, 1, 4, 2, 3, 5).contiguous()
         pose_stream = pose_stream + dropout(x)
 
@@ -1278,6 +1312,7 @@ class SSTNetwork(nn.Module):
             spatial_stream, camera_stream = self.spatial_cam_attns[layer_idx](
                 spatial_stream, camera_stream, spatial_stream,
                 B, T, K, P, 2, D, self.dropout,
+                cam_vis=camera_visible,
             )
             _nc(f"layer{layer_idx}/spatial_stream_post_cam_attn", spatial_stream)
             _nc(f"layer{layer_idx}/camera_stream_post_cam_attn", camera_stream)
