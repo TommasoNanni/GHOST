@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=4G
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=tnanni@ethz.ch
 #
@@ -50,9 +50,9 @@ SCENES=(
     # "BBQ_001_guitar.tar.gz" # DOWNLOADED
     # "BBQ_001_juggle.tar.gz" # DOWNLOADED
     # "LectureHall_018_wipingchairs1.tar.gz" # DOWNLOADED
-    #"LectureHall_018_wipingspray1.tar.gz" # DOWNLOADED
-    #"LectureHall_020_wipingtable1.tar.gz" # DOWNLOADED
-    "ParkingLot1_002_burpee3.tar.gz"
+    # "LectureHall_018_wipingspray1.tar.gz" # DOWNLOADED
+    # "LectureHall_020_wipingtable1.tar.gz" # DOWNLOADED
+    # "ParkingLot1_002_burpee3.tar.gz" # DOWNLOADED
     # "ParkingLot1_002_overfence1.tar.gz"
     # "ParkingLot1_002_overfence2.tar.gz"
     # "ParkingLot1_002_pushup1.tar.gz"
@@ -75,7 +75,7 @@ SCENES=(
     # "ParkingLot2_008_overfence3.tar.gz"
     # "ParkingLot2_008_phonetalk1.tar.gz"
     # "ParkingLot2_008_pushup1.tar.gz"
-    "ParkingLot2_008_pushup2.tar.gz"
+    # "ParkingLot2_008_pushup2.tar.gz" # DOWNLOADED
     # "ParkingLot2_014_burpeejump1.tar.gz"
     # "ParkingLot2_014_burpeejump2.tar.gz"
     # "ParkingLot2_014_overfence3.tar.gz"
@@ -84,26 +84,26 @@ SCENES=(
     # "ParkingLot2_014_takingphotos2.tar.gz"
     # "ParkingLot2_015_burpeejump2.tar.gz"
     # "ParkingLot2_015_overfence1.tar.gz"
-    "ParkingLot2_015_pushup1.tar.gz"
+    # "ParkingLot2_015_pushup1.tar.gz" # DOWNLOADED
     # "ParkingLot2_016_burpeejump2.tar.gz"
     # "ParkingLot2_016_overfence2.tar.gz"
     # "ParkingLot2_016_pushup1.tar.gz"
     # "ParkingLot2_016_pushup2.tar.gz"
     # "ParkingLot2_016_stretching1.tar.gz"
-    "Pavallion_000_phonesiteat.tar.gz"
-    # "Pavallion_000_plankjack.tar.gz"
-    # "Pavallion_000_sidebalancerun.tar.gz"
-    # "Pavallion_000_yoga2.tar.gz"
-    # "Pavallion_002_phonesiteat.tar.gz"
-    # "Pavallion_002_plankjack.tar.gz"
-    #"Pavallion_003_018_tossball.tar.gz" # DOWNLOADED
-    # "Pavallion_003_phonesiteat.tar.gz"
-    # "Pavallion_003_plankjack.tar.gz"
-    # "Pavallion_003_sidebalancerun.tar.gz"
-    # "Pavallion_006_phonesiteat.tar.gz"
-    # "Pavallion_013_phonesiteat.tar.gz"
-    # "Pavallion_013_plankjack.tar.gz"
-    "Pavallion_013_yoga2.tar.gz"
+    # "Pavallion_000_phonesiteat.tar.gz" # DOWNLOADED
+    "Pavallion_000_plankjack.tar.gz"
+    "Pavallion_000_sidebalancerun.tar.gz"
+    "Pavallion_000_yoga2.tar.gz"
+    "Pavallion_002_phonesiteat.tar.gz"
+    "Pavallion_002_plankjack.tar.gz"
+    # "Pavallion_003_018_tossball.tar.gz" # DOWNLOADED
+    "Pavallion_003_phonesiteat.tar.gz"
+    "Pavallion_003_plankjack.tar.gz"
+    "Pavallion_003_sidebalancerun.tar.gz"
+    "Pavallion_006_phonesiteat.tar.gz"
+    "Pavallion_013_phonesiteat.tar.gz"
+    "Pavallion_013_plankjack.tar.gz"
+    # "Pavallion_013_yoga2.tar.gz" # DOWNLOADED
     # "ParkingLot2_015_eating2.tar.gz"
     # "ParkingLot1_004_phonetalk1.tar.gz"
     # "Pavallion_006_plankjack.tar.gz"

@@ -32,7 +32,8 @@ synchronization:
   enabled: false  # Set true to run temporal sync before camera alignment (uses random-shift evaluation)
 
 fusion:
-  use_wandb: false
+  checkpoint_dir: "/cluster/project/cvg/students/tnanni/ghost/checkpoints/fusion_module"
+  use_wandb: true
   architecture:
     embedding_dimension: 128
     temporal_window: 32
@@ -48,10 +49,12 @@ fusion:
     epipolar_weight: 0.01
     temporal_weight: 0.1
     bone_length_weight: 0.01
-    camera_mse_weight: 1.0
-    triangulation_weight: 0.1
-    translation_mse_weight: 1.0
-    vposer_weight: 0.0001
+    camera_mse_weight: 2.0
+    triangulation_weight: 0.05
+    translation_mse_weight: 2.0
+    shape_reg_weight: 0.01
+    translation_temporal_weight: 0.1
+    vposer_weight: 0.001
   training:
     max_epochs: 500
     lr: 0.001
