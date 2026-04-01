@@ -213,6 +213,7 @@ class BodyParameterEstimator:
                     reid_threshold=self.reid_threshold,
                     gallery_ema_alpha=self.gallery_ema_alpha,
                     reid_match_window=self.reid_match_window,
+                    fps=video.fps,
                     converter=converter,
                 )
                 gc.collect()
@@ -237,6 +238,7 @@ class BodyParameterEstimator:
                 video.video_id,
                 str(video_dirs[video.video_id]),
                 str(video.frames_home) if video.frames_home else None,
+                video.fps,
             ))
         # If every video was already estimated, nothing to do
         if task_queue.empty():
@@ -335,7 +337,7 @@ class BodyParameterEstimator:
             if task is None:
                 break
 
-            video_id, video_dir, frames_dir = task
+            video_id, video_dir, frames_dir, video_fps = task
             logging.info(f"{gpu_label}Processing {video_id}")
             try:
                 BodyParameterEstimator._process_video_core(
@@ -350,6 +352,7 @@ class BodyParameterEstimator:
                     reid_threshold=reid_threshold,
                     gallery_ema_alpha=gallery_ema_alpha,
                     reid_match_window=reid_match_window,
+                    fps=video_fps,
                     converter=converter,
                 )
             except Exception as e:
@@ -396,6 +399,7 @@ class BodyParameterEstimator:
         reid_threshold: float = 0.65,
         gallery_ema_alpha: float = 0.9,
         reid_match_window: int = 5,
+        fps: float = 15.0,
         converter=None,
     ) -> None:
         """Process all frames of one video with batched per-frame inference.
@@ -468,6 +472,13 @@ class BodyParameterEstimator:
         person_feat_buffer: dict[int, list[tuple[int, np.ndarray]]] = {}
         id_remap: dict[int, int] = {}
         pending_reid: dict[int, int] = {}  # person_id → frames remaining
+        # Gap severing: track when each SAM3 ID was last seen (frame index).
+        # If an ID reappears after a gap longer than gap_threshold it is routed
+        # back through pending_reid so its identity is re-verified rather than
+        # blindly continuing the old track (which may now belong to an object).
+        track_last_seen: dict[int, int] = {}
+        severed_ids: set[int] = set()
+        gap_threshold: int = max(1, round(fps))  # 1 second worth of frames
 
         # Pass 2: batched MHR→SMPL-X conversion after the frame loop.
         # Accumulate per-person SAM3D outputs during the frame loop, then
@@ -624,6 +635,21 @@ class BodyParameterEstimator:
                 )
                 canonical_id: int = id_remap.get(person_id, person_id)
 
+                # Gap severing: if this SAM3 ID was absent for more than
+                # gap_threshold frames, treat it as an unverified track. We keep
+                # the gallery entry intact (so the similarity check can match it)
+                # but force a ReID pass via pending_reid.
+                if person_id in track_last_seen:
+                    gap = frame_idx - track_last_seen[person_id]
+                    if gap > gap_threshold:
+                        logging.info(
+                            f"{gpu_label}Gap-sever: SAM3 id {person_id} absent "
+                            f"{gap} frames (>{gap_threshold}) in {video_id} "
+                            f"@ frame {frame_idx} — re-routing through ReID"
+                        )
+                        severed_ids.add(person_id)
+                        pending_reid[person_id] = reid_match_window
+
                 if feat_i is not None:
                     # Determine whether to attempt ReID matching for this track.
                     # Brand-new tracks get matched immediately. If the first
@@ -647,6 +673,11 @@ class BodyParameterEstimator:
                         frame_canonical_ids = {
                             id_remap.get(p[0], p[0]) for p in valid_persons
                         }
+                        # A severed track must be allowed to match against its
+                        # own old gallery entry (same canonical ID).  Remove it
+                        # from the exclusion set for this specific check.
+                        if person_id in severed_ids:
+                            frame_canonical_ids.discard(canonical_id)
 
                         sims = {
                             pid: float(np.dot(feat_i, gfeat))
@@ -668,6 +699,7 @@ class BodyParameterEstimator:
                             id_remap[person_id] = best_id
                             canonical_id = best_id
                             pending_reid.pop(person_id, None)
+                            severed_ids.discard(person_id)
                             # Merge any buffered frames from the old track into
                             # the canonical person's buffer.
                             if person_id in person_feat_buffer:
@@ -698,9 +730,11 @@ class BodyParameterEstimator:
                                     person_gallery[person_id] = feat_i.copy()
                                     person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat_i.copy()))
                                     del pending_reid[person_id]
+                                    severed_ids.discard(person_id)
                             else:
                                 person_gallery[person_id] = feat_i.copy()
                                 person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat_i.copy()))
+                                severed_ids.discard(person_id)
                     elif should_try_reid and not person_gallery:
                         # Very first person ever — no gallery to match against
                         person_gallery[person_id] = feat_i.copy()
@@ -715,6 +749,9 @@ class BodyParameterEstimator:
                         person_gallery[canonical_id] = g / norm if norm > 0 else g
                         # Also buffer this frame for the confidence-weighted cross-view gallery.
                         person_feat_buffer.setdefault(canonical_id, []).append((frame_idx, feat_i.copy()))
+
+                # Record the last frame this SAM3 ID was observed (used by gap severing).
+                track_last_seen[person_id] = frame_idx
 
                 params = {"bbox": np.array([x1, y1, x2, y2], dtype=np.float32)}
 
