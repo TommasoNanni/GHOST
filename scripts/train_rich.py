@@ -59,11 +59,7 @@ SKIP_SCENES: list[str] = [
     "Pavallion_003_018_tossball",
     "ParkingLot1_002_burpee3",
 ]
-# Last N scenes (alphabetically) are used for validation, rest for training.
 NUM_VAL_SCENES = 2
-# Losses to skip during training — add names here to ablate one at a time.
-# Valid names: "pose", "shape", "epipolar", "temporal", "bone",
-#              "camera_mse", "triangulation", "translation_mse", "vposer"
 DISABLED_LOSSES: list[str] = []
 
 
@@ -82,6 +78,50 @@ def load_datapoints(scenes: list[Path]) -> list[RICHFusionDatapoint]:
     return datapoints
 
 
+def _split_by_location(scenes: list[Path], num_val: int) -> tuple[list[Path], list[Path]]:
+    """Split scenes into train/val ensuring every location appears in train.
+
+    Algorithm:
+    1. Group scenes by location prefix (first '_'-separated token, e.g. 'BBQ').
+    2. From each location take the first scene (alphabetically) as a mandatory
+       train scene — guarantees full location coverage in training.
+    3. All remaining scenes form a pool sorted alphabetically.
+    4. The last ``num_val`` scenes in the pool go to val (preferring diversity
+       since the pool already has one scene per location removed); the rest go
+       to train.  If the pool has fewer than ``num_val`` scenes, all pool scenes
+       go to val and a warning is logged.
+    """
+    from collections import defaultdict
+
+    by_location: dict[str, list[Path]] = defaultdict(list)
+    for s in scenes:
+        loc = s.name.split('_')[0]
+        by_location[loc].append(s)
+
+    mandatory_train: list[Path] = []
+    pool: list[Path] = []
+    for loc in sorted(by_location):
+        loc_scenes = sorted(by_location[loc], key=lambda s: s.name)
+        mandatory_train.append(loc_scenes[0])   # one per location, always in train
+        pool.extend(loc_scenes[1:])
+
+    pool = sorted(pool, key=lambda s: s.name)
+
+    if num_val > len(pool):
+        logger.warning(
+            f"NUM_VAL_SCENES={num_val} but only {len(pool)} scenes available for val "
+            f"after reserving one per location for train. Using all {len(pool)} as val."
+        )
+        val_scenes = pool
+        extra_train: list[Path] = []
+    else:
+        val_scenes   = pool[-num_val:]
+        extra_train  = pool[:-num_val]
+
+    train_scenes = sorted(mandatory_train + extra_train, key=lambda s: s.name)
+    return train_scenes, val_scenes
+
+
 def main():
     # ── Discover scenes ───────────────────────────────────────────────────────
     all_scenes = sorted(SCENES_ROOT.iterdir())
@@ -92,8 +132,7 @@ def main():
     if not scenes:
         raise RuntimeError(f"No scenes found in {SCENES_ROOT}")
 
-    train_scenes = scenes[:-NUM_VAL_SCENES]
-    val_scenes   = scenes[-NUM_VAL_SCENES:]
+    train_scenes, val_scenes = _split_by_location(scenes, NUM_VAL_SCENES)
 
     logger.info(f"Train scenes ({len(train_scenes)}):")
     for s in train_scenes:

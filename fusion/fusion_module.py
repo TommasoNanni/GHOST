@@ -744,10 +744,11 @@ class ShapeStreamLayer(nn.Module):
 
 
 class CameraStreamLayer(nn.Module):
-    """One layer of the camera stream: windowed temporal attn → FFN."""
+    """One layer of the camera stream: cross-camera attn → windowed temporal attn → FFN."""
 
     def __init__(self, embedding_dim: int, num_heads: int, temporal_window: int, dropout: float, name: str = "camera"):
         super().__init__()
+        self.view_attn = CrossViewAttention(embedding_dim, num_heads, dropout)
         self.temporal_norm = nn.LayerNorm(embedding_dim)
         self.temporal_attn = WindowedTemporalAttentionSDPA(embedding_dim, num_heads, temporal_window, dropout, name=name)
         self.ff = FeedForward(embedding_dim)
@@ -759,13 +760,27 @@ class CameraStreamLayer(nn.Module):
         pe: PositionalEncoding | None,
         dropout: nn.Dropout,
         temporal_conf: torch.Tensor | None = None,
+        cam_attn_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Parameters
         ----------
         x            : (B, T, K, D)
         temporal_conf: (B*K, T) binary presence scores, or None.
+        cam_attn_mask: (B*T*num_heads, K, K) additive mask — -inf for absent cameras,
+                       0 for present ones.  Built by SSTNetwork using
+                       _build_confidence_mask(camera_visible.reshape(B*T, K)).
+                       All-absent rows are pre-set to 0.0 by _build_confidence_mask
+                       and further guarded by _safe_mha inside CrossViewAttention,
+                       so no NaN can enter the backward pass.
         """
+        # Cross-camera attention: at each frame, all K cameras attend to each other.
+        # Reshape (B, T, K, D) → (B*T, K, D) so K is the sequence dimension.
+        x_flat = x.reshape(B * T, K, D)
+        x_flat = self.view_attn(x_flat, attn_mask=cam_attn_mask)  # residual included
+        x = x_flat.reshape(B, T, K, D)
+
+        # Windowed temporal attention: each camera independently across time.
         h = self.temporal_norm(x)
         h = h.permute(0, 2, 1, 3).contiguous().reshape(B * K, T, D)
         if pe is not None:
@@ -1262,6 +1277,13 @@ class SSTNetwork(nn.Module):
         camera_visible = person_visible.any(dim=-1).to(pose_emb.dtype)   # (B, T, K)
         camera_temporal_conf = camera_visible.permute(0, 2, 1).reshape(B * K, T)
 
+        # Cross-camera attention mask: (B*T*H, K, K) — absent cameras are -inf keys.
+        # _build_confidence_mask sets all-absent rows to 0.0 (uniform attn) to prevent
+        # NaN softmax; _safe_mha inside CrossViewAttention zeros those outputs afterwards.
+        camera_cross_view_mask = self._build_confidence_mask(
+            camera_visible.reshape(B * T, K), H
+        )
+
         shape_stream = shape_emb
         camera_stream = camera_emb
 
@@ -1306,6 +1328,7 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
                 temporal_conf=camera_temporal_conf,
+                cam_attn_mask=camera_cross_view_mask,
             )
             _nc(f"layer{layer_idx}/camera_stream", camera_stream)
 
