@@ -216,7 +216,6 @@ def main() -> None:
     parser.add_argument(
         "--video_dir",
         type=Path,
-        default=Path("/cluster/project/cvg/students/tnanni/ghost/test_outputs/segmentation_test/cmu_bike01_2/cam02"),
         help="Root output directory for one video (contains frames/, mask_data.npz, etc.)",
     )
     parser.add_argument(

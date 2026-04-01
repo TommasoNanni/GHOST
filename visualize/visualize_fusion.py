@@ -49,8 +49,13 @@ Check bottom-left corner of VSCode — it must match the node the server is on.
 """
 from __future__ import annotations
 
+import sys
+import os
 import time
 from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from configuration import CONFIG
 
 import numpy as np
 import torch
@@ -192,7 +197,7 @@ def _cam_to_viser(
 def run(
     predictions:     Path,
     scene_dir:       Path,
-    rich_data_root:  Path  = Path("/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"),
+    rich_data_root:  Path  = Path(CONFIG.data.rich_data_root),
     smplx_model_dir: Path  = Path("body_models/SMPLX_NEUTRAL.pkl"),
     frame_start:     int   = 0,
     show_gt:         bool  = True,
@@ -596,7 +601,7 @@ def run(
 def main(
     predictions:     Path,
     scene_dir:       Path,
-    rich_data_root:  Path = Path("/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"),
+    rich_data_root:  Path = Path(CONFIG.data.rich_data_root),
     smplx_model_dir: Path = Path("body_models/SMPLX_NEUTRAL.pkl"),
     frame_start:     int  = 0,
     show_gt:         bool = True,

@@ -40,7 +40,12 @@ def compact_mask_data(video_dir: Path) -> None:
 
 
 def main():
-    test_outputs = Path("/cluster/project/cvg/students/tnanni/ghost/test_outputs")
+    import argparse
+    parser = argparse.ArgumentParser(description="Compact existing mask_data/ folders into mask_data.npz.")
+    parser.add_argument("--output_dir", required=True, type=Path,
+                        help="Root output directory to scan for mask_data/ folders")
+    args = parser.parse_args()
+    test_outputs = args.output_dir
 
     print("=== Debug: raw rglob results ===")
     existing_npz = sorted(test_outputs.rglob("mask_data.npz"))

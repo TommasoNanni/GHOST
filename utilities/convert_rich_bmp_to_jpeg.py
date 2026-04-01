@@ -6,7 +6,7 @@ pool for throughput.
 
 Usage:
     python -m utilities.convert_rich_bmp_to_jpeg \\
-        --root /cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train \\
+        --root /path/to/rich/train \\
         --quality 92 \\
         --workers 16 \\
         --dry-run        # omit to actually convert
@@ -42,7 +42,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Convert RICH BMP → JPEG")
     parser.add_argument(
         "--root",
-        default="/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train",
+        required=True,
         help="Root directory to search recursively for .bmp files",
     )
     parser.add_argument(

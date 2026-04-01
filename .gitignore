@@ -1,6 +1,7 @@
 .claude/
 checkpoints/
 test_outputs/
+preprocessing_outputs/
 *.pyc
 __pycache__/
 body_models/
@@ -12,3 +13,5 @@ CLAUDE.md
 *.out
 wandb/
 fusion_outputs/
+manual_reids/
+manual_reid_yaml/

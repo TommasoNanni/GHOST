@@ -744,9 +744,8 @@ class RichDataset(Dataset):
 
 
 if __name__ =="__main__":
-    egoexo_path = "/cluster/project/cvg/data/EgoExo_georgiatech/raw/takes"
-    rich_path = "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train/"
-    video_ds = RichDataset(rich_path, slice=5)
+    from configuration import CONFIG
+    video_ds = RichDataset(CONFIG.data.rich_data_root, slice=5)
     print(f"Found {len(video_ds)} scenes: {video_ds.get_scene_ids()}")
 
     scene = video_ds[0]

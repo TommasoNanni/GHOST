@@ -25,13 +25,9 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as SciR
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
-SCENE_ROOT = Path(
-    "/cluster/project/cvg/students/tnanni/ghost/test_outputs/rich10_segmentation_test"
-)
-RICH_ROOT = Path(
-    "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"
-)
+# ── Paths (set from argparse in __main__) ──────────────────────────────────────
+SCENE_ROOT: Path
+RICH_ROOT: Path
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -289,4 +285,13 @@ def run():
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Compare SAM3D predictions against GT body parameters.")
+    parser.add_argument("--scene_root", required=True, type=Path,
+                        help="Ghost output directory containing per-scene folders")
+    parser.add_argument("--rich_root", required=True, type=Path,
+                        help="Root of the RICH dataset (train split)")
+    _args = parser.parse_args()
+    SCENE_ROOT = _args.scene_root
+    RICH_ROOT  = _args.rich_root
     run()

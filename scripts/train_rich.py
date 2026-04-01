@@ -51,16 +51,13 @@ from utilities.smplx_utilities import get_smplx_joints
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
 
-SCENES_ROOT = Path("test_outputs/rich10_segmentation_test")
+SCENES_ROOT = Path(CONFIG.data.output_directory)
 # Scenes to exclude (broken ReID or other issues).
 # Add scene directory names here to skip them.
 SKIP_SCENES: list[str] = [
     "ParkingLot2_008_pushup2",
     "Pavallion_003_018_tossball",
-    "ParkingLot2_008_pushup2",
-    "ParkingLot2_015_pushup1",
     "ParkingLot1_002_burpee3",
-    "Pavallion_013_yoga2",
 ]
 # Last N scenes (alphabetically) are used for validation, rest for training.
 NUM_VAL_SCENES = 2
