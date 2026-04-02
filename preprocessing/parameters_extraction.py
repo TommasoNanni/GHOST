@@ -38,6 +38,7 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 from scipy.optimize import linear_sum_assignment
+from scipy.signal import correlate
 from tqdm import tqdm
 import smplx
 
@@ -60,7 +61,192 @@ from mhr.mhr import MHR
 from conversion import Conversion
 from preprocessing.confidence import ConfidenceEstimator
 
-class BodyParameterEstimator:
+class InVideoReidentifier:
+    """Tracks and resolves within-video person identity across SAM2 track interruptions.
+
+    Maintains an appearance gallery (EMA), handles gap severing, covisibility
+    blocking, and retry windows.  One instance per video.
+
+    Parameters
+    ----------
+    reid_threshold : float
+        Minimum cosine similarity to accept a ReID merge.
+    gallery_ema_alpha : float
+        EMA coefficient for gallery descriptor updates.
+    reid_match_window : int
+        Frames to retry ReID before finalising a new person.
+    fps : float
+        Video frame rate — sets the gap-sever threshold (1 second).
+    gpu_label : str
+        Prefix for log messages (e.g. "[GPU 0] ").
+    video_id : str
+        Video identifier for log messages.
+    """
+
+    _COVISIBILITY_THRESHOLD: int = 3
+
+    def __init__(
+        self,
+        reid_threshold: float = 0.65,
+        gallery_ema_alpha: float = 0.9,
+        reid_match_window: int = 5,
+        fps: float = 15.0,
+        gpu_label: str = "",
+        video_id: str = "",
+    ):
+        self.reid_threshold = reid_threshold
+        self.gallery_ema_alpha = gallery_ema_alpha
+        self.reid_match_window = reid_match_window
+        self.gap_threshold: int = max(1, round(fps))
+        self.gpu_label = gpu_label
+        self.video_id = video_id
+
+        self._person_gallery: dict[int, np.ndarray] = {}
+        self._person_feat_buffer: dict[int, list[tuple[int, np.ndarray]]] = {}
+        self._id_remap: dict[int, int] = {}
+        self._pending_reid: dict[int, int] = {}
+        self._track_last_seen: dict[int, int] = {}
+        self._severed_ids: set[int] = set()
+        self._covisible_ids: set[frozenset] = set()
+
+    def build_covisibility(self, json_files: list) -> None:
+        """Pre-scan JSON frames to find SAM3 IDs that are ever co-visible."""
+        counter: Counter = Counter()
+        for jp in json_files:
+            with open(jp) as _f:
+                meta = json.load(_f)
+            ids = sorted(int(s) for s in meta.get("labels", {}).keys())
+            for ai, a in enumerate(ids):
+                for b in ids[ai + 1:]:
+                    counter[frozenset({a, b})] += 1
+        self._covisible_ids = {
+            pair for pair, count in counter.items()
+            if count >= self._COVISIBILITY_THRESHOLD
+        }
+
+    def process_detection(
+        self,
+        person_id: int,
+        feat: np.ndarray | None,
+        frame_idx: int,
+        valid_persons: list,
+    ) -> int:
+        """Process one detection and return its canonical person ID.
+
+        Parameters
+        ----------
+        person_id : int
+            Raw SAM3 track ID.
+        feat : np.ndarray or None
+            L2-normalised DINOv3 descriptor, or None if unavailable.
+        frame_idx : int
+            Current frame index within this video.
+        valid_persons : list
+            All (person_id, ...) tuples in this frame — for co-visibility exclusion.
+        """
+        canonical_id: int = self._id_remap.get(person_id, person_id)
+
+        # Gap severing
+        if person_id in self._track_last_seen:
+            gap = frame_idx - self._track_last_seen[person_id]
+            if gap > self.gap_threshold:
+                logging.info(
+                    f"{self.gpu_label}Gap-sever: SAM3 id {person_id} absent "
+                    f"{gap} frames (>{self.gap_threshold}) in {self.video_id} "
+                    f"@ frame {frame_idx} — re-routing through ReID"
+                )
+                self._severed_ids.add(person_id)
+                self._pending_reid[person_id] = self.reid_match_window
+
+        if feat is not None:
+            should_try_reid = False
+            if person_id not in self._person_gallery and person_id not in self._id_remap:
+                should_try_reid = True
+                if person_id not in self._pending_reid:
+                    self._pending_reid[person_id] = self.reid_match_window
+            elif person_id in self._pending_reid:
+                should_try_reid = True
+
+            if should_try_reid and self._person_gallery:
+                frame_canonical_ids = {
+                    self._id_remap.get(p[0], p[0]) for p in valid_persons
+                }
+                if person_id in self._severed_ids:
+                    frame_canonical_ids.discard(canonical_id)
+
+                sims = {
+                    pid: float(np.dot(feat, gfeat))
+                    for pid, gfeat in self._person_gallery.items()
+                    if pid not in frame_canonical_ids
+                }
+                best_id = max(sims, key=lambda pid: sims[pid]) if sims else None
+
+                if (
+                    best_id is not None
+                    and sims[best_id] >= self.reid_threshold
+                    and frozenset({person_id, best_id}) not in self._covisible_ids
+                ):
+                    self._id_remap[person_id] = best_id
+                    canonical_id = best_id
+                    self._pending_reid.pop(person_id, None)
+                    self._severed_ids.discard(person_id)
+                    if person_id in self._person_feat_buffer:
+                        self._person_feat_buffer.setdefault(best_id, []).extend(
+                            self._person_feat_buffer.pop(person_id)
+                        )
+                    logging.info(
+                        f"{self.gpu_label}Re-ID: SAM3 id {person_id} → "
+                        f"person {best_id} (sim={sims[best_id]:.3f}) "
+                        f"in {self.video_id} frame {frame_idx}"
+                    )
+                else:
+                    if best_id is not None and sims:
+                        covis_blocked = frozenset({person_id, best_id}) in self._covisible_ids
+                        logging.info(
+                            f"[within-video reid] {self.gpu_label}{self.video_id} "
+                            f"frame {frame_idx}  SAM3 id {person_id} → "
+                            f"best match person {best_id}  "
+                            f"sim={sims[best_id]:.3f}  "
+                            f"({'covis-blocked' if covis_blocked else f'rejected (thr={self.reid_threshold:.2f})'})"
+                        )
+                    if person_id in self._pending_reid:
+                        self._pending_reid[person_id] -= 1
+                        if self._pending_reid[person_id] <= 0:
+                            self._person_gallery[person_id] = feat.copy()
+                            self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
+                            del self._pending_reid[person_id]
+                            self._severed_ids.discard(person_id)
+                    else:
+                        self._person_gallery[person_id] = feat.copy()
+                        self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
+                        self._severed_ids.discard(person_id)
+
+            elif should_try_reid and not self._person_gallery:
+                self._person_gallery[person_id] = feat.copy()
+                self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
+                self._pending_reid.pop(person_id, None)
+
+            # EMA gallery update for the canonical person.
+            if canonical_id in self._person_gallery:
+                alpha = self.gallery_ema_alpha
+                g = alpha * self._person_gallery[canonical_id] + (1 - alpha) * feat
+                norm = np.linalg.norm(g)
+                self._person_gallery[canonical_id] = g / norm if norm > 0 else g
+                self._person_feat_buffer.setdefault(canonical_id, []).append((frame_idx, feat.copy()))
+
+        self._track_last_seen[person_id] = frame_idx
+        return canonical_id
+
+    @property
+    def id_remap(self) -> dict[int, int]:
+        return self._id_remap
+
+    @property
+    def feature_buffer(self) -> dict[int, list[tuple[int, np.ndarray]]]:
+        return self._person_feat_buffer
+
+
+class ParametersExtractor:
     """Estimate 3D body parameters for tracked persons.
 
     Reads pre-existing segmentation output and runs SAM3D Body on each
@@ -195,14 +381,17 @@ class BodyParameterEstimator:
 
         if num_gpus <= 1:
             # Fallback: sequential on single GPU
-            self._init_sam3d()
-            converter = self._create_converter(self.mhr_model_path, self.smplx_model_path)
+            converter = None
             for video in tqdm(scene.videos, desc="SAM3D Body estimation"):
                 video_dir = video_dirs[video.video_id]
-                if BodyParameterEstimator._is_estimated(video_dir):
+                if ParametersExtractor._is_estimated(video_dir):
                     logging.info(f"  {video.video_id}: body data already exists, skipping")
                     continue
-                BodyParameterEstimator._process_video_core(
+                # Lazy-load model only when at least one video needs processing
+                if self._estimator is None:
+                    self._init_sam3d()
+                    converter = self._create_converter(self.mhr_model_path, self.smplx_model_path)
+                ParametersExtractor._process_video_core(
                     self._estimator,
                     video.video_id,
                     str(video_dir),
@@ -231,7 +420,7 @@ class BodyParameterEstimator:
         mp.set_start_method("spawn", force=True)
         task_queue: mp.Queue = mp.Queue()
         for video in scene.videos:
-            if BodyParameterEstimator._is_estimated(video_dirs[video.video_id]):
+            if ParametersExtractor._is_estimated(video_dirs[video.video_id]):
                 logging.info(f"  {video.video_id}: body data already exists, skipping")
                 continue
             task_queue.put((
@@ -254,7 +443,7 @@ class BodyParameterEstimator:
         for gpu_id in range(num_workers):
             # Launch processes in parallel on the available GPUs
             p = mp.Process(
-                target=BodyParameterEstimator._gpu_worker,
+                target=ParametersExtractor._gpu_worker,
                 args=(
                     gpu_id,
                     task_queue,
@@ -327,7 +516,7 @@ class BodyParameterEstimator:
         estimator = setup_sam_3d_body(hf_repo_id=sam3d_hf_repo)
         logging.info(f"{gpu_label}SAM3D loaded.")
 
-        converter = BodyParameterEstimator._create_converter(mhr_model_path, smplx_model_path)
+        converter = ParametersExtractor._create_converter(mhr_model_path, smplx_model_path)
         if converter is not None:
             logging.info(f"{gpu_label}SMPLX converter initialised.")
 
@@ -340,7 +529,7 @@ class BodyParameterEstimator:
             video_id, video_dir, frames_dir, video_fps = task
             logging.info(f"{gpu_label}Processing {video_id}")
             try:
-                BodyParameterEstimator._process_video_core(
+                ParametersExtractor._process_video_core(
                     estimator,
                     video_id,
                     video_dir,
@@ -435,50 +624,15 @@ class BodyParameterEstimator:
 
         tracks: dict[int, dict[int, dict]] = {}
 
-        # Phase 0 — pre-scan every JSON frame to find which SAM3 track IDs are
-        # ever SIMULTANEOUSLY visible.  ID pairs co-visible in >= N frames must
-        # belong to different people and can never be merged by re-ID.
-        # Using a threshold > 1 avoids blocking re-ID across detection-transition
-        # frames where SAM3 briefly emits both the old and the new track ID
-        # (e.g. the frame where one person's track fades while a new one
-        # initialises), which would otherwise permanently block valid merges.
-        _COVISIBILITY_THRESHOLD = 3
-        _covisibility_counter: Counter = Counter()
-        for jp in json_files:
-            with open(jp) as _f:
-                _meta = json.load(_f)
-            _ids = sorted(int(s) for s in _meta.get("labels", {}).keys())
-            for _ai, _a in enumerate(_ids):
-                for _b in _ids[_ai + 1:]:
-                    _covisibility_counter[frozenset({_a, _b})] += 1
-        covisible_ids: set[frozenset] = {
-            pair for pair, count in _covisibility_counter.items()
-            if count >= _COVISIBILITY_THRESHOLD
-        }
-
-        # Gallery for visual re-identification across SAM2 track interruptions.
-        # person_gallery: canonical_id → L2-normalised appearance descriptor (EMA).
-        #   Used live during within-video track merging.
-        # person_feat_buffer: canonical_id → list of (frame_idx, feat) pairs.
-        #   Collects all confirmed appearance features; at save time the top-K
-        #   highest-confidence frames are used to build the cross-view gallery
-        #   (confidence-weighted mean), which is more robust than a flat EMA.
-        # id_remap: raw SAM3 id → canonical_id for ids that were re-identified.
-        # pending_reid: new SAM3 ids that weren't matched on first sight —
-        #   maps person_id → frames_remaining for retry attempts.
-        # We employ DINOv3 backbone (given by SAM 3D) in order to match people across
-        # frames using cosine similarity between visual features
-        person_gallery: dict[int, np.ndarray] = {}
-        person_feat_buffer: dict[int, list[tuple[int, np.ndarray]]] = {}
-        id_remap: dict[int, int] = {}
-        pending_reid: dict[int, int] = {}  # person_id → frames remaining
-        # Gap severing: track when each SAM3 ID was last seen (frame index).
-        # If an ID reappears after a gap longer than gap_threshold it is routed
-        # back through pending_reid so its identity is re-verified rather than
-        # blindly continuing the old track (which may now belong to an object).
-        track_last_seen: dict[int, int] = {}
-        severed_ids: set[int] = set()
-        gap_threshold: int = max(1, round(fps))  # 1 second worth of frames
+        reidentifier = InVideoReidentifier(
+            reid_threshold=reid_threshold,
+            gallery_ema_alpha=gallery_ema_alpha,
+            reid_match_window=reid_match_window,
+            fps=fps,
+            gpu_label=gpu_label,
+            video_id=video_id,
+        )
+        reidentifier.build_covisibility(json_files)
 
         # Pass 2: batched MHR→SMPL-X conversion after the frame loop.
         # Accumulate per-person SAM3D outputs during the frame loop, then
@@ -633,130 +787,14 @@ class BodyParameterEstimator:
                     if vis_feats is not None and i < len(vis_feats)
                     else None
                 )
-                canonical_id: int = id_remap.get(person_id, person_id)
-
-                # Gap severing: if this SAM3 ID was absent for more than
-                # gap_threshold frames, treat it as an unverified track. We keep
-                # the gallery entry intact (so the similarity check can match it)
-                # but force a ReID pass via pending_reid.
-                if person_id in track_last_seen:
-                    gap = frame_idx - track_last_seen[person_id]
-                    if gap > gap_threshold:
-                        logging.info(
-                            f"{gpu_label}Gap-sever: SAM3 id {person_id} absent "
-                            f"{gap} frames (>{gap_threshold}) in {video_id} "
-                            f"@ frame {frame_idx} — re-routing through ReID"
-                        )
-                        severed_ids.add(person_id)
-                        pending_reid[person_id] = reid_match_window
-
-                if feat_i is not None:
-                    # Determine whether to attempt ReID matching for this track.
-                    # Brand-new tracks get matched immediately. If the first
-                    # match fails, the track enters a retry window of
-                    # `reid_match_window` frames before being finalised as a
-                    # genuinely new person.
-                    should_try_reid = False
-                    if person_id not in person_gallery and person_id not in id_remap:
-                        # First time seeing this SAM2 track
-                        should_try_reid = True
-                        if person_id not in pending_reid:
-                            pending_reid[person_id] = reid_match_window
-                    elif person_id in pending_reid:
-                        # Still within the retry window
-                        should_try_reid = True
-
-                    if should_try_reid and person_gallery:
-                        # Canonical IDs already present in THIS frame — we must
-                        # never merge into one of them (they are a different
-                        # person who is simultaneously visible).
-                        frame_canonical_ids = {
-                            id_remap.get(p[0], p[0]) for p in valid_persons
-                        }
-                        # A severed track must be allowed to match against its
-                        # own old gallery entry (same canonical ID).  Remove it
-                        # from the exclusion set for this specific check.
-                        if person_id in severed_ids:
-                            frame_canonical_ids.discard(canonical_id)
-
-                        sims = {
-                            pid: float(np.dot(feat_i, gfeat))
-                            for pid, gfeat in person_gallery.items()
-                            if pid not in frame_canonical_ids
-                        }
-                        if sims:
-                            best_id = max(sims, key=lambda pid: sims[pid])
-                        else:
-                            best_id = None
-                        # Match only if similarity is high enough AND the two SAM2
-                        # track IDs were never seen in the same frame (co-visible
-                        # IDs must belong to different people).
-                        if (
-                            best_id is not None
-                            and sims[best_id] >= reid_threshold
-                            and frozenset({person_id, best_id}) not in covisible_ids
-                        ):
-                            id_remap[person_id] = best_id
-                            canonical_id = best_id
-                            pending_reid.pop(person_id, None)
-                            severed_ids.discard(person_id)
-                            # Merge any buffered frames from the old track into
-                            # the canonical person's buffer.
-                            if person_id in person_feat_buffer:
-                                person_feat_buffer.setdefault(best_id, []).extend(
-                                    person_feat_buffer.pop(person_id)
-                                )
-                            logging.info(
-                                f"{gpu_label}Re-ID: SAM3 id {person_id} → "
-                                f"person {best_id} (sim={sims[best_id]:.3f}) "
-                                f"in {video_id} frame {frame_idx}"
-                            )
-                        else:
-                            if best_id is not None and sims:
-                                covis_blocked = frozenset({person_id, best_id}) in covisible_ids
-                                logging.info(
-                                    f"[within-video reid] {gpu_label}{video_id} "
-                                    f"frame {frame_idx}  SAM3 id {person_id} → "
-                                    f"best match person {best_id}  "
-                                    f"sim={sims[best_id]:.3f}  "
-                                    f"({'covis-blocked' if covis_blocked else f'rejected (thr={reid_threshold:.2f})'})"
-                                )
-                            # Decrement retry counter; finalise as new person
-                            # when the window expires.
-                            if person_id in pending_reid:
-                                pending_reid[person_id] -= 1
-                                if pending_reid[person_id] <= 0:
-                                    # Window expired — genuinely new person
-                                    person_gallery[person_id] = feat_i.copy()
-                                    person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat_i.copy()))
-                                    del pending_reid[person_id]
-                                    severed_ids.discard(person_id)
-                            else:
-                                person_gallery[person_id] = feat_i.copy()
-                                person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat_i.copy()))
-                                severed_ids.discard(person_id)
-                    elif should_try_reid and not person_gallery:
-                        # Very first person ever — no gallery to match against
-                        person_gallery[person_id] = feat_i.copy()
-                        person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat_i.copy()))
-                        pending_reid.pop(person_id, None)
-
-                    # Update gallery descriptor with EMA for the canonical person.
-                    if canonical_id in person_gallery:
-                        alpha = gallery_ema_alpha
-                        g = alpha * person_gallery[canonical_id] + (1 - alpha) * feat_i
-                        norm = np.linalg.norm(g)
-                        person_gallery[canonical_id] = g / norm if norm > 0 else g
-                        # Also buffer this frame for the confidence-weighted cross-view gallery.
-                        person_feat_buffer.setdefault(canonical_id, []).append((frame_idx, feat_i.copy()))
-
-                # Record the last frame this SAM3 ID was observed (used by gap severing).
-                track_last_seen[person_id] = frame_idx
+                canonical_id: int = reidentifier.process_detection(
+                    person_id, feat_i, frame_idx, valid_persons
+                )
 
                 params = {"bbox": np.array([x1, y1, x2, y2], dtype=np.float32)}
 
                 # Always keep model-agnostic SAM3D outputs.
-                for key in BodyParameterEstimator._AGNOSTIC_KEYS:
+                for key in ParametersExtractor._AGNOSTIC_KEYS:
                     if key in body:
                         val = body[key]
                         if isinstance(val, torch.Tensor):
@@ -766,7 +804,7 @@ class BodyParameterEstimator:
                 # When no converter, fall back to raw MHR params immediately.
                 if converter is None:
                     for key in param_keys:
-                        if key in body and key not in BodyParameterEstimator._AGNOSTIC_KEYS:
+                        if key in body and key not in ParametersExtractor._AGNOSTIC_KEYS:
                             val = body[key]
                             if isinstance(val, torch.Tensor):
                                 val = val.detach().cpu().numpy()
@@ -942,6 +980,10 @@ class BodyParameterEstimator:
         if _mask_zip is not None:
             _mask_zip.close()
 
+        # Expose reidentifier state for post-loop gallery saving and remap.
+        person_feat_buffer = reidentifier.feature_buffer
+        id_remap = reidentifier.id_remap
+
         if not tracks:
             logging.warning(f"{gpu_label}{video_id}: no body detections")
             return
@@ -975,7 +1017,7 @@ class BodyParameterEstimator:
             )
             return
 
-        BodyParameterEstimator._save_body_data_static(
+        ParametersExtractor._save_body_data_static(
             tracks, body_dir, video_id, param_keys
         )
 
@@ -1046,7 +1088,7 @@ class BodyParameterEstimator:
                 f"  {video_id}: re-ID merged {len(id_remap)} SAM2 track(s) "
                 f"→ updating masks and JSON metadata"
             )
-            BodyParameterEstimator._apply_reid_remap(
+            ParametersExtractor._apply_reid_remap(
                 video_path, id_remap, gpu_label
             )
 
@@ -1126,37 +1168,16 @@ class BodyParameterEstimator:
         self._save_body_data_static(tracks, body_dir, video_id, self._PARAM_KEYS)
 
     @staticmethod
-    def _match_persons_across_views_static(
+    def _cross_view_reid_core(
         video_dirs: dict[str, Path],
         scene_id: str,
         scene_dir: Path,
-        cross_view_reid_threshold: float = 0.4,
-        appearance_weight: float = 0.7,
-        shape_weight: float = 0.3,
+        cross_view_reid_threshold: float,
+        appearance_weight: float,
+        shape_weight: float,
     ) -> None:
-        """Core logic for cross-view person re-identification.
-
-        Parameters
-        ----------
-        video_dirs : dict[str, Path]
-            Mapping of ``video_id`` → output directory.
-        scene_id : str
-            Used only for logging.
-        cross_view_reid_threshold : float
-            Minimum hybrid cosine similarity to accept a cross-view match.
-        appearance_weight : float
-            Weight for the DINOv3 appearance component of the hybrid descriptor.
-        shape_weight : float
-            Weight for the SMPL-X shape (beta) component.
-        """
+        """Cross-view re-identification logic. Called by CrossVideoReidentifier."""
         video_ids = list(video_dirs.keys())
-        if len(video_ids) < 2:
-            logging.info(
-                f"Scene {scene_id}: only one video, skipping cross-view re-ID"
-            )
-            return
-
-        # ── 1. Load per-person descriptors ────────────────────────────────
         # person_descs[video_id][person_id] = (app_feat, shape_feat)
         #   app_feat  : L2-normalised DINOv3 float32 vector, or None
         #   shape_feat: L2-normalised median SMPL-X beta vector, or None
@@ -1165,6 +1186,9 @@ class BodyParameterEstimator:
         # avoiding the dimension-imbalance distortion of concatenation.
         person_descs: dict[str, dict[int, tuple[np.ndarray | None, np.ndarray | None]]] = {}
         person_pids: dict[str, list[int]] = {}
+        # person_cam_t[vid_id][pid] = (frame_indices (N,), cam_t (N, 3))
+        # Used by the RANSAC geometric veto.
+        person_cam_t: dict[str, dict[int, tuple[np.ndarray, np.ndarray]]] = {}
 
         for vid_id, vid_dir in video_dirs.items():
             body_dir = Path(vid_dir) / "body_data"
@@ -1227,6 +1251,12 @@ class BodyParameterEstimator:
                             shape_feat = (
                                 shape_med / norm if norm > 0 else shape_med
                             )
+                    # Load camera translation for the geometric veto in the same pass.
+                    if "pred_cam_t" in pdata and "frame_indices" in pdata:
+                        person_cam_t.setdefault(vid_id, {})[pid] = (
+                            pdata["frame_indices"].copy(),
+                            pdata["pred_cam_t"].copy(),
+                        )
 
                 # app_feat is (feat_matrix (N,D), conf_weights (N,)) or None
                 app_feat: tuple[np.ndarray, np.ndarray] | None = app_gallery.get(pid)
@@ -1347,33 +1377,199 @@ class BodyParameterEstimator:
             sim_mat = np.where(weight_mat > 0, sim_mat / weight_mat, 0.0)
             return sim_mat
 
+        # ── 3a. Geometric consistency helper (RANSAC veto) ────────────────
+        # Computes the peak normalized cross-correlation between the
+        # inter-person distance profiles of two candidate persons in two
+        # different (unsynchronized) cameras.  The anchor pair provides the
+        # reference person in each camera.
+        GEO_CORR_THRESHOLD = 0.5   # peak NCC to accept a geometric match
+        GEO_MIN_OVERLAP = 30       # min frames with both persons visible
+        TOP_N_ANCHORS = 5          # candidate anchors tried by RANSAC
+
+        def _geo_consistency(
+            frames_i: np.ndarray, cam_t_i: np.ndarray,
+            frames_anc_a: np.ndarray, cam_t_anc_a: np.ndarray,
+            frames_j: np.ndarray, cam_t_j: np.ndarray,
+            frames_anc_b: np.ndarray, cam_t_anc_b: np.ndarray,
+        ) -> float:
+            """Return peak NCC of inter-person distance profiles (0 if not enough data)."""
+            # Distance profile in cam_a: frames where both person i and anchor are present
+            common_a = np.intersect1d(frames_i, frames_anc_a)
+            if len(common_a) < GEO_MIN_OVERLAP:
+                return 0.0
+            idx_i   = np.searchsorted(frames_i,     common_a)
+            idx_anc = np.searchsorted(frames_anc_a, common_a)
+            d_a = np.linalg.norm(cam_t_i[idx_i] - cam_t_anc_a[idx_anc], axis=1)
+
+            # Distance profile in cam_b: frames where both person j and anchor are present
+            common_b = np.intersect1d(frames_j, frames_anc_b)
+            if len(common_b) < GEO_MIN_OVERLAP:
+                return 0.0
+            idx_j    = np.searchsorted(frames_j,     common_b)
+            idx_ancb = np.searchsorted(frames_anc_b, common_b)
+            d_b = np.linalg.norm(cam_t_j[idx_j] - cam_t_anc_b[idx_ancb], axis=1)
+
+            # Normalize each signal to zero mean, unit std
+            def _norm(s: np.ndarray) -> np.ndarray:
+                std = s.std()
+                return (s - s.mean()) / std if std > 1e-6 else np.zeros_like(s)
+
+            d_a = _norm(d_a)
+            d_b = _norm(d_b)
+
+            # Normalized cross-correlation — cameras are unsynchronized so we
+            # search across all lags and take the peak.  Dividing by the
+            # product of L2 norms gives a value in [-1, 1].
+            cc = correlate(d_a, d_b, mode="full")
+            norm = float(np.linalg.norm(d_a) * np.linalg.norm(d_b))
+            return float(cc.max() / norm) if norm > 1e-9 else 0.0
+
+        def _ransac_match(
+            vid_a: str, vid_b: str,
+        ) -> list[tuple[int, int, float]]:
+            """RANSAC geometric veto for one camera pair.
+
+            Returns a list of (pid_a, pid_b, hybrid_sim) accepted pairs.
+            Falls back to pure Hungarian when either camera has < 2 persons.
+            """
+            pids_a = person_pids[vid_a]
+            pids_b = person_pids[vid_b]
+
+            sim_mat = _weighted_sim_mat(
+                pids_a, pids_b,
+                person_descs[vid_a], person_descs[vid_b],
+                appearance_weight, shape_weight,
+            )
+
+            cam_t_a = person_cam_t.get(vid_a, {})
+            cam_t_b = person_cam_t.get(vid_b, {})
+
+            # Degenerate: either camera has < 2 persons — no inter-person
+            # distance signal available; fall back to pure Hungarian.
+            use_geo = len(pids_a) >= 2 and len(pids_b) >= 2
+            if not use_geo:
+                cost_mat = 1.0 - sim_mat
+                row_ind, col_ind = linear_sum_assignment(cost_mat)
+                return [
+                    (pids_a[r], pids_b[c], float(sim_mat[r, c]))
+                    for r, c in zip(row_ind, col_ind)
+                ]
+
+            # Build flat list of all (sim, ia, ib) sorted descending for anchor candidates
+            flat = sorted(
+                [(float(sim_mat[ia, ib]), ia, ib)
+                 for ia in range(len(pids_a)) for ib in range(len(pids_b))],
+                reverse=True,
+            )
+            anchors = flat[:TOP_N_ANCHORS]
+
+            best_trusted: list[tuple[int, int, float, float]] = []  # (pa, pb, app_sim, geo_score)
+            best_score = -1
+            best_mean_geo = -1.0
+
+            for anc_sim, anc_ia, anc_ib in anchors:
+                pa_anc, pb_anc = pids_a[anc_ia], pids_b[anc_ib]
+                trusted = [(pa_anc, pb_anc, anc_sim, 1.0)]  # anchor always trusted
+                geo_scores = []
+                claimed_b = {pb_anc}  # track which pids_b are already taken
+
+                for ia, pa in enumerate(pids_a):
+                    if pa == pa_anc:
+                        continue
+                    # Candidates in cam_b sorted by appearance sim (descending),
+                    # excluding pids_b already claimed by the anchor or earlier matches.
+                    cands = sorted(
+                        [(float(sim_mat[ia, ib]), ib) for ib in range(len(pids_b))
+                         if pids_b[ib] not in claimed_b],
+                        reverse=True,
+                    )
+                    for cand_sim, ib in cands:
+                        pb = pids_b[ib]
+                        # Compute geometric consistency if cam_t available
+                        geo = 0.0
+                        if (pa in cam_t_a and pa_anc in cam_t_a and
+                                pb in cam_t_b and pb_anc in cam_t_b):
+                            fi_a, ct_a = cam_t_a[pa]
+                            fa_a, ct_anc_a = cam_t_a[pa_anc]
+                            fi_b, ct_b = cam_t_b[pb]
+                            fa_b, ct_anc_b = cam_t_b[pb_anc]
+                            geo = _geo_consistency(
+                                fi_a, ct_a, fa_a, ct_anc_a,
+                                fi_b, ct_b, fa_b, ct_anc_b,
+                            )
+                        if geo >= GEO_CORR_THRESHOLD:
+                            trusted.append((pa, pb, cand_sim, geo))
+                            geo_scores.append(geo)
+                            claimed_b.add(pb)
+                            break
+
+                score = len(trusted)
+                mean_geo = float(np.mean(geo_scores)) if geo_scores else 0.0
+                if score > best_score or (score == best_score and mean_geo > best_mean_geo):
+                    best_score = score
+                    best_trusted = trusted
+                    best_mean_geo = mean_geo
+
+            # Log the winning anchor and its trusted set
+            if best_trusted:
+                pa_anc_win, pb_anc_win, anc_sim_win, _ = best_trusted[0]
+                logging.info(
+                    f"[ransac] {scene_id}  {vid_a}↔{vid_b}  "
+                    f"anchor {vid_a}/P{pa_anc_win}↔{vid_b}/P{pb_anc_win} "
+                    f"(app_sim={anc_sim_win:.3f})  trusted_set_size={best_score}"
+                )
+                for pa, pb, app_sim, geo in best_trusted[1:]:
+                    logging.info(
+                        f"[ransac]   {vid_a}/P{pa}↔{vid_b}/P{pb}  "
+                        f"app_sim={app_sim:.3f}  geo={geo:.3f}"
+                    )
+
+            # Collect matched persons from trusted set
+            matched_a = {pa for pa, _, _, _ in best_trusted}
+            matched_b = {pb for _, pb, _, _ in best_trusted}
+            # Keep geo score: anchor gets 1.0, trusted-set matches keep their computed score
+            result = [(pa, pb, app_sim, geo) for pa, pb, app_sim, geo in best_trusted]
+
+            # Residual pass: unmatched persons get appearance-only Hungarian
+            # (no geometric veto, but constrained to not conflict with trusted set)
+            res_pids_a = [p for p in pids_a if p not in matched_a]
+            res_pids_b = [p for p in pids_b if p not in matched_b]
+            if res_pids_a and res_pids_b:
+                res_sim_mat = _weighted_sim_mat(
+                    res_pids_a, res_pids_b,
+                    person_descs[vid_a], person_descs[vid_b],
+                    appearance_weight, shape_weight,
+                )
+                r_ind, c_ind = linear_sum_assignment(1.0 - res_sim_mat)
+                for r, c in zip(r_ind, c_ind):
+                    # Residual matches have no geo veto — assign geo=0.0 so they
+                    # are always evicted first in conflict resolution.
+                    result.append((res_pids_a[r], res_pids_b[c], float(res_sim_mat[r, c]), 0.0))
+
+            return result
+
+        # ── 3b. All-pairs matching ─────────────────────────────────────────
         for ii, vid_a in enumerate(active_vids):
             for vid_b in active_vids[ii + 1:]:
                 pids_a = person_pids[vid_a]
                 pids_b = person_pids[vid_b]
 
-                # Weighted sum of per-modality cosine similarities
-                sim_mat = _weighted_sim_mat(
-                    pids_a, pids_b,
-                    person_descs[vid_a], person_descs[vid_b],
-                    appearance_weight, shape_weight,
-                )
-                cost_mat = 1.0 - sim_mat
+                pairs = _ransac_match(vid_a, vid_b)
 
-                row_ind, col_ind = linear_sum_assignment(cost_mat)
-                for r, c in zip(row_ind, col_ind):
-                    sim = float(sim_mat[r, c])
+                for pa, pb, sim, geo in pairs:
                     accepted = sim >= cross_view_reid_threshold
+                    used_geo = len(pids_a) >= 2 and len(pids_b) >= 2
                     logging.info(
                         f"[cross-view reid] {scene_id}  "
-                        f"{vid_a}/P{pids_a[r]} ↔ {vid_b}/P{pids_b[c]}  "
-                        f"sim={sim:.3f}  "
-                        f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'})"
+                        f"{vid_a}/P{pa} ↔ {vid_b}/P{pb}  "
+                        f"sim={sim:.3f}  geo={geo:.3f}  "
+                        f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'}"
+                        f"{' [geo]' if used_geo else ''})"
                     )
                     if accepted:
-                        node_a = (vid_a, pids_a[r])
-                        node_b = (vid_b, pids_b[c])
-                        edges.append((sim, node_a, node_b))
+                        node_a = (vid_a, pa)
+                        node_b = (vid_b, pb)
+                        edges.append((sim, geo, node_a, node_b))
                         _union(node_a, node_b)
 
         # ── 4. Conflict detection and resolution ──────────────────────────
@@ -1405,16 +1601,17 @@ class BodyParameterEstimator:
                     if len(nodes) < 2:
                         continue
 
-                    # Conflict — find the weakest accepted edge whose both
-                    # endpoints currently live in this component.
+                    # Conflict — find the geometrically weakest edge anywhere
+                    # in this component (not just edges touching the conflicting
+                    # nodes).  The causal edge creating the cycle may be between
+                    # two OTHER cameras and never touch the conflicting cam nodes.
                     conflict_found = True
-                    conflict_nodes = set(nodes)
-                    worst_sim, worst_idx = float("inf"), -1
-                    for ei, (sim, na, nb) in enumerate(edges):
-                        if _find(na) == _find(nb):  # same component
-                            if na in conflict_nodes or nb in conflict_nodes:
-                                if sim < worst_sim:
-                                    worst_sim, worst_idx = sim, ei
+                    conflict_root = _find(nodes[0])
+                    worst_geo, worst_sim, worst_idx = float("inf"), float("inf"), -1
+                    for ei, (sim, geo, na, nb) in enumerate(edges):
+                        if _find(na) == conflict_root:  # edge lives in this component
+                            if geo < worst_geo or (geo == worst_geo and sim < worst_sim):
+                                worst_geo, worst_sim, worst_idx = geo, sim, ei
 
                     if worst_idx >= 0:
                         edges.pop(worst_idx)
@@ -1424,11 +1621,11 @@ class BodyParameterEstimator:
                         for _vid in active_vids:
                             for _pid in person_pids[_vid]:
                                 _find((_vid, _pid))
-                        for _sim, _na, _nb in edges:
+                        for _sim, _geo, _na, _nb in edges:
                             _union(_na, _nb)
                         logging.info(
                             f"Scene {scene_id}: removed conflicting cross-view "
-                            f"edge (sim={worst_sim:.3f}) to resolve "
+                            f"edge (geo={worst_geo:.3f}, sim={worst_sim:.3f}) to resolve "
                             f"same-video duplicate in {vid_id}"
                         )
                     break  # restart outer conflict loop after rebuild
@@ -1534,7 +1731,7 @@ class BodyParameterEstimator:
 
             if best_root is not None and best_sim >= consolidation_threshold:
                 comp_member = multi_view_comps[best_root][0]
-                edges.append((best_sim, (vid, pid), comp_member))
+                edges.append((best_sim, 0.0, (vid, pid), comp_member))  # consolidation: geo=0.0
                 _union((vid, pid), comp_member)
                 consolidation_edges_added = True
                 logging.info(
@@ -1559,13 +1756,12 @@ class BodyParameterEstimator:
                             continue
 
                         conflict_found = True
-                        conflict_nodes = set(nodes)
-                        worst_sim, worst_idx = float("inf"), -1
-                        for ei, (sim, na, nb) in enumerate(edges):
-                            if _find(na) == _find(nb):
-                                if na in conflict_nodes or nb in conflict_nodes:
-                                    if sim < worst_sim:
-                                        worst_sim, worst_idx = sim, ei
+                        conflict_root = _find(nodes[0])
+                        worst_geo, worst_sim, worst_idx = float("inf"), float("inf"), -1
+                        for ei, (sim, geo, na, nb) in enumerate(edges):
+                            if _find(na) == conflict_root:
+                                if geo < worst_geo or (geo == worst_geo and sim < worst_sim):
+                                    worst_geo, worst_sim, worst_idx = geo, sim, ei
 
                         if worst_idx >= 0:
                             edges.pop(worst_idx)
@@ -1574,11 +1770,11 @@ class BodyParameterEstimator:
                             for _vid in active_vids:
                                 for _pid in person_pids[_vid]:
                                     _find((_vid, _pid))
-                            for _sim, _na, _nb in edges:
+                            for _sim, _geo, _na, _nb in edges:
                                 _union(_na, _nb)
                             logging.info(
                                 f"Scene {scene_id}: consolidation conflict "
-                                f"resolved — removed edge (sim={worst_sim:.3f})"
+                                f"resolved — removed edge (geo={worst_geo:.3f}, sim={worst_sim:.3f})"
                             )
                         break
 
@@ -1701,7 +1897,7 @@ class BodyParameterEstimator:
                 json.dump({str(k): v for k, v in remap.items()}, _f, indent=2)
 
             # Rewrite mask_data.npz and json_data/*.json with the global IDs.
-            BodyParameterEstimator._apply_reid_remap(vid_dir, remap)
+            ParametersExtractor._apply_reid_remap(vid_dir, remap)
             print(
                 f"  {vid_id}: cross-view re-ID — "
                 f"{len(remap)} ID remap(s): {remap}"
@@ -1879,7 +2075,7 @@ class BodyParameterEstimator:
         )
 
 
-class CrossViewReidentifier:
+class CrossVideoReidentifier:
     """Assign consistent global person IDs across camera views in a scene.
 
     Parameters
@@ -1912,17 +2108,23 @@ class CrossViewReidentifier:
         video_dirs: dict[str, Path],
     ) -> None:
         """Assign consistent global person IDs across all camera views in a scene."""
+        scene_id = scene.scene_id
         scene_dir = Path(next(iter(video_dirs.values()))).parent
+        cross_view_reid_threshold = self.threshold
+        appearance_weight = self.appearance_weight
+        shape_weight = self.shape_weight
 
         if (scene_dir / "cross_view_reid.json").exists():
-            logging.info(f"  Scene {scene.scene_id}: cross-view ReID already done, skipping")
+            logging.info(f"  Scene {scene_id}: cross-view ReID already done, skipping")
             return
 
-        BodyParameterEstimator._match_persons_across_views_static(
+        ParametersExtractor._cross_view_reid_core(
             video_dirs=video_dirs,
-            scene_id=scene.scene_id,
+            scene_id=scene_id,
             scene_dir=scene_dir,
-            cross_view_reid_threshold=self.threshold,
-            appearance_weight=self.appearance_weight,
-            shape_weight=self.shape_weight,
+            cross_view_reid_threshold=cross_view_reid_threshold,
+            appearance_weight=appearance_weight,
+            shape_weight=shape_weight,
         )
+
+

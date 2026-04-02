@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from preprocessing.parameters_extraction import BodyParameterEstimator
+from preprocessing.parameters_extraction import ParametersExtractor
 
 FEAT_DIM = 64   # arbitrary small backbone output channels
 
@@ -109,13 +109,13 @@ class _MockEstimator:
 
 def _run_core(tmpdir: Path, estimator: _MockEstimator) -> Path:
     """Run _process_video_core and return the body_data dir."""
-    BodyParameterEstimator._process_video_core(
+    ParametersExtractor._process_video_core(
         estimator=estimator,
         video_id="unit_test",
         video_dir=str(tmpdir),
         sam3d_step=1,
         bbox_padding=0.0,
-        param_keys=BodyParameterEstimator._PARAM_KEYS,
+        param_keys=ParametersExtractor._PARAM_KEYS,
     )
     return tmpdir / "body_data"
 
@@ -160,7 +160,7 @@ def test_reid_merge():
         npz_files = sorted(body_dir.glob("person_*.npz"))
 
         print(f"  cosine_sim(feat_A, feat_B) = {sim:.4f}  "
-              f"(threshold = {BodyParameterEstimator._REID_THRESHOLD})")
+              f"(threshold = {ParametersExtractor._REID_THRESHOLD})")
         print(f"  Person files found: {[f.name for f in npz_files]}")
 
         assert len(npz_files) == 1, (
@@ -212,7 +212,7 @@ def test_reid_no_false_merge():
         npz_files = sorted(body_dir.glob("person_*.npz"))
 
         print(f"  cosine_sim(feat_A, feat_B) = {sim:.4f}  "
-              f"(threshold = {BodyParameterEstimator._REID_THRESHOLD})")
+              f"(threshold = {ParametersExtractor._REID_THRESHOLD})")
         print(f"  Person files found: {[f.name for f in npz_files]}")
 
         assert len(npz_files) == 2, (

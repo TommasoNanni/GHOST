@@ -9,7 +9,7 @@ import numpy as np
 from configuration import CONFIG
 from data.video_dataset import EgoExoSceneDataset, RichDataset
 from preprocessing.segmentation import PersonSegmenter
-from preprocessing.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
+from preprocessing.parameters_extraction import ParametersExtractor, CrossVideoReidentifier
 from utilities.visualize_segmented_reids import visualize_reid
 
 def main():
@@ -47,7 +47,7 @@ def main():
         print(f"  {video_id}: {vdir}")
 
     # Step 2: Estimate body parameters from segmentation output
-    estimator = BodyParameterEstimator(
+    estimator = ParametersExtractor(
         sam3d_hf_repo = CONFIG.parameters_extraction.sam3d_id,
         sam3d_step = CONFIG.parameters_extraction.sam3d_step,
         bbox_padding = CONFIG.parameters_extraction.bbox_padding,
@@ -57,7 +57,7 @@ def main():
         gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
         reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
     )
-    reidentifier = CrossViewReidentifier(
+    reidentifier = CrossVideoReidentifier(
         threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
         appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
         shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),

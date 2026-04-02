@@ -13,7 +13,7 @@ from collections import defaultdict
 
 from data.video_dataset import Video, Scene, EgoExoSceneDataset
 from preprocessing.segmentation import PersonSegmenter
-from preprocessing.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
+from preprocessing.parameters_extraction import ParametersExtractor, CrossVideoReidentifier
 from synchronize_videos.synchronizer import Synchronizer
 
 
@@ -136,13 +136,13 @@ def main(args):
         scene_directories[scene.scene_id] = video_dir
 
     # Estimate the HMR parameters using SAM-3D-Body
-    parameters_extractor = BodyParameterEstimator(
+    parameters_extractor = ParametersExtractor(
         sam3d_hf_repo=args.sam3d_hf_repo,
         sam3d_step=args.sam3d_step,
         smplx_model_path=args.smplx_model_path,
         mhr_model_path=args.mhr_model_path,
     )
-    reidentifier = CrossViewReidentifier()
+    reidentifier = CrossVideoReidentifier()
 
     # Extract people parameters
     for scene in tqdm(dataset.scenes, desc="Extracting Body Parameters from scenes"):

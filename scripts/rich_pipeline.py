@@ -20,7 +20,7 @@ from data.video_dataset import RichDataset
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from preprocessing.camera_alignment import CameraAlignment
 from preprocessing.segmentation import PersonSegmenter
-from preprocessing.parameters_extraction import BodyParameterEstimator, CrossViewReidentifier
+from preprocessing.parameters_extraction import ParametersExtractor, CrossVideoReidentifier
 from synchronize_videos.synchronizer import Synchronizer
 from utilities.visualize_segmented_reids import visualize_reid
 
@@ -143,10 +143,16 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
 
     # Step 1: Segment people in the scene
     print(f"\n--- Running segmentation on scene '{scene.scene_id}' ---")
+    from preprocessing.segmentation import PersonSegmenter as _PS
+    _seg_output_dir = Path(output_dir) / scene.scene_id
+    _all_segmented = all(
+        _PS._is_segmented(_seg_output_dir / v.video_id)
+        for v in scene.videos
+    )
     video_dirs = segmenter.segment_scene(
         scene=scene,
         output_dir=output_dir,
-        vis=True,
+        vis=not _all_segmented,
     )
     print(f"\nSegmentation output dirs:")
     for video_id, vdir in video_dirs.items():
@@ -161,13 +167,15 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
 
     # Step 3: Match person IDs across camera views
     print(f"\n--- Running cross-view person re-identification ---")
+    scene_output_dir_pre = Path(next(iter(video_dirs.values()))).parent
+    _reid_already_done = (scene_output_dir_pre / "cross_view_reid.json").exists()
     reidentifier.match_across_views(
         scene=scene,
         video_dirs=video_dirs,
     )
 
     # Derive the shared scene output directory (parent of all video dirs)
-    scene_output_dir = Path(next(iter(video_dirs.values()))).parent
+    scene_output_dir = scene_output_dir_pre
 
     # Step 4: Verify SMPLX conversion
     # MHR → SMPLX conversion happens automatically inside estimate_scene when
@@ -280,12 +288,12 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
         )
         ds = RICHFusionDataset([fusion_dp])
         inputs, targets = ds[0]
-        print("  Inputs:")
-        for k, v in inputs.items():
-            print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
-        print("  Targets:")
-        for k, v in targets.items():
-            print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
+        # print("  Inputs:")
+        # for k, v in inputs.items():
+        #     print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
+        # print("  Targets:")
+        # for k, v in targets.items():
+        #     print(f"    {k}: {tuple(v.shape)} dtype={v.dtype}")
         print("  FusionDatapoint compatibility: OK")
     except Exception as e:
         print(f"  ERROR: FusionDatapoint failed to load: {e}")
@@ -326,39 +334,42 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
             for key, arr in sorted(data.items()):
                 print(f"    {key}: shape={arr.shape}, dtype={arr.dtype}, min={arr.min():.4f}, max={arr.max():.4f}")
 
-            if "frame_indices" in data:
-                print(f"    -> frame_indices (first 5): {data['frame_indices'][:5].tolist()}")
-            if "pred_keypoints_3d" in data:
-                kp3d = data["pred_keypoints_3d"]
-                print(f"    -> pred_keypoints_3d[0] (first joint): {kp3d[0, 0].tolist()}")
-            if "pred_cam_t" in data:
-                print(f"    -> pred_cam_t[0]: {data['pred_cam_t'][0].tolist()}")
-            if "bbox" in data:
-                print(f"    -> bbox[0]: {data['bbox'][0].tolist()}")
+            # if "frame_indices" in data:
+            #     print(f"    -> frame_indices (first 5): {data['frame_indices'][:5].tolist()}")
+            # if "pred_keypoints_3d" in data:
+            #     kp3d = data["pred_keypoints_3d"]
+            #     print(f"    -> pred_keypoints_3d[0] (first joint): {kp3d[0, 0].tolist()}")
+            # if "pred_cam_t" in data:
+            #     print(f"    -> pred_cam_t[0]: {data['pred_cam_t'][0].tolist()}")
+            # if "bbox" in data:
+            #     print(f"    -> bbox[0]: {data['bbox'][0].tolist()}")
 
         summary_path = body_dir / "body_params_summary.json"
         if summary_path.exists():
             with open(summary_path) as f:
                 summary = json.load(f)
-            print(f"\n  Summary JSON for {video_id}:")
-            print(f"  {json.dumps(summary, indent=4)}")
+            # print(f"\n  Summary JSON for {video_id}:")
+            # print(f"  {json.dumps(summary, indent=4)}")
         else:
             print(f"  WARNING: summary JSON not found at {summary_path}")
 
-    # Step 9: Visualise the re-ID corrected segmentation.
-    print(f"\n--- Visualising re-ID corrected segmentation ---")
-    for video in scene.videos:
-        if video.video_id not in video_dirs:
-            continue
-        print(f"  {video.video_id}")
-        try:
-            visualize_reid(
-                video_dir=Path(video_dirs[video.video_id]),
-                fps=int(video.fps),
-                frames_dir=video.frames_home,
-            )
-        except FileNotFoundError as e:
-            print(f"  WARNING: skipping visualisation — {e}")
+    # Step 9: Visualise the re-ID corrected segmentation (only if ReID ran this session).
+    if not _reid_already_done:
+        print(f"\n--- Visualising re-ID corrected segmentation ---")
+        for video in scene.videos:
+            if video.video_id not in video_dirs:
+                continue
+            print(f"  {video.video_id}")
+            try:
+                visualize_reid(
+                    video_dir=Path(video_dirs[video.video_id]),
+                    fps=int(video.fps),
+                    frames_dir=video.frames_home,
+                )
+            except FileNotFoundError as e:
+                print(f"  WARNING: skipping visualisation — {e}")
+    else:
+        print(f"\n--- Skipping re-ID visualisation (cross-view ReID was already done) ---")
 
 
 def main():
@@ -371,6 +382,7 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
+    ds.scenes = [s for s in ds.scenes if "tossball" in s.scene_id]
 
     for scene in ds.scenes:
         # Re-instantiate per scene so no Python-level instance state (gallery
@@ -382,7 +394,7 @@ def main():
             new_det_thresh=CONFIG.segmentation.new_det_thresh,
             score_threshold_detection=CONFIG.segmentation.score_threshold_detection,
         )
-        estimator = BodyParameterEstimator(
+        estimator = ParametersExtractor(
             sam3d_hf_repo = CONFIG.parameters_extraction.sam3d_id,
             sam3d_step = CONFIG.parameters_extraction.sam3d_step,
             bbox_padding = CONFIG.parameters_extraction.bbox_padding,
@@ -392,7 +404,7 @@ def main():
             gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
             reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
         )
-        reidentifier = CrossViewReidentifier(
+        reidentifier = CrossVideoReidentifier(
             threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
             appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
             shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
