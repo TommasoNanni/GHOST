@@ -1426,14 +1426,19 @@ class ParametersExtractor:
 
         def _ransac_match(
             vid_a: str, vid_b: str,
+            pids_a_restrict: list[int] | None = None,
+            pids_b_restrict: list[int] | None = None,
         ) -> list[tuple[int, int, float, float]]:
             """RANSAC geometric veto for one camera pair.
 
             Returns a list of (pid_a, pid_b, hybrid_sim, geo_score) accepted pairs.
             Falls back to pure Hungarian when either camera has < 2 persons.
+
+            pids_a_restrict / pids_b_restrict: if provided, restrict matching to
+            these pid subsets (used by BFS propagation to handle only residual persons).
             """
-            pids_a = person_pids[vid_a]
-            pids_b = person_pids[vid_b]
+            pids_a = pids_a_restrict if pids_a_restrict is not None else person_pids[vid_a]
+            pids_b = pids_b_restrict if pids_b_restrict is not None else person_pids[vid_b]
 
             sim_mat = _weighted_sim_mat(
                 pids_a, pids_b,
@@ -1548,29 +1553,83 @@ class ParametersExtractor:
 
             return result
 
-        # ── 3b. All-pairs matching ─────────────────────────────────────────
-        for ii, vid_a in enumerate(active_vids):
+        # ── 3b. BFS-ordered matching with constraint propagation ──────────────
+        # Phase 1: root camera (active_vids[0]) ↔ every other camera via normal
+        # RANSAC.  After this phase the union-find already encodes all transitive
+        # matches through the root.
+        #
+        # Phase 2: remaining pairs (non-root pairs).  For each pair we inspect
+        # the existing union-find: if (vid_a, pa) and (vid_b, pb) are already in
+        # the same component (both were matched to the same root-camera person in
+        # Phase 1), we add a forced edge (geo=1.0) directly instead of re-running
+        # RANSAC.  RANSAC is then called only on the residual persons that have no
+        # shared component yet.  This prevents wrong anchor selection caused by
+        # RANSAC lacking global context.
+
+        def _accept_pairs(vid_a: str, vid_b: str,
+                          pairs: list[tuple[int, int, float, float]]) -> None:
+            """Log and conditionally add edges for one set of matched pairs."""
+            used_geo = len(person_pids[vid_a]) >= 2 and len(person_pids[vid_b]) >= 2
+            for pa, pb, sim, geo in pairs:
+                accepted = sim >= cross_view_reid_threshold
+                logging.info(
+                    f"[cross-view reid] {scene_id}  "
+                    f"{vid_a}/P{pa} ↔ {vid_b}/P{pb}  "
+                    f"sim={sim:.3f}  geo={geo:.3f}  "
+                    f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'}"
+                    f"{' [geo]' if used_geo else ''})"
+                )
+                if accepted:
+                    edges.append((sim, geo, (vid_a, pa), (vid_b, pb)))
+                    _union((vid_a, pa), (vid_b, pb))
+
+        # Phase 1 — root star
+        root_vid = active_vids[0]
+        for vid_b in active_vids[1:]:
+            pairs = _ransac_match(root_vid, vid_b)
+            _accept_pairs(root_vid, vid_b, pairs)
+
+        # Phase 2 — non-root pairs with BFS constraint propagation
+        for ii, vid_a in enumerate(active_vids[1:], start=1):
             for vid_b in active_vids[ii + 1:]:
                 pids_a = person_pids[vid_a]
                 pids_b = person_pids[vid_b]
 
-                pairs = _ransac_match(vid_a, vid_b)
+                # Persons in vid_a and vid_b that already share a UF component
+                # (transitively matched via root in Phase 1) → force the edge.
+                forced: list[tuple[int, int]] = []
+                claimed_b: set[int] = set()
+                free_a: list[int] = []
 
-                for pa, pb, sim, geo in pairs:
-                    accepted = sim >= cross_view_reid_threshold
-                    used_geo = len(pids_a) >= 2 and len(pids_b) >= 2
+                for pa in pids_a:
+                    root_a = _find((vid_a, pa))
+                    # Look for a unique pb in vid_b that sits in the same component.
+                    matches_in_b = [pb for pb in pids_b
+                                    if _find((vid_b, pb)) == root_a]
+                    if len(matches_in_b) == 1 and matches_in_b[0] not in claimed_b:
+                        forced.append((pa, matches_in_b[0]))
+                        claimed_b.add(matches_in_b[0])
+                    else:
+                        free_a.append(pa)
+
+                free_b = [pb for pb in pids_b if pb not in claimed_b]
+
+                # Add forced (propagated) edges — no threshold needed.
+                for pa, pb in forced:
                     logging.info(
                         f"[cross-view reid] {scene_id}  "
                         f"{vid_a}/P{pa} ↔ {vid_b}/P{pb}  "
-                        f"sim={sim:.3f}  geo={geo:.3f}  "
-                        f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'}"
-                        f"{' [geo]' if used_geo else ''})"
+                        f"PROPAGATED (shared root component, geo=1.0)"
                     )
-                    if accepted:
-                        node_a = (vid_a, pa)
-                        node_b = (vid_b, pb)
-                        edges.append((sim, geo, node_a, node_b))
-                        _union(node_a, node_b)
+                    edges.append((1.0, 1.0, (vid_a, pa), (vid_b, pb)))
+                    _union((vid_a, pa), (vid_b, pb))
+
+                # RANSAC on residual persons only.
+                if free_a and free_b:
+                    pairs = _ransac_match(vid_a, vid_b,
+                                         pids_a_restrict=free_a,
+                                         pids_b_restrict=free_b)
+                    _accept_pairs(vid_a, vid_b, pairs)
 
         # ── 4. Conflict detection and resolution ──────────────────────────
         # A conflict occurs when two persons from the same video end up in
