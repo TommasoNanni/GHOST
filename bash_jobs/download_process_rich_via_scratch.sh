@@ -190,7 +190,6 @@ PYEOF
     mkdir -p "$RICH_TRAIN_ROOT"
     mv "$scratch_scene" "$dest_dir"
     echo "[$(date '+%H:%M:%S')] Done: $scene_name"
-    echo "Scene $scene_name fully processed and moved to $dest_dir" | mail -s "[SLURM] rich_dl_scratch: $scene_name done" tnanni@ethz.ch
 done
 
 rmdir "$SCRATCH_DIR" 2>/dev/null || true
