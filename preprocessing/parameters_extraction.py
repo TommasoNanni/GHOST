@@ -1426,10 +1426,10 @@ class ParametersExtractor:
 
         def _ransac_match(
             vid_a: str, vid_b: str,
-        ) -> list[tuple[int, int, float]]:
+        ) -> list[tuple[int, int, float, float]]:
             """RANSAC geometric veto for one camera pair.
 
-            Returns a list of (pid_a, pid_b, hybrid_sim) accepted pairs.
+            Returns a list of (pid_a, pid_b, hybrid_sim, geo_score) accepted pairs.
             Falls back to pure Hungarian when either camera has < 2 persons.
             """
             pids_a = person_pids[vid_a]
@@ -1451,7 +1451,7 @@ class ParametersExtractor:
                 cost_mat = 1.0 - sim_mat
                 row_ind, col_ind = linear_sum_assignment(cost_mat)
                 return [
-                    (pids_a[r], pids_b[c], float(sim_mat[r, c]))
+                    (pids_a[r], pids_b[c], float(sim_mat[r, c]), 0.0)
                     for r, c in zip(row_ind, col_ind)
                 ]
 
