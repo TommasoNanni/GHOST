@@ -51,14 +51,14 @@ SCENES=(
     # "LectureHall_018_wipingspray1.tar.gz" # DOWNLOADED
     # "LectureHall_020_wipingtable1.tar.gz" # DOWNLOADED
     # "ParkingLot1_002_burpee3.tar.gz" # DOWNLOADED
-    "ParkingLot1_002_overfence1.tar.gz"
-    "ParkingLot1_002_overfence2.tar.gz"
-    "ParkingLot1_002_pushup1.tar.gz"
-    "ParkingLot1_002_stretching1.tar.gz"
-    "ParkingLot1_004_005_greetingchattingeating1.tar.gz"
-    "ParkingLot1_004_burpeejump1.tar.gz"
-    "ParkingLot1_004_eating1.tar.gz"
-    "ParkingLot1_004_pushup2.tar.gz"
+    # "ParkingLot1_002_overfence1.tar.gz" # DOWNLOADED
+    # "ParkingLot1_002_overfence2.tar.gz" # DOWNLOADED
+    # "ParkingLot1_002_pushup1.tar.gz" # DOWNLOADED
+    # "ParkingLot1_002_stretching1.tar.gz" # DOWNLOADED
+    # "ParkingLot1_004_005_greetingchattingeating1.tar.gz" # DOWNLOADED
+    # "ParkingLot1_004_burpeejump1.tar.gz" # DOWNLOADED
+    # "ParkingLot1_004_eating1.tar.gz" # DOWNLOADED
+    # "ParkingLot1_004_pushup2.tar.gz" # DOWNLOADED
     # "ParkingLot1_004_takingphotos1.tar.gz"
     # "ParkingLot1_005_burpeejump2.tar.gz"
     # "ParkingLot1_005_overfence1.tar.gz"
