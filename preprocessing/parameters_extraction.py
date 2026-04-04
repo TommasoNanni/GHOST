@@ -38,7 +38,6 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 from scipy.optimize import linear_sum_assignment
-from scipy.signal import correlate
 from tqdm import tqdm
 import smplx
 
@@ -1377,307 +1376,32 @@ class ParametersExtractor:
             sim_mat = np.where(weight_mat > 0, sim_mat / weight_mat, 0.0)
             return sim_mat
 
-        # ── 3a. Geometric consistency helper (RANSAC veto) ────────────────
-        # Computes the peak normalized cross-correlation between the
-        # inter-person distance profiles of two candidate persons in two
-        # different (unsynchronized) cameras.  The anchor pair provides the
-        # reference person in each camera.
-        GEO_CORR_THRESHOLD = 0.5   # peak NCC to accept a geometric match
-        GEO_MIN_OVERLAP = 30       # min frames with both persons visible
-        TOP_N_ANCHORS = 5          # candidate anchors tried by RANSAC
-
-        def _geo_consistency(
-            frames_i: np.ndarray, cam_t_i: np.ndarray,
-            frames_anc_a: np.ndarray, cam_t_anc_a: np.ndarray,
-            frames_j: np.ndarray, cam_t_j: np.ndarray,
-            frames_anc_b: np.ndarray, cam_t_anc_b: np.ndarray,
-        ) -> float:
-            """Return peak NCC of inter-person distance profiles (0 if not enough data)."""
-            # Distance profile in cam_a: frames where both person i and anchor are present
-            common_a = np.intersect1d(frames_i, frames_anc_a)
-            if len(common_a) < GEO_MIN_OVERLAP:
-                return 0.0
-            idx_i   = np.searchsorted(frames_i,     common_a)
-            idx_anc = np.searchsorted(frames_anc_a, common_a)
-            d_a = np.linalg.norm(cam_t_i[idx_i] - cam_t_anc_a[idx_anc], axis=1)
-
-            # Distance profile in cam_b: frames where both person j and anchor are present
-            common_b = np.intersect1d(frames_j, frames_anc_b)
-            if len(common_b) < GEO_MIN_OVERLAP:
-                return 0.0
-            idx_j    = np.searchsorted(frames_j,     common_b)
-            idx_ancb = np.searchsorted(frames_anc_b, common_b)
-            d_b = np.linalg.norm(cam_t_j[idx_j] - cam_t_anc_b[idx_ancb], axis=1)
-
-            # Normalize each signal to zero mean, unit std
-            def _norm(s: np.ndarray) -> np.ndarray:
-                std = s.std()
-                return (s - s.mean()) / std if std > 1e-6 else np.zeros_like(s)
-
-            d_a = _norm(d_a)
-            d_b = _norm(d_b)
-
-            # Normalized cross-correlation — cameras are unsynchronized so we
-            # search across all lags and take the peak.  Dividing by the
-            # product of L2 norms gives a value in [-1, 1].
-            cc = correlate(d_a, d_b, mode="full")
-            norm = float(np.linalg.norm(d_a) * np.linalg.norm(d_b))
-            return float(cc.max() / norm) if norm > 1e-9 else 0.0
-
-        def _build_pooled_descs(vid: str) -> dict[int, tuple]:
-            """Pool appearance features from all UF-component members for each person in vid.
-
-            For each person in vid, concatenates appearance feature matrices from
-            every node currently in the same UF component (i.e. all views matched
-            so far).  On the first Phase-1 iteration the component is a singleton,
-            so this equals the original descriptor; on later iterations it
-            accumulates cross-view signal, making similarity scores more robust.
-            Shape descriptor is kept from the original (single-video) entry.
-            """
-            pooled: dict[int, tuple] = {}
-            for pid in person_pids[vid]:
-                root = _find((vid, pid))
-                all_feats: list[np.ndarray] = []
-                all_confs: list[np.ndarray] = []
-                for v in active_vids:
-                    for p in person_pids[v]:
-                        if _find((v, p)) == root:
-                            app = person_descs[v][p][0]
-                            if app is not None:
-                                all_feats.append(app[0])
-                                all_confs.append(app[1])
-                app_pooled = (
-                    (np.concatenate(all_feats, axis=0),
-                     np.concatenate(all_confs, axis=0))
-                    if all_feats else None
-                )
-                pooled[pid] = (app_pooled, person_descs[vid][pid][1])
-            return pooled
-
-        def _ransac_match(
-            vid_a: str, vid_b: str,
-            pids_a_restrict: list[int] | None = None,
-            pids_b_restrict: list[int] | None = None,
-            descs_a_override: dict | None = None,
-        ) -> list[tuple[int, int, float, float]]:
-            """RANSAC geometric veto for one camera pair.
-
-            Returns a list of (pid_a, pid_b, hybrid_sim, geo_score) accepted pairs.
-            Falls back to pure Hungarian when either camera has < 2 persons.
-
-            pids_a_restrict / pids_b_restrict: if provided, restrict matching to
-            these pid subsets (used by BFS propagation to handle only residual persons).
-            descs_a_override: if provided, use these descriptors for vid_a instead of
-            person_descs[vid_a] (used in Phase 1 to pass component-pooled descriptors).
-            """
-            pids_a = pids_a_restrict if pids_a_restrict is not None else person_pids[vid_a]
-            pids_b = pids_b_restrict if pids_b_restrict is not None else person_pids[vid_b]
-
-            descs_a = descs_a_override if descs_a_override is not None else person_descs[vid_a]
-
-            sim_mat = _weighted_sim_mat(
-                pids_a, pids_b,
-                descs_a, person_descs[vid_b],
-                appearance_weight, shape_weight,
-            )
-
-            cam_t_a = person_cam_t.get(vid_a, {})
-            cam_t_b = person_cam_t.get(vid_b, {})
-
-            # Degenerate: either camera has < 2 persons — no inter-person
-            # distance signal available; fall back to pure Hungarian.
-            use_geo = len(pids_a) >= 2 and len(pids_b) >= 2
-            if not use_geo:
-                cost_mat = 1.0 - sim_mat
-                row_ind, col_ind = linear_sum_assignment(cost_mat)
-                return [
-                    (pids_a[r], pids_b[c], float(sim_mat[r, c]), 0.0)
-                    for r, c in zip(row_ind, col_ind)
-                ]
-
-            # Build flat list of all (sim, ia, ib) sorted descending for anchor candidates
-            flat = sorted(
-                [(float(sim_mat[ia, ib]), ia, ib)
-                 for ia in range(len(pids_a)) for ib in range(len(pids_b))],
-                reverse=True,
-            )
-            anchors = flat[:TOP_N_ANCHORS]
-
-            best_trusted: list[tuple[int, int, float, float]] = []  # (pa, pb, app_sim, geo_score)
-            best_score = -1
-            best_mean_geo = -1.0
-
-            for anc_sim, anc_ia, anc_ib in anchors:
-                pa_anc, pb_anc = pids_a[anc_ia], pids_b[anc_ib]
-                trusted = [(pa_anc, pb_anc, anc_sim, 1.0)]  # anchor always trusted
-                geo_scores = []
-                claimed_b = {pb_anc}  # track which pids_b are already taken
-
-                # Process non-anchor persons in order of their best available sim
-                # score (descending).  This ensures the most-confident assignment
-                # goes first so high-sim persons don't have their slot stolen by a
-                # lower-confidence person that happens to appear earlier in the list.
-                non_anchor_order = sorted(
-                    [ia for ia in range(len(pids_a)) if pids_a[ia] != pa_anc],
-                    key=lambda ia: float(sim_mat[ia].max()),
-                    reverse=True,
-                )
-                for ia in non_anchor_order:
-                    pa = pids_a[ia]
-                    # Candidates in cam_b sorted by appearance sim (descending),
-                    # excluding pids_b already claimed by the anchor or earlier matches.
-                    cands = sorted(
-                        [(float(sim_mat[ia, ib]), ib) for ib in range(len(pids_b))
-                         if pids_b[ib] not in claimed_b],
-                        reverse=True,
-                    )
-                    for cand_sim, ib in cands:
-                        pb = pids_b[ib]
-                        # Compute geometric consistency if cam_t available
-                        geo = 0.0
-                        if (pa in cam_t_a and pa_anc in cam_t_a and
-                                pb in cam_t_b and pb_anc in cam_t_b):
-                            fi_a, ct_a = cam_t_a[pa]
-                            fa_a, ct_anc_a = cam_t_a[pa_anc]
-                            fi_b, ct_b = cam_t_b[pb]
-                            fa_b, ct_anc_b = cam_t_b[pb_anc]
-                            geo = _geo_consistency(
-                                fi_a, ct_a, fa_a, ct_anc_a,
-                                fi_b, ct_b, fa_b, ct_anc_b,
-                            )
-                        if geo >= GEO_CORR_THRESHOLD:
-                            trusted.append((pa, pb, cand_sim, geo))
-                            geo_scores.append(geo)
-                            claimed_b.add(pb)
-                            break
-
-                score = len(trusted)
-                mean_geo = float(np.mean(geo_scores)) if geo_scores else 0.0
-                if score > best_score or (score == best_score and mean_geo > best_mean_geo):
-                    best_score = score
-                    best_trusted = trusted
-                    best_mean_geo = mean_geo
-
-            # Log the winning anchor and its trusted set
-            if best_trusted:
-                pa_anc_win, pb_anc_win, anc_sim_win, _ = best_trusted[0]
-                logging.info(
-                    f"[ransac] {scene_id}  {vid_a}↔{vid_b}  "
-                    f"anchor {vid_a}/P{pa_anc_win}↔{vid_b}/P{pb_anc_win} "
-                    f"(app_sim={anc_sim_win:.3f})  trusted_set_size={best_score}"
-                )
-                for pa, pb, app_sim, geo in best_trusted[1:]:
-                    logging.info(
-                        f"[ransac]   {vid_a}/P{pa}↔{vid_b}/P{pb}  "
-                        f"app_sim={app_sim:.3f}  geo={geo:.3f}"
-                    )
-
-            # Collect matched persons from trusted set
-            matched_a = {pa for pa, _, _, _ in best_trusted}
-            matched_b = {pb for _, pb, _, _ in best_trusted}
-            # Keep geo score: anchor gets 1.0, trusted-set matches keep their computed score
-            result = [(pa, pb, app_sim, geo) for pa, pb, app_sim, geo in best_trusted]
-
-            # Residual pass: unmatched persons get appearance-only Hungarian
-            # (no geometric veto, but constrained to not conflict with trusted set)
-            res_pids_a = [p for p in pids_a if p not in matched_a]
-            res_pids_b = [p for p in pids_b if p not in matched_b]
-            if res_pids_a and res_pids_b:
-                res_sim_mat = _weighted_sim_mat(
-                    res_pids_a, res_pids_b,
-                    descs_a, person_descs[vid_b],
-                    appearance_weight, shape_weight,
-                )
-                r_ind, c_ind = linear_sum_assignment(1.0 - res_sim_mat)
-                for r, c in zip(r_ind, c_ind):
-                    # Residual matches have no geo veto — assign geo=0.0 so they
-                    # are always evicted first in conflict resolution.
-                    result.append((res_pids_a[r], res_pids_b[c], float(res_sim_mat[r, c]), 0.0))
-
-            return result
-
-        # ── 3b. BFS-ordered matching with constraint propagation ──────────────
-        # Phase 1: root camera (active_vids[0]) ↔ every other camera via normal
-        # RANSAC.  After this phase the union-find already encodes all transitive
-        # matches through the root.
-        #
-        # Phase 2: remaining pairs (non-root pairs).  For each pair we inspect
-        # the existing union-find: if (vid_a, pa) and (vid_b, pb) are already in
-        # the same component (both were matched to the same root-camera person in
-        # Phase 1), we add a forced edge (geo=1.0) directly instead of re-running
-        # RANSAC.  RANSAC is then called only on the residual persons that have no
-        # shared component yet.  This prevents wrong anchor selection caused by
-        # RANSAC lacking global context.
-
-        def _accept_pairs(vid_a: str, vid_b: str,
-                          pairs: list[tuple[int, int, float, float]]) -> None:
-            """Log and conditionally add edges for one set of matched pairs."""
-            used_geo = len(person_pids[vid_a]) >= 2 and len(person_pids[vid_b]) >= 2
-            for pa, pb, sim, geo in pairs:
-                accepted = sim >= cross_view_reid_threshold
-                logging.info(
-                    f"[cross-view reid] {scene_id}  "
-                    f"{vid_a}/P{pa} ↔ {vid_b}/P{pb}  "
-                    f"sim={sim:.3f}  geo={geo:.3f}  "
-                    f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'}"
-                    f"{' [geo]' if used_geo else ''})"
-                )
-                if accepted:
-                    edges.append((sim, geo, (vid_a, pa), (vid_b, pb)))
-                    _union((vid_a, pa), (vid_b, pb))
-
-        # Phase 1 — root star (sequential with component-pooled descriptors)
-        # Before each pair, pool appearance features from all views already matched
-        # to each root person.  On the first iteration this is a singleton (no-op);
-        # on later iterations the centroid of multiple camera views is used, making
-        # similarity scores robust to single-view appearance drift.
-        root_vid = active_vids[0]
-        for vid_b in active_vids[1:]:
-            pooled_root = _build_pooled_descs(root_vid)
-            pairs = _ransac_match(root_vid, vid_b, descs_a_override=pooled_root)
-            _accept_pairs(root_vid, vid_b, pairs)
-
-        # Phase 2 — non-root pairs with BFS constraint propagation
-        for ii, vid_a in enumerate(active_vids[1:], start=1):
+        # ── 3b. All-pairs appearance-only Hungarian matching ─────────────────
+        for ii, vid_a in enumerate(active_vids):
             for vid_b in active_vids[ii + 1:]:
                 pids_a = person_pids[vid_a]
                 pids_b = person_pids[vid_b]
 
-                # Persons in vid_a and vid_b that already share a UF component
-                # (transitively matched via root in Phase 1) → force the edge.
-                forced: list[tuple[int, int]] = []
-                claimed_b: set[int] = set()
-                free_a: list[int] = []
-
-                for pa in pids_a:
-                    root_a = _find((vid_a, pa))
-                    # Look for a unique pb in vid_b that sits in the same component.
-                    matches_in_b = [pb for pb in pids_b
-                                    if _find((vid_b, pb)) == root_a]
-                    if len(matches_in_b) == 1 and matches_in_b[0] not in claimed_b:
-                        forced.append((pa, matches_in_b[0]))
-                        claimed_b.add(matches_in_b[0])
-                    else:
-                        free_a.append(pa)
-
-                free_b = [pb for pb in pids_b if pb not in claimed_b]
-
-                # Add forced (propagated) edges — no threshold needed.
-                for pa, pb in forced:
+                sim_mat = _weighted_sim_mat(
+                    pids_a, pids_b,
+                    person_descs[vid_a], person_descs[vid_b],
+                    appearance_weight, shape_weight,
+                )
+                row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
+                for r, c in zip(row_ind, col_ind):
+                    sim = float(sim_mat[r, c])
+                    accepted = sim >= cross_view_reid_threshold
                     logging.info(
                         f"[cross-view reid] {scene_id}  "
-                        f"{vid_a}/P{pa} ↔ {vid_b}/P{pb}  "
-                        f"PROPAGATED (shared root component, geo=1.0)"
+                        f"{vid_a}/P{pids_a[r]} ↔ {vid_b}/P{pids_b[c]}  "
+                        f"sim={sim:.3f}  "
+                        f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'})"
                     )
-                    edges.append((1.0, 1.0, (vid_a, pa), (vid_b, pb)))
-                    _union((vid_a, pa), (vid_b, pb))
-
-                # RANSAC on residual persons only.
-                if free_a and free_b:
-                    pairs = _ransac_match(vid_a, vid_b,
-                                         pids_a_restrict=free_a,
-                                         pids_b_restrict=free_b)
-                    _accept_pairs(vid_a, vid_b, pairs)
+                    if accepted:
+                        node_a = (vid_a, pids_a[r])
+                        node_b = (vid_b, pids_b[c])
+                        edges.append((sim, node_a, node_b))
+                        _union(node_a, node_b)
 
         # ── 4. Conflict detection and resolution ──────────────────────────
         # A conflict occurs when two persons from the same video end up in
@@ -1708,34 +1432,29 @@ class ParametersExtractor:
                     if len(nodes) < 2:
                         continue
 
-                    # Conflict — find the geometrically weakest edge anywhere
-                    # in this component (not just edges touching the conflicting
-                    # nodes).  The causal edge creating the cycle may be between
-                    # two OTHER cameras and never touch the conflicting cam nodes.
                     conflict_found = True
                     conflict_root = _find(nodes[0])
-                    worst_geo, worst_sim, worst_idx = float("inf"), float("inf"), -1
-                    for ei, (sim, geo, na, nb) in enumerate(edges):
-                        if _find(na) == conflict_root:  # edge lives in this component
-                            if geo < worst_geo or (geo == worst_geo and sim < worst_sim):
-                                worst_geo, worst_sim, worst_idx = geo, sim, ei
+                    worst_sim, worst_idx = float("inf"), -1
+                    for ei, (sim, na, nb) in enumerate(edges):
+                        if _find(na) == conflict_root:
+                            if sim < worst_sim:
+                                worst_sim, worst_idx = sim, ei
 
                     if worst_idx >= 0:
                         edges.pop(worst_idx)
-                        # Rebuild union-find without the removed edge.
                         parent.clear()
                         rank_uf.clear()
                         for _vid in active_vids:
                             for _pid in person_pids[_vid]:
                                 _find((_vid, _pid))
-                        for _sim, _geo, _na, _nb in edges:
+                        for _sim, _na, _nb in edges:
                             _union(_na, _nb)
                         logging.info(
                             f"Scene {scene_id}: removed conflicting cross-view "
-                            f"edge (geo={worst_geo:.3f}, sim={worst_sim:.3f}) to resolve "
+                            f"edge (sim={worst_sim:.3f}) to resolve "
                             f"same-video duplicate in {vid_id}"
                         )
-                    break  # restart outer conflict loop after rebuild
+                    break
 
             if not conflict_found:
                 break
@@ -1838,7 +1557,7 @@ class ParametersExtractor:
 
             if best_root is not None and best_sim >= consolidation_threshold:
                 comp_member = multi_view_comps[best_root][0]
-                edges.append((best_sim, 0.0, (vid, pid), comp_member))  # consolidation: geo=0.0
+                edges.append((best_sim, (vid, pid), comp_member))
                 _union((vid, pid), comp_member)
                 consolidation_edges_added = True
                 logging.info(
@@ -1864,11 +1583,11 @@ class ParametersExtractor:
 
                         conflict_found = True
                         conflict_root = _find(nodes[0])
-                        worst_geo, worst_sim, worst_idx = float("inf"), float("inf"), -1
-                        for ei, (sim, geo, na, nb) in enumerate(edges):
+                        worst_sim, worst_idx = float("inf"), -1
+                        for ei, (sim, na, nb) in enumerate(edges):
                             if _find(na) == conflict_root:
-                                if geo < worst_geo or (geo == worst_geo and sim < worst_sim):
-                                    worst_geo, worst_sim, worst_idx = geo, sim, ei
+                                if sim < worst_sim:
+                                    worst_sim, worst_idx = sim, ei
 
                         if worst_idx >= 0:
                             edges.pop(worst_idx)
@@ -1877,11 +1596,11 @@ class ParametersExtractor:
                             for _vid in active_vids:
                                 for _pid in person_pids[_vid]:
                                     _find((_vid, _pid))
-                            for _sim, _geo, _na, _nb in edges:
+                            for _sim, _na, _nb in edges:
                                 _union(_na, _nb)
                             logging.info(
                                 f"Scene {scene_id}: consolidation conflict "
-                                f"resolved — removed edge (geo={worst_geo:.3f}, sim={worst_sim:.3f})"
+                                f"resolved — removed edge (sim={worst_sim:.3f})"
                             )
                         break
 
