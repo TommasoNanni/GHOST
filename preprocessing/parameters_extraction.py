@@ -1424,10 +1424,41 @@ class ParametersExtractor:
             norm = float(np.linalg.norm(d_a) * np.linalg.norm(d_b))
             return float(cc.max() / norm) if norm > 1e-9 else 0.0
 
+        def _build_pooled_descs(vid: str) -> dict[int, tuple]:
+            """Pool appearance features from all UF-component members for each person in vid.
+
+            For each person in vid, concatenates appearance feature matrices from
+            every node currently in the same UF component (i.e. all views matched
+            so far).  On the first Phase-1 iteration the component is a singleton,
+            so this equals the original descriptor; on later iterations it
+            accumulates cross-view signal, making similarity scores more robust.
+            Shape descriptor is kept from the original (single-video) entry.
+            """
+            pooled: dict[int, tuple] = {}
+            for pid in person_pids[vid]:
+                root = _find((vid, pid))
+                all_feats: list[np.ndarray] = []
+                all_confs: list[np.ndarray] = []
+                for v in active_vids:
+                    for p in person_pids[v]:
+                        if _find((v, p)) == root:
+                            app = person_descs[v][p][0]
+                            if app is not None:
+                                all_feats.append(app[0])
+                                all_confs.append(app[1])
+                app_pooled = (
+                    (np.concatenate(all_feats, axis=0),
+                     np.concatenate(all_confs, axis=0))
+                    if all_feats else None
+                )
+                pooled[pid] = (app_pooled, person_descs[vid][pid][1])
+            return pooled
+
         def _ransac_match(
             vid_a: str, vid_b: str,
             pids_a_restrict: list[int] | None = None,
             pids_b_restrict: list[int] | None = None,
+            descs_a_override: dict | None = None,
         ) -> list[tuple[int, int, float, float]]:
             """RANSAC geometric veto for one camera pair.
 
@@ -1436,13 +1467,17 @@ class ParametersExtractor:
 
             pids_a_restrict / pids_b_restrict: if provided, restrict matching to
             these pid subsets (used by BFS propagation to handle only residual persons).
+            descs_a_override: if provided, use these descriptors for vid_a instead of
+            person_descs[vid_a] (used in Phase 1 to pass component-pooled descriptors).
             """
             pids_a = pids_a_restrict if pids_a_restrict is not None else person_pids[vid_a]
             pids_b = pids_b_restrict if pids_b_restrict is not None else person_pids[vid_b]
 
+            descs_a = descs_a_override if descs_a_override is not None else person_descs[vid_a]
+
             sim_mat = _weighted_sim_mat(
                 pids_a, pids_b,
-                person_descs[vid_a], person_descs[vid_b],
+                descs_a, person_descs[vid_b],
                 appearance_weight, shape_weight,
             )
 
@@ -1478,9 +1513,17 @@ class ParametersExtractor:
                 geo_scores = []
                 claimed_b = {pb_anc}  # track which pids_b are already taken
 
-                for ia, pa in enumerate(pids_a):
-                    if pa == pa_anc:
-                        continue
+                # Process non-anchor persons in order of their best available sim
+                # score (descending).  This ensures the most-confident assignment
+                # goes first so high-sim persons don't have their slot stolen by a
+                # lower-confidence person that happens to appear earlier in the list.
+                non_anchor_order = sorted(
+                    [ia for ia in range(len(pids_a)) if pids_a[ia] != pa_anc],
+                    key=lambda ia: float(sim_mat[ia].max()),
+                    reverse=True,
+                )
+                for ia in non_anchor_order:
+                    pa = pids_a[ia]
                     # Candidates in cam_b sorted by appearance sim (descending),
                     # excluding pids_b already claimed by the anchor or earlier matches.
                     cands = sorted(
@@ -1542,7 +1585,7 @@ class ParametersExtractor:
             if res_pids_a and res_pids_b:
                 res_sim_mat = _weighted_sim_mat(
                     res_pids_a, res_pids_b,
-                    person_descs[vid_a], person_descs[vid_b],
+                    descs_a, person_descs[vid_b],
                     appearance_weight, shape_weight,
                 )
                 r_ind, c_ind = linear_sum_assignment(1.0 - res_sim_mat)
@@ -1583,10 +1626,15 @@ class ParametersExtractor:
                     edges.append((sim, geo, (vid_a, pa), (vid_b, pb)))
                     _union((vid_a, pa), (vid_b, pb))
 
-        # Phase 1 — root star
+        # Phase 1 — root star (sequential with component-pooled descriptors)
+        # Before each pair, pool appearance features from all views already matched
+        # to each root person.  On the first iteration this is a singleton (no-op);
+        # on later iterations the centroid of multiple camera views is used, making
+        # similarity scores robust to single-view appearance drift.
         root_vid = active_vids[0]
         for vid_b in active_vids[1:]:
-            pairs = _ransac_match(root_vid, vid_b)
+            pooled_root = _build_pooled_descs(root_vid)
+            pairs = _ransac_match(root_vid, vid_b, descs_a_override=pooled_root)
             _accept_pairs(root_vid, vid_b, pairs)
 
         # Phase 2 — non-root pairs with BFS constraint propagation
