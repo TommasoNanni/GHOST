@@ -508,7 +508,7 @@ class Trainer:
         return self.model(inputs)
 
     def _append_smplx_joints(self, preds: Any) -> Any:
-        """Compute SMPL-X joints once and append as preds[7].
+        """Compute SMPL-X joints once and append as preds[8].
 
         Both EpipolarLoss and BoneLengthLoss need world-frame joint positions.
         Computing them here (once per step) instead of once per loss × camera-pair

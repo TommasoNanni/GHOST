@@ -1065,7 +1065,10 @@ class SSTOutputHeads(nn.Module):
         # body_orient_world_per_cam and body_transl_world_per_cam are the per-camera world-frame estimates
         # before aggregation — exposed for the triangulation loss.
         # person_visible is returned so the triangulation loss can mask absent persons.
-        return pose_aggr, shape_aggr, camera_out, body_transl_world, body_orient_world_per_cam, body_transl_world_per_cam, person_visible
+        # body_transl_cam (preds[7]) is the per-camera camera-frame translation before back-projection,
+        # used by TranslationMSELoss to supervise translation without going through predicted cameras.
+        # joints_world is appended by Trainer._append_smplx_joints as preds[8].
+        return pose_aggr, shape_aggr, camera_out, body_transl_world, body_orient_world_per_cam, body_transl_world_per_cam, person_visible, body_transl_cam
 
 class SSTNetwork(nn.Module):
     """Spatio-Spatio-Temporal attention module that fuses parameters across

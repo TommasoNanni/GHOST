@@ -101,7 +101,7 @@ class EpipolarLoss(Loss):
         B, T, P = pose_aggr.shape[:3]
 
         # joints_world precomputed once per step in Trainer._append_smplx_joints
-        joints_world = preds[7]                                                 # (B, T, P, Jsmplx, 3)
+        joints_world = preds[8]                                                 # (B, T, P, Jsmplx, 3)
         Jsmplx = joints_world.shape[3]
         flat_world = joints_world.reshape(B * T, P * Jsmplx, 3)                # (B*T, P*J, 3)
 
@@ -440,7 +440,7 @@ class BoneLengthconsistencyLoss(Loss):
         """
         Penalises inconsistent bone lengths across time in the fused prediction.
 
-        Uses precomputed joints_world from preds[7] (set by Trainer._append_smplx_joints).
+        Uses precomputed joints_world from preds[8] (set by Trainer._append_smplx_joints).
 
         pose_aggr : (B, T, P, J, 6)
         shape_aggr: (B, T, P, 10)
@@ -455,7 +455,7 @@ class BoneLengthconsistencyLoss(Loss):
 
         # joints_world precomputed once per step in Trainer._append_smplx_joints
         # bone lengths are global-translation invariant, so world-frame joints are fine
-        joints = preds[7][..., :55, :]     # (B, T, P, 55, 3)
+        joints = preds[8][..., :55, :]     # (B, T, P, 55, 3)
 
         parent_mapping = torch.tensor(
             PARENTS_TABLE, device=joints.device, dtype=torch.long
@@ -563,77 +563,75 @@ class TriangulationLoss(Loss):
 
 
 class TranslationMSELoss(Loss):
-    """Direct MSE supervision of world-frame body root translation.
+    """Supervise body root translation in each camera's own frame.
 
-    Two terms are summed:
-    1. ``body_transl_world`` (preds[3], (B,T,P,3)) vs GT — supervises the
-       confidence-weighted mean across cameras.
-    2. ``body_transl_world_per_cam`` (preds[5], (B,T,K,P,3)) vs GT — supervises each
-       per-camera back-projected translation independently, masked by
-       ``person_visible`` (preds[6]).  This forces all cameras to agree
-       on the same world-frame position, coupling camera and body
-       translation optimisation.
+    Compares ``body_transl_cam`` (preds[7], (B,T,K,P,3)) — the per-camera
+    translation prediction *before* back-projection — against the GT world
+    translation projected into each camera frame using GT cameras from
+    ``targets["camera"]``.
 
-    Frames with no RICH annotation are masked out via ``targets["gt_valid"]``.
-    Both terms are normalised by squared scene scale to keep the loss unit-free.
+    Because neither side touches predicted cameras, this loss gives a clean
+    gradient to the translation head from the very first step, regardless of
+    how accurate the camera predictions are.
+
+    Row-vector convention (matches fusion_module.py):
+        v_cam = v_world @ R_w2c^T + t_w2c
     """
 
-    def __init__(self, name: str = "Translation MSE Loss", weight: float = 1.0) -> None:
+    def __init__(self, name: str = "Translation camera-frame loss", weight: float = 1.0) -> None:
         super().__init__(name, weight)
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        body_transl_world          = preds[3]   # (B, T, P, 3)    — aggregated world frame
-        body_transl_world_per_cam  = preds[5]   # (B, T, K, P, 3) — per-camera world frame
-        person_visible             = preds[6]   # (B, T, K, P)    — visibility weights
-        gt_body_transl_world       = targets["trans"]   # (B, T, P, 3)
+        body_transl_cam = preds[7]          # (B, T, K, P, 3) — camera frame, before back-projection
+        person_visible  = preds[6]          # (B, T, K, P)
+        gt_transl_world = targets["trans"]  # (B, T, P, 3)
+        cam_gt          = targets["camera"] # (B, T, K, 8)  — quaternion[0:4] + translation[4:7]
 
         gt_valid = targets.get("gt_valid")  # (B, T, P) bool or None
 
-        def _masked_mse(pred, gt, mask):
-            m = mask.unsqueeze(-1).expand_as(pred)
-            if not m.any():
-                return pred.new_zeros([])
-            return F.mse_loss(pred[m], gt[m])
+        B, T, K, P, _ = body_transl_cam.shape
 
-        # 1. Aggregated translation loss
-        if gt_valid is not None:
-            if not gt_valid.any():
-                return body_transl_world.new_zeros([])
-            loss = _masked_mse(body_transl_world, gt_body_transl_world, gt_valid)
-        else:
-            loss = F.mse_loss(body_transl_world, gt_body_transl_world)
+        # Identify cameras with real GT (non-zero quaternion sentinel).
+        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
 
-        # 2. Per-camera translation loss
-        gt_body_transl_world_per_cam = gt_body_transl_world.unsqueeze(2).expand_as(body_transl_world_per_cam)
-        vis_mask = person_visible > 0                              # (B, T, K, P) bool
+        # Replace invalid camera quaternions with identity to avoid NaN in quaternion_to_matrix.
+        q_safe = cam_gt[..., :4].clone()
+        q_safe[~cam_valid] = q_safe.new_tensor([1., 0., 0., 0.])
+        gt_cam_rot_w2c    = quaternion_to_matrix(q_safe.reshape(-1, 4)).reshape(B, T, K, 3, 3)
+        gt_cam_transl_w2c = cam_gt[..., 4:7]  # (B, T, K, 3)
+
+        # Project GT world translation into each camera frame.
+        # Row convention: v_cam = v_world @ R_w2c^T + t_w2c
+        gt_world_exp  = gt_transl_world.unsqueeze(2).expand(B, T, K, P, 3)
+        gt_cam_rot_T  = gt_cam_rot_w2c.transpose(-1, -2).reshape(B * T * K, 3, 3)
+        gt_transl_cam = torch.bmm(
+            gt_world_exp.reshape(B * T * K, P, 3),
+            gt_cam_rot_T,
+        ).reshape(B, T, K, P, 3) + gt_cam_transl_w2c.unsqueeze(-2)
+
+        # Build mask: camera must have GT, person must be visible, frame must have GT annotation.
+        vis_mask = person_visible > 0
+        vis_mask = vis_mask & cam_valid.unsqueeze(-1).expand_as(vis_mask)
         if gt_valid is not None:
             vis_mask = vis_mask & gt_valid.unsqueeze(2).expand_as(vis_mask)
-        loss = loss + _masked_mse(body_transl_world_per_cam, gt_body_transl_world_per_cam, vis_mask)
+
+        if not vis_mask.any():
+            return body_transl_cam.new_zeros([])
+
+        # vis_mask is (B,T,K,P); indexing a (B,T,K,P,3) tensor with it yields (N,3)
+        loss = F.mse_loss(body_transl_cam[vis_mask], gt_transl_cam[vis_mask])
 
         # Normalise by squared scene scale so the loss is unit-free.
-        # Only use cameras with real GT (non-zero quaternion) to avoid NaN from
-        # quaternion_to_matrix and to prevent zero-translation cameras from
-        # collapsing the scene scale toward zero.
-        if "camera" in targets:
-            cam_gt = targets["camera"]     # (B, T, K, 8)
-            cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
-            if cam_valid.any():
-                # Replace invalid quaternions with identity to prevent NaN in quaternion_to_matrix
-                q_safe = cam_gt[..., :4].clone()
-                q_safe[~cam_valid] = q_safe.new_tensor([1., 0., 0., 0.])
-                gt_cam_rot_w2c = quaternion_to_matrix(q_safe.reshape(-1, 4)).reshape(*cam_gt.shape[:-1], 3, 3)
-                gt_cam_transl_w2c = cam_gt[..., 4:7]
-                gt_cam_centres = -torch.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
-                # Pairwise distances between valid cameras only
-                diff = gt_cam_centres.unsqueeze(-2) - gt_cam_centres.unsqueeze(-3)  # (B, T, K, K, 3)
-                dist = diff.norm(dim=-1)  # (B, T, K, K)
-                valid_pair = cam_valid.unsqueeze(-1) & cam_valid.unsqueeze(-2)  # (B, T, K, K)
-                K_dim = cam_gt.shape[-2]
-                diag = torch.eye(K_dim, dtype=torch.bool, device=cam_gt.device)[None, None]
-                valid_pair = valid_pair & ~diag
-                if valid_pair.any():
-                    scene_scale = dist[valid_pair].mean().clamp(min=1e-3)
-                    loss = loss / (scene_scale ** 2)
+        if cam_valid.any():
+            gt_cam_centres = -torch.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
+            diff = gt_cam_centres.unsqueeze(-2) - gt_cam_centres.unsqueeze(-3)  # (B, T, K, K, 3)
+            dist = diff.norm(dim=-1)
+            K_dim = K
+            diag = torch.eye(K_dim, dtype=torch.bool, device=cam_gt.device)[None, None]
+            valid_pair = cam_valid.unsqueeze(-1) & cam_valid.unsqueeze(-2) & ~diag
+            if valid_pair.any():
+                scene_scale = dist[valid_pair].mean().clamp(min=1e-3)
+                loss = loss / (scene_scale ** 2)
 
         return loss
 
