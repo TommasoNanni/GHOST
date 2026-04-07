@@ -382,7 +382,7 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
-    ds.scenes = [s for s in ds.scenes if "tossball" in s.scene_id]
+    # ds.scenes = [s for s in ds.scenes if "tossball" in s.scene_id]
 
     for scene in ds.scenes:
         # Re-instantiate per scene so no Python-level instance state (gallery

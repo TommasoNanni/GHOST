@@ -1376,32 +1376,172 @@ class ParametersExtractor:
             sim_mat = np.where(weight_mat > 0, sim_mat / weight_mat, 0.0)
             return sim_mat
 
-        # ── 3b. All-pairs appearance-only Hungarian matching ─────────────────
+        # ── 3a. Geometric consistency helper ──────────────────────────────
+        GEO_CORR_THRESHOLD = 0.5
+        GEO_MIN_OVERLAP    = 30
+
+        def _geo_consistency(
+            frames_i: np.ndarray, cam_t_i: np.ndarray,
+            frames_anc_a: np.ndarray, cam_t_anc_a: np.ndarray,
+            frames_j: np.ndarray, cam_t_j: np.ndarray,
+            frames_anc_b: np.ndarray, cam_t_anc_b: np.ndarray,
+        ) -> float | None:
+            """Peak NCC of inter-person distance profiles.
+
+            Returns None when there is not enough overlapping data to make a
+            judgement (caller should skip the veto rather than reject).
+            """
+            common_a = np.intersect1d(frames_i, frames_anc_a)
+            common_b = np.intersect1d(frames_j, frames_anc_b)
+            if len(common_a) < GEO_MIN_OVERLAP or len(common_b) < GEO_MIN_OVERLAP:
+                return None
+            d_a = np.linalg.norm(
+                cam_t_i[np.searchsorted(frames_i, common_a)] -
+                cam_t_anc_a[np.searchsorted(frames_anc_a, common_a)], axis=1)
+            d_b = np.linalg.norm(
+                cam_t_j[np.searchsorted(frames_j, common_b)] -
+                cam_t_anc_b[np.searchsorted(frames_anc_b, common_b)], axis=1)
+
+            def _norm(s: np.ndarray) -> np.ndarray:
+                std = s.std()
+                return (s - s.mean()) / std if std > 1e-6 else np.zeros_like(s)
+
+            d_a, d_b = _norm(d_a), _norm(d_b)
+            from scipy.signal import correlate as _correlate
+            cc   = _correlate(d_a, d_b, mode="full")
+            norm = float(np.linalg.norm(d_a) * np.linalg.norm(d_b))
+            return float(cc.max() / norm) if norm > 1e-9 else None
+
+        def _geo_score_for_match(
+            pa: int, pb: int,
+            vid_a: str, vid_b: str,
+            anchors: list[tuple[int, int]],
+        ) -> float | None:
+            """Max geo consistency of (pa, pb) against a list of anchor pairs.
+
+            Returns None if no anchor has enough data, meaning we cannot veto.
+            """
+            cam_t_a = person_cam_t.get(vid_a, {})
+            cam_t_b = person_cam_t.get(vid_b, {})
+            if pa not in cam_t_a or pb not in cam_t_b:
+                return None
+            fi_a, ct_a = cam_t_a[pa]
+            fi_b, ct_b = cam_t_b[pb]
+            scores = []
+            for anc_a, anc_b in anchors:
+                if anc_a not in cam_t_a or anc_b not in cam_t_b:
+                    continue
+                fa_a, ct_anc_a = cam_t_a[anc_a]
+                fa_b, ct_anc_b = cam_t_b[anc_b]
+                g = _geo_consistency(fi_a, ct_a, fa_a, ct_anc_a,
+                                     fi_b, ct_b, fa_b, ct_anc_b)
+                if g is not None:
+                    scores.append(g)
+            return max(scores) if scores else None
+
+        # ── 3b. All-pairs matching: appearance Hungarian + geo validation ─────
+        # For each camera pair:
+        #   1. Run appearance-only Hungarian → initial assignment
+        #   2. Iteratively validate each match geometrically against all other
+        #      confirmed matches in this pair (used as anchors).
+        #   3. If a match fails geo → remove it, try next-best appearance
+        #      candidate for that person (must be unclaimed in vid_b).
+        #   4. Repeat until all remaining matches pass geo or no more candidates.
+        # Conflict resolution (step 4) remains the global safety net.
+
+        def _match_with_geo_validation(
+            vid_a: str, vid_b: str,
+        ) -> list[tuple[int, int, float]]:
+            """Return a geo-validated list of (pid_a, pid_b, sim) matches."""
+            pids_a = person_pids[vid_a]
+            pids_b = person_pids[vid_b]
+
+            sim_mat = _weighted_sim_mat(
+                pids_a, pids_b,
+                person_descs[vid_a], person_descs[vid_b],
+                appearance_weight, shape_weight,
+            )
+
+            # Initial assignment via Hungarian.
+            row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
+            assignment: list[tuple[int, int, float]] = [
+                (pids_a[r], pids_b[c], float(sim_mat[r, c]))
+                for r, c in zip(row_ind, col_ind)
+            ]
+
+            # With ≤1 match there are no anchors — skip geo validation.
+            if len(assignment) <= 1:
+                return assignment
+
+            # Iterative geo validation: find worst-failing match, replace it.
+            # Cap at 1 removal: each removal degrades the anchor set for the next
+            # iteration, so allowing more than one cascades into false vetoes on
+            # good matches (the remaining anchors become unverified background tracks).
+            geo_removals = 0
+            for _ in range(len(pids_a) * len(pids_b) + 1):
+                # Score every match in the current assignment.
+                geo_scores: list[float | None] = []
+                for i, (pa, pb, _) in enumerate(assignment):
+                    anchors = [(a, b) for j, (a, b, _) in enumerate(assignment) if j != i]
+                    geo_scores.append(_geo_score_for_match(pa, pb, vid_a, vid_b, anchors))
+
+                # Find the match with the worst *available* geo score.
+                # Matches where geo data is unavailable (None) are not vetoed.
+                scored = [(i, g) for i, g in enumerate(geo_scores) if g is not None]
+                if not scored:
+                    break  # no geo data at all → keep appearance assignment
+                worst_i, worst_geo = min(scored, key=lambda x: x[1])
+                if worst_geo >= GEO_CORR_THRESHOLD:
+                    break  # all scored matches pass → done
+                if geo_removals >= 1:
+                    break  # cap: one removal already done, anchor set no longer reliable
+
+                # Remove the worst-failing match and try the next-best candidate
+                # for that person in vid_b (must be unclaimed).
+                pa_fail, _, _ = assignment[worst_i]
+                assignment.pop(worst_i)
+                claimed_b = {pb for _, pb, _ in assignment}
+
+                ia = pids_a.index(pa_fail)
+                candidates = sorted(
+                    [(float(sim_mat[ia, ib]), pids_b[ib])
+                     for ib in range(len(pids_b)) if pids_b[ib] not in claimed_b],
+                    reverse=True,
+                )
+                replaced = False
+                for cand_sim, cand_pb in candidates:
+                    if cand_sim < cross_view_reid_threshold:
+                        break
+                    anchors = [(a, b) for a, b, _ in assignment]
+                    geo = _geo_score_for_match(pa_fail, cand_pb, vid_a, vid_b, anchors)
+                    if geo is not None and geo >= GEO_CORR_THRESHOLD:
+                        assignment.append((pa_fail, cand_pb, cand_sim))
+                        replaced = True
+                        break
+
+                geo_removals += 1
+                if not replaced:
+                    # No valid replacement found — pa_fail stays unmatched.
+                    logging.info(
+                        f"[cross-view reid] {scene_id}  "
+                        f"{vid_a}/P{pa_fail} left unmatched after geo validation"
+                    )
+
+            return assignment
+
         for ii, vid_a in enumerate(active_vids):
             for vid_b in active_vids[ii + 1:]:
-                pids_a = person_pids[vid_a]
-                pids_b = person_pids[vid_b]
-
-                sim_mat = _weighted_sim_mat(
-                    pids_a, pids_b,
-                    person_descs[vid_a], person_descs[vid_b],
-                    appearance_weight, shape_weight,
-                )
-                row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
-                for r, c in zip(row_ind, col_ind):
-                    sim = float(sim_mat[r, c])
+                matches = _match_with_geo_validation(vid_a, vid_b)
+                for pa, pb, sim in matches:
                     accepted = sim >= cross_view_reid_threshold
                     logging.info(
                         f"[cross-view reid] {scene_id}  "
-                        f"{vid_a}/P{pids_a[r]} ↔ {vid_b}/P{pids_b[c]}  "
-                        f"sim={sim:.3f}  "
+                        f"{vid_a}/P{pa} ↔ {vid_b}/P{pb}  sim={sim:.3f}  "
                         f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'})"
                     )
                     if accepted:
-                        node_a = (vid_a, pids_a[r])
-                        node_b = (vid_b, pids_b[c])
-                        edges.append((sim, node_a, node_b))
-                        _union(node_a, node_b)
+                        edges.append((sim, (vid_a, pa), (vid_b, pb)))
+                        _union((vid_a, pa), (vid_b, pb))
 
         # ── 4. Conflict detection and resolution ──────────────────────────
         # A conflict occurs when two persons from the same video end up in
@@ -1434,11 +1574,24 @@ class ParametersExtractor:
 
                     conflict_found = True
                     conflict_root = _find(nodes[0])
-                    worst_sim, worst_idx = float("inf"), -1
+
+                    # Count how many edges each node participates in.
+                    # An edge is suspicious if one of its endpoints has very few
+                    # other connections (i.e. no consensus from other cameras).
+                    node_degree: dict[tuple, int] = {}
+                    for _, na, nb in edges:
+                        node_degree[na] = node_degree.get(na, 0) + 1
+                        node_degree[nb] = node_degree.get(nb, 0) + 1
+
+                    # Remove the edge whose least-connected endpoint has the
+                    # fewest edges (outlier with no consensus). Break ties by
+                    # lowest sim.
+                    worst_score, worst_sim, worst_idx = (float("inf"), float("inf"), -1)
                     for ei, (sim, na, nb) in enumerate(edges):
                         if _find(na) == conflict_root:
-                            if sim < worst_sim:
-                                worst_sim, worst_idx = sim, ei
+                            score = min(node_degree.get(na, 1), node_degree.get(nb, 1))
+                            if (score, sim) < (worst_score, worst_sim):
+                                worst_score, worst_sim, worst_idx = score, sim, ei
 
                     if worst_idx >= 0:
                         edges.pop(worst_idx)
