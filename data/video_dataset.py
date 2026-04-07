@@ -681,7 +681,7 @@ class RichDataset(Dataset):
         # a canonical `frames/` sub-directory.
         all_cam_dirs = [cd for _, cds in scene_cam_dirs for cd in cds]
         video_map: dict[Path, Video] = {}
-        with ThreadPoolExecutor(max_workers=min(32, len(all_cam_dirs) or 1)) as pool:
+        with ThreadPoolExecutor(max_workers=min(4, len(all_cam_dirs) or 1)) as pool:
             futures = {
                 pool.submit(Video, cd, self.resolution, max_side=self._max_side): cd
                 for cd in all_cam_dirs
@@ -741,6 +741,341 @@ class RichDataset(Dataset):
             )
             for d in scene_dir.iterdir()
         )
+
+
+# ======================================================================
+# DNA-Rendering — SMC/HDF5 helpers + Dataset
+# ======================================================================
+
+# Camera resolution group keys to try in order (prefer 5 MP).
+_DNA_CAM_KEYS = ("Camera_5mp", "Camera_12mp")
+
+
+def _open_smc(path: Path):
+    """Open an SMC (HDF5) file in read mode.  Caller is responsible for closing."""
+    try:
+        import h5py
+    except ImportError as exc:
+        raise ImportError(
+            "h5py is required to read DNA-Rendering SMC files. "
+            "Install it with: pip install h5py"
+        ) from exc
+    return h5py.File(str(path), "r")
+
+
+def _dna_camera_group(f):
+    """Return (group, key) for the first available Camera_Xmp group, or (None, None)."""
+    for key in _DNA_CAM_KEYS:
+        if key in f:
+            return f[key], key
+    return None, None
+
+
+def dna_list_camera_ids(smc_path: Path) -> list[str]:
+    """Return sorted camera IDs present in a DNA-Rendering media SMC file."""
+    with _open_smc(smc_path) as f:
+        grp, _ = _dna_camera_group(f)
+        return sorted(grp.keys()) if grp is not None else []
+
+
+def dna_extract_frames(
+    smc_path: Path,
+    camera_id: str,
+    frames_dir: Path,
+    *,
+    cam_key: str | None = None,
+) -> list[str]:
+    """Extract JPEG frames for *camera_id* from a DNA-Rendering media SMC file.
+
+    Frames already present in *frames_dir* are not re-decoded (idempotent).
+
+    Parameters
+    ----------
+    smc_path : Path
+        Path to the media ``.smc`` (HDF5) file.
+    camera_id : str
+        Camera identifier as it appears inside the HDF5 group.
+    frames_dir : Path
+        Destination directory.  Created if it does not exist.
+    cam_key : str | None
+        Override the resolution group key.  Auto-detected when ``None``.
+
+    Returns
+    -------
+    list[str]
+        Sorted list of written frame file names, e.g. ``["000000.jpg", ...]``.
+    """
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    existing = sorted(p.name for p in frames_dir.iterdir() if p.suffix.lower() == ".jpg")
+
+    with _open_smc(smc_path) as f:
+        if cam_key is None:
+            grp_parent, cam_key = _dna_camera_group(f)
+            if grp_parent is None:
+                raise KeyError(f"No Camera_5mp or Camera_12mp group in {smc_path}")
+        else:
+            if cam_key not in f:
+                raise KeyError(f"Group '{cam_key}' not found in {smc_path}")
+            grp_parent = f[cam_key]
+
+        if camera_id not in grp_parent:
+            raise KeyError(f"Camera '{camera_id}' not found under '{cam_key}' in {smc_path}")
+
+        cam_grp = grp_parent[camera_id]
+        frame_keys = sorted(cam_grp.keys(), key=lambda x: int(x))
+        n_frames = len(frame_keys)
+
+        if existing and len(existing) >= n_frames:
+            print(f"  {camera_id}: reusing {len(existing)} existing frames in {frames_dir}")
+            return existing
+
+        frame_names: list[str] = []
+        for i, fkey in enumerate(tqdm.tqdm(frame_keys, desc=f"  Extracting {camera_id}", leave=False)):
+            name = f"{i:06d}.jpg"
+            dst = frames_dir / name
+            if dst.exists():
+                frame_names.append(name)
+                continue
+            # Each entry is a compressed JPEG stored as a uint8 byte array.
+            jpeg_bytes = np.frombuffer(cam_grp[fkey][()], dtype=np.uint8)
+            img = cv2.imdecode(jpeg_bytes, cv2.IMREAD_COLOR)
+            if img is None:
+                print(f"  WARNING: {camera_id}: failed to decode frame {fkey} — skipping")
+                continue
+            cv2.imwrite(str(dst), img)
+            frame_names.append(name)
+
+    return frame_names
+
+
+def dna_load_calibration(annots_path: Path) -> dict[str, dict[str, np.ndarray]]:
+    """Load per-camera calibration from a DNA-Rendering annotation SMC file.
+
+    Parameters
+    ----------
+    annots_path : Path
+        Path to the ``<scene>_annots.smc`` HDF5 file.
+
+    Returns
+    -------
+    dict mapping camera_id (str) to a calibration dict with keys:
+
+    ``'K'`` / ``'intrinsics'``
+        (3, 3) float32 intrinsic matrix (same object under two aliases).
+    ``'D'``
+        (N,) float32 distortion coefficients.
+    ``'R'``
+        (3, 3) float32 rotation matrix (world → camera).
+    ``'T'``
+        (3,) float32 translation vector.
+    ``'extrinsics'``
+        (3, 4) float32 ``[R | T]`` world-to-camera matrix.
+    """
+    calibration: dict[str, dict[str, np.ndarray]] = {}
+    with _open_smc(annots_path) as f:
+        if "Camera_Parameter" not in f:
+            print(f"WARNING: No 'Camera_Parameter' group in {annots_path}")
+            return calibration
+        param_grp = f["Camera_Parameter"]
+        for cam_id in param_grp.keys():
+            cam = param_grp[cam_id]
+            K = np.asarray(cam["K"], dtype=np.float32)             # (3, 3)
+            D = np.asarray(cam["D"], dtype=np.float32).reshape(-1)  # (N,)
+            R = np.asarray(cam["R"], dtype=np.float32)             # (3, 3)
+            T = np.asarray(cam["T"], dtype=np.float32).reshape(3)  # (3,)
+            ext = np.concatenate([R, T[:, None]], axis=1)           # (3, 4)
+            calibration[cam_id] = {
+                "K": K,
+                "D": D,
+                "R": R,
+                "T": T,
+                "extrinsics": ext,   # world → camera, same convention as RICH XML
+                "intrinsics": K,     # alias used by FusionDatapoint.convert_camera
+            }
+    return calibration
+
+
+class DNARenderingScene(Scene):
+    """A :class:`Scene` extended with per-camera calibration.
+
+    Produced by :class:`DNARenderingDataset`.
+
+    Extra attributes
+    ----------------
+    calibration : dict[str, dict]
+        Maps camera_id → calibration dict (keys: K, D, R, T, extrinsics,
+        intrinsics).  Populated from the ``_annots.smc`` file.
+    annots_path : Path | None
+        Path to the annotation SMC file used to load calibration.
+    """
+
+    def __init__(
+        self,
+        scene_id: str,
+        videos: list[Video],
+        calibration: dict[str, dict[str, np.ndarray]] | None = None,
+        annots_path: Path | None = None,
+    ):
+        super().__init__(scene_id=scene_id, videos=videos)
+        self.calibration: dict[str, dict[str, np.ndarray]] = calibration or {}
+        self.annots_path = annots_path
+
+    def get_camera_calibration(self, camera_id: str) -> dict[str, np.ndarray] | None:
+        """Return the calibration dict for *camera_id*, or ``None`` if missing."""
+        return self.calibration.get(camera_id)
+
+    def __repr__(self) -> str:
+        return (
+            f"DNARenderingScene({self.scene_id!r}, "
+            f"cameras={len(self.videos)}, calibrated={len(self.calibration)})"
+        )
+
+
+class DNARenderingDataset(Dataset):
+    """PyTorch dataset where each item is one DNA-Rendering scene.
+
+    Extracts JPEG frames from HDF5 ``.smc`` containers into a standard
+    ``<output_root>/<scene>/<camera_id>/frames/`` layout the first time a
+    scene is processed.  Subsequent runs reuse the cached frames.
+
+    Expected layout (nested or flat both supported)::
+
+        data_root/
+            scene_001/
+                scene_001.smc           ← media file (images per camera)
+                scene_001_annots.smc    ← annotations (calibration)
+            scene_002/
+                ...
+
+    Parameters
+    ----------
+    data_root : str | Path
+        Root directory searched recursively for ``*.smc`` media files.
+        Files ending with ``_annots.smc`` are automatically excluded.
+    output_root : str | Path | None
+        Where to write extracted frames.  Defaults to *data_root* so frames
+        are co-located with the source data (same convention as RICH).
+    resolution : tuple[int, int] | None
+        Optional (H, W) resize applied during frame decoding.
+    slice : int | None
+        Limit the number of scenes loaded (for debugging).
+    preextract_frames : bool
+        If ``True`` (default), extract all frames during ``__init__``.
+    """
+
+    def __init__(
+        self,
+        data_root: str | Path,
+        output_root: str | Path | None = None,
+        resolution: tuple[int, int] | None = None,
+        slice: int | None = None,
+        preextract_frames: bool = True,
+    ):
+        self.data_root = Path(data_root)
+        self.output_root = Path(output_root) if output_root is not None else self.data_root
+        self.resolution = resolution
+
+        smc_paths = sorted(
+            p for p in self.data_root.rglob("*.smc")
+            if not p.name.endswith("_annots.smc")
+        )
+        if slice is not None:
+            smc_paths = smc_paths[:slice]
+
+        if not smc_paths:
+            raise FileNotFoundError(
+                f"No *.smc media files found under {self.data_root}"
+            )
+
+        print(f"Found {len(smc_paths)} SMC scene file(s) under {self.data_root}")
+
+        self.scenes: list[DNARenderingScene] = []
+        for smc_path in tqdm.tqdm(smc_paths, desc="Building scenes"):
+            self.scenes.append(self._build_scene(smc_path))
+
+        print(
+            f"Dataset created: {len(self.scenes)} scenes, "
+            f"{sum(len(s) for s in self.scenes)} cameras total"
+        )
+
+        if preextract_frames:
+            total_cams = sum(len(s) for s in self.scenes)
+            print(f"Pre-extracting frames for {total_cams} cameras ...")
+            for scene in tqdm.tqdm(self.scenes, desc="Extracting frames"):
+                smc_path = self._locate_smc(scene.scene_id)
+                if smc_path is not None:
+                    self._extract_scene_frames(scene, smc_path)
+                else:
+                    print(f"  WARNING: {scene.scene_id}: media SMC not found, skipping extraction")
+            print("Frame extraction complete.")
+
+    def __len__(self) -> int:
+        return len(self.scenes)
+
+    def __getitem__(self, idx: int) -> DNARenderingScene:
+        return self.scenes[idx]
+
+    def get_scene_ids(self) -> list[str]:
+        return [s.scene_id for s in self.scenes]
+
+    def _locate_smc(self, scene_id: str) -> Path | None:
+        """Find the media SMC for *scene_id* in nested or flat layout."""
+        nested = self.data_root / scene_id / f"{scene_id}.smc"
+        if nested.exists():
+            return nested
+        flat = self.data_root / f"{scene_id}.smc"
+        if flat.exists():
+            return flat
+        return None
+
+    def _build_scene(self, smc_path: Path) -> DNARenderingScene:
+        scene_id = smc_path.stem
+        annots_path = smc_path.with_name(f"{scene_id}_annots.smc")
+
+        calibration: dict[str, dict[str, np.ndarray]] = {}
+        if annots_path.exists():
+            try:
+                calibration = dna_load_calibration(annots_path)
+            except Exception as exc:
+                print(f"  WARNING: {scene_id}: could not load calibration — {exc}")
+        else:
+            print(f"  WARNING: {scene_id}: annotation file not found at {annots_path}")
+
+        camera_ids = dna_list_camera_ids(smc_path)
+        scene_out = self.output_root / scene_id
+        videos: list[Video] = []
+        for cam_id in camera_ids:
+            frames_dir = scene_out / cam_id / "frames"
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            video = Video(frames_dir=frames_dir, resolution=self.resolution)
+            video.video_id = cam_id
+            videos.append(video)
+
+        return DNARenderingScene(
+            scene_id=scene_id,
+            videos=videos,
+            calibration=calibration,
+            annots_path=annots_path if annots_path.exists() else None,
+        )
+
+    def _extract_scene_frames(self, scene: DNARenderingScene, smc_path: Path) -> None:
+        with _open_smc(smc_path) as f:
+            _, cam_key = _dna_camera_group(f)
+        if cam_key is None:
+            print(f"  WARNING: {scene.scene_id}: no camera group found in {smc_path}")
+            return
+
+        scene_out = self.output_root / scene.scene_id
+        for video in tqdm.tqdm(scene.videos, desc=f"  {scene.scene_id}", leave=False):
+            cam_id = video.video_id
+            frames_dir = scene_out / cam_id / "frames"
+            dna_extract_frames(smc_path, cam_id, frames_dir, cam_key=cam_key)
+            # Rebuild Video so metadata (num_frames, h, w) is correct.
+            new_video = Video(frames_dir=frames_dir, resolution=self.resolution)
+            new_video.video_id = cam_id
+            idx = scene.video_ids.index(cam_id)
+            scene.videos[idx] = new_video
+            scene._by_id[cam_id] = new_video
 
 
 if __name__ =="__main__":

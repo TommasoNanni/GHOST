@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=4G
-#SBATCH --time=16:00:00
+#SBATCH --time=20:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=tnanni@ethz.ch
 #
@@ -59,16 +59,16 @@ SCENES=(
     # "ParkingLot1_004_burpeejump1.tar.gz" # DOWNLOADED
     # "ParkingLot1_004_eating1.tar.gz" # DOWNLOADED
     # "ParkingLot1_004_pushup2.tar.gz" # DOWNLOADED
-    # "ParkingLot1_004_takingphotos1.tar.gz"
-    # "ParkingLot1_005_burpeejump2.tar.gz"
-    # "ParkingLot1_005_overfence1.tar.gz"
-    # "ParkingLot1_005_pushup2.tar.gz"
-    # "ParkingLot1_005_pushup3.tar.gz"
-    # "ParkingLot1_007_eating1.tar.gz"
-    # "ParkingLot1_007_eating2.tar.gz"
-    # "ParkingLot1_007_overfence2.tar.gz"
-    # "ParkingLot2_008_burpeejump1.tar.gz"
-    # "ParkingLot2_008_eating1.tar.gz"
+    "ParkingLot1_004_takingphotos1.tar.gz"
+    "ParkingLot1_005_burpeejump2.tar.gz"
+    "ParkingLot1_005_overfence1.tar.gz"
+    "ParkingLot1_005_pushup2.tar.gz"
+    "ParkingLot1_005_pushup3.tar.gz"
+    "ParkingLot1_007_eating1.tar.gz"
+    "ParkingLot1_007_eating2.tar.gz"
+    "ParkingLot1_007_overfence2.tar.gz"
+    "ParkingLot2_008_burpeejump1.tar.gz"
+    "ParkingLot2_008_eating1.tar.gz"
     # "ParkingLot2_008_overfence1.tar.gz"
     # "ParkingLot2_008_overfence3.tar.gz"
     # "ParkingLot2_008_phonetalk1.tar.gz"

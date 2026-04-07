@@ -59,6 +59,7 @@ SKIP_SCENES: list[str] = [
     "Pavallion_003_018_tossball",
     "ParkingLot1_002_burpee3",
 ]
+
 NUM_VAL_SCENES = 2
 DISABLED_LOSSES: list[str] = []
 

@@ -955,9 +955,6 @@ class PersonSegmenter:
             return
         npz_path = video_dir / "mask_data.npz"
         json_dir = video_dir / "json_data"
-        result_dir = video_dir / "result"
-        result_dir.mkdir(exist_ok=True)
-
         frame_names = sorted(
             p.name for p in frame_dir.iterdir()
             if p.suffix.lower() in (".jpg", ".jpeg")
@@ -1027,11 +1024,6 @@ class PersonSegmenter:
                 }
                 overlay = render_masklet_frame(img_rgb, sam3_outputs)
 
-            # Save annotated frame
-            cv2.imwrite(
-                str(result_dir / frame_name),
-                cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR),
-            )
             writer.write(cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
 
         writer.release()
