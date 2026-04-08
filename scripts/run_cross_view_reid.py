@@ -1,24 +1,29 @@
 """
 Run cross-view person re-identification on pre-computed body_data.
 
-Scans an output directory for scenes (subdirs where at least one camera
-subdir contains body_data/) and runs CrossVideoReidentifier on each,
-writing cross_view_reid.json and remapping body_data / mask files in-place.
-
-Usage:
-    pixi run python -m scripts.run_cross_view_reid \\
-        --output_dir /path/to/output \\
-        [--scene SCENE_ID] \\
-        [--force] \\
-        [--visualize --data_root /path/to/rich/train]
+Scans OUTPUT_DIR for scenes (subdirs where at least one camera subdir contains
+body_data/) and runs CrossVideoReidentifier on each, writing cross_view_reid.json
+and remapping body_data / mask files in-place.
 """
-import argparse
+import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+sys.path.append(str(Path(__file__).parent.parent / 'MHR' / 'tools' / 'mhr_smpl_conversion'))
+
 from configuration import CONFIG
 from preprocessing.parameters_extraction import CrossVideoReidentifier
+
+# --- configuration -----------------------------------------------------------
+OUTPUT_DIR  = Path("/cluster/project/cvg/students/tnanni/ghost/preprocessing_outputs/new_reid_test")
+SCENE       = None      # set to a scene ID string to process only that scene, e.g. "scene_01"
+FORCE       = True     # re-run even if cross_view_reid.json already exists
+VISUALIZE   = True     # generate *_segmentation_reid.mp4 videos after ReID
+DATA_ROOT   = "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"
+# -----------------------------------------------------------------------------
 
 
 def scan_scenes(output_dir: Path) -> list[tuple[str, dict[str, Path]]]:
@@ -37,38 +42,12 @@ def scan_scenes(output_dir: Path) -> list[tuple[str, dict[str, Path]]]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Run cross-view ReID on existing body_data without re-running the full pipeline.",
-    )
-    parser.add_argument(
-        "--output_dir", required=True,
-        help="Directory containing scene subdirs (e.g. the pipeline output_dir).",
-    )
-    parser.add_argument(
-        "--scene",
-        help="Process only this scene ID (default: all scenes found).",
-    )
-    parser.add_argument(
-        "--force", action="store_true",
-        help="Re-run even if cross_view_reid.json already exists.",
-    )
-    parser.add_argument(
-        "--visualize", action="store_true",
-        help="Generate *_segmentation_reid.mp4 videos after ReID.",
-    )
-    parser.add_argument(
-        "--data_root",
-        help="RICH data root containing original frames (required for --visualize).",
-    )
-    args = parser.parse_args()
-
-    output_dir = Path(args.output_dir)
-    if not output_dir.exists():
-        print(f"ERROR: output_dir does not exist: {output_dir}")
+    if not OUTPUT_DIR.exists():
+        print(f"ERROR: OUTPUT_DIR does not exist: {OUTPUT_DIR}")
         sys.exit(1)
 
-    if args.visualize and not args.data_root:
-        print("ERROR: --visualize requires --data_root to locate original frames.")
+    if VISUALIZE and not DATA_ROOT:
+        print("ERROR: VISUALIZE=True requires DATA_ROOT to be set.")
         sys.exit(1)
 
     reidentifier = CrossVideoReidentifier(
@@ -77,15 +56,15 @@ def main() -> None:
         shape_weight=getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
     )
 
-    scenes = scan_scenes(output_dir)
+    scenes = scan_scenes(OUTPUT_DIR)
     if not scenes:
-        print(f"No scenes with body_data found in {output_dir}")
+        print(f"No scenes with body_data found in {OUTPUT_DIR}")
         sys.exit(0)
 
-    if args.scene:
-        scenes = [(sid, vd) for sid, vd in scenes if sid == args.scene]
+    if SCENE:
+        scenes = [(sid, vd) for sid, vd in scenes if sid == SCENE]
         if not scenes:
-            print(f"Scene '{args.scene}' not found or has no body_data in {output_dir}")
+            print(f"Scene '{SCENE}' not found or has no body_data in {OUTPUT_DIR}")
             sys.exit(1)
 
     print(f"Found {len(scenes)} scene(s) with body_data.")
@@ -95,29 +74,23 @@ def main() -> None:
         for vid_id in sorted(video_dirs):
             print(f"  {vid_id}")
 
-        reid_marker = output_dir / scene_id / "cross_view_reid.json"
-        if args.force and reid_marker.exists():
-            print(f"  --force: removing existing {reid_marker}")
+        reid_marker = OUTPUT_DIR / scene_id / "cross_view_reid.json"
+        if FORCE and reid_marker.exists():
+            print(f"  FORCE: removing existing {reid_marker}")
             reid_marker.unlink()
 
         # match_across_views only reads scene.scene_id; no full Scene object needed.
         mock_scene = SimpleNamespace(scene_id=scene_id)
         reidentifier.match_across_views(scene=mock_scene, video_dirs=video_dirs)
 
-        if args.visualize:
+        if VISUALIZE:
             from utilities.visualize_segmented_reids import visualize_reid
-            data_root = Path(args.data_root)
             print(f"\n  Generating ReID visualizations...")
             for vid_id, video_dir in sorted(video_dirs.items()):
-                frames_dir = data_root / scene_id / vid_id / "frames"
-                if not frames_dir.exists():
-                    frames_dir = None
+                _cam_dir = Path(DATA_ROOT) / scene_id / vid_id
+                frames_dir = _cam_dir / "frames" if (_cam_dir / "frames").exists() else _cam_dir if _cam_dir.exists() else None
                 try:
-                    out = visualize_reid(
-                        video_dir=video_dir,
-                        fps=30,
-                        frames_dir=frames_dir,
-                    )
+                    out = visualize_reid(video_dir=video_dir, fps=30, frames_dir=frames_dir)
                     print(f"    {vid_id}: saved {out}")
                 except FileNotFoundError as e:
                     print(f"    WARNING: skipping {vid_id} — {e}")
