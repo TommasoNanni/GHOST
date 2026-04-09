@@ -290,21 +290,14 @@ class PersonSegmenter:
             video_results[video.video_id] = result
             newly_segmented = True
 
+            # Compact immediately after each video to free disk space before
+            # the next camera starts.
+            PersonSegmenter._filter_short_tracks(vid_out / "mask_data", vid_out / "json_data")
+            PersonSegmenter._compact_mask_data(vid_out)
+
             del result
             gc.collect()
             torch.cuda.empty_cache()
-
-        if newly_segmented:
-            # --- filter short-lived tracks (hallucinated detections) ---
-            for video in scene.videos:
-                PersonSegmenter._filter_short_tracks(
-                    scene_dir / video.video_id / "mask_data",
-                    scene_dir / video.video_id / "json_data",
-                )
-
-            # --- compact per-frame .npy files into a single compressed .npz to save space---
-            for video in scene.videos:
-                PersonSegmenter._compact_mask_data(scene_dir / video.video_id)
 
             # Exit the BFloat16 autocast context before body estimation runs in
             # the same process (single-GPU mode shares the main process).
@@ -530,7 +523,13 @@ class PersonSegmenter:
         """
         results = []
         for task_args in task_list:
-            results.append(PersonSegmenter._segment_video_on_gpu(*task_args))
+            result = PersonSegmenter._segment_video_on_gpu(*task_args)
+            # Compact immediately after each video to free disk space before
+            # the next camera starts on this GPU.
+            vid_out = Path(task_args[4])
+            PersonSegmenter._filter_short_tracks(vid_out / "mask_data", vid_out / "json_data")
+            PersonSegmenter._compact_mask_data(vid_out)
+            results.append(result)
         return results
 
     @staticmethod

@@ -353,6 +353,13 @@ class Video:
             scale = max_s / max(h, w)
             img = cv2.resize(img, (round(w * scale), round(h * scale)))
             cv2.imwrite(str(dst_dir / name), img)
+
+        # Delete the high-res originals now that resized copies are on disk.
+        for name in src_frames:
+            p = src_dir / name
+            if p.exists():
+                p.unlink()
+
         self.frames_dir = dst_dir
         return dst_dir, src_frames
 
@@ -726,21 +733,25 @@ class RichDataset(Dataset):
         """Return sorted sub-directories of *scene_dir* that contain images."""
         return sorted(
             d for d in scene_dir.iterdir()
-            if d.is_dir() and any(
-                p.suffix.lower() in self.image_extensions
-                for p in d.iterdir() if p.is_file()
-            )
+            if d.is_dir() and self._dir_has_images(d)
         )
 
     def _has_images(self, scene_dir: Path) -> bool:
         """Check whether *scene_dir* has at least one camera sub-dir with images."""
         return any(
-            d.is_dir() and any(
-                p.suffix.lower() in self.image_extensions
-                for p in d.iterdir() if p.is_file()
-            )
+            d.is_dir() and self._dir_has_images(d)
             for d in scene_dir.iterdir()
         )
+
+    def _dir_has_images(self, cam_dir: Path) -> bool:
+        """Check if cam_dir or its frames/ subdirectory contains images."""
+        for search_dir in (cam_dir, cam_dir / "frames"):
+            if search_dir.is_dir() and any(
+                p.suffix.lower() in self.image_extensions
+                for p in search_dir.iterdir() if p.is_file()
+            ):
+                return True
+        return False
 
 
 # ======================================================================
