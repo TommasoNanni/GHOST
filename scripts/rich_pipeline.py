@@ -152,12 +152,12 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     video_dirs = segmenter.segment_scene(
         scene=scene,
         output_dir=output_dir,
-        vis=not _all_segmented,
+        vis=False,  # vis=not _all_segmented
     )
     print(f"\nSegmentation output dirs:")
     for video_id, vdir in video_dirs.items():
         print(f"  {video_id}: {vdir}")
-
+    """
     # Step 2: Estimate body parameters from segmentation output.
     print(f"\n--- Running body parameter estimation ---")
     estimator.estimate_scene(
@@ -370,7 +370,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
                 print(f"  WARNING: skipping visualisation — {e}")
     else:
         print(f"\n--- Skipping re-ID visualisation (cross-view ReID was already done) ---")
-
+    """
 
 def main():
     rich_data_root = CONFIG.data.rich_data_root
@@ -394,6 +394,7 @@ def main():
             new_det_thresh=CONFIG.segmentation.new_det_thresh,
             score_threshold_detection=CONFIG.segmentation.score_threshold_detection,
         )
+        
         estimator = ParametersExtractor(
             sam3d_hf_repo = CONFIG.parameters_extraction.sam3d_id,
             sam3d_step = CONFIG.parameters_extraction.sam3d_step,

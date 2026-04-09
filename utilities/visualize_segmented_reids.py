@@ -81,14 +81,16 @@ def visualize_reid(
     reid_map: dict[int, int] = {}
     merged_from: dict[int, list[int]] = {}
 
-    reid_map_path = body_dir / "reid_id_mapping.json"
-    if reid_map_path.exists():
-        with open(reid_map_path) as f:
-            reid_map = {int(k): int(v) for k, v in json.load(f).items()}
-        for raw_id, canon_id in reid_map.items():
-            merged_from.setdefault(canon_id, []).append(raw_id)
-    else:
+    for map_filename in ("reid_id_mapping.json", "cross_view_id_mapping.json"):
+        map_path = body_dir / map_filename
+        if map_path.exists():
+            with open(map_path) as f:
+                for k, v in json.load(f).items():
+                    reid_map[int(k)] = int(v)
+    if not reid_map:
         print(f"  No reid_id_mapping.json found in {body_dir} — rendering without re-ID labels")
+    for raw_id, canon_id in reid_map.items():
+        merged_from.setdefault(canon_id, []).append(raw_id)
 
     # ── Collect sorted frame list ─────────────────────────────────────────────
     json_files = sorted(json_dir.glob("*.json"))

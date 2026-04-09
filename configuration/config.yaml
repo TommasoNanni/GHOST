@@ -24,7 +24,7 @@ parameters_extraction:
   sam3d_step: 1 # Predict using sam3d every sam3d_step frames
   bbox_padding: 0.2 # Padding added to the bounding box before cropping the image for SAM3D.
   # Cross-view re-identification (run once per scene after all per-video estimation)
-  cross_view_reid_threshold: 0.7 # Min hybrid similarity to accept a cross-view match
+  cross_view_reid_threshold: 0.5 # Min hybrid similarity to accept a cross-view match
   cross_view_appearance_weight: 0.7 # Weight of DINOv3 appearance features
   cross_view_shape_weight: 0.3 # Weight of SMPL-X shape (beta) features
 
