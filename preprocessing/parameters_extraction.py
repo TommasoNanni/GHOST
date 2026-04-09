@@ -1270,6 +1270,44 @@ class ParametersExtractor:
                 person_pids[vid_id] = sorted(descs.keys())
 
         active_vids = [v for v in video_ids if v in person_descs]
+
+        # ── 1b. Per-camera appearance centering ───────────────────────────
+        # DINOv2 embeddings carry both a "generic person" component and a
+        # camera-specific component (viewpoint, lighting, image quality).
+        # We remove the latter by centering per-camera: for each camera,
+        # compute the mean of all per-frame feature vectors of all people
+        # visible in that camera, project it out, and renormalise.
+        #
+        #   μ̂_cam = mean of all feature vectors in this camera, L2-normalised
+        #   e'     = e - (e · μ̂_cam) μ̂_cam,  then re-normalised to unit length
+        #
+        # Per-camera centering avoids the bias introduced by cameras with more
+        # people (e.g. a background-heavy camera would dominate a scene-wide mean).
+        # This is done in-memory only; appearance_gallery.npz is not modified.
+        for vid in active_vids:
+            cam_feats: list[np.ndarray] = []
+            for pid, (app_feat, _) in person_descs[vid].items():
+                if app_feat is not None:
+                    cam_feats.append(app_feat[0])   # (N, D)
+            if not cam_feats:
+                continue
+            cam_mean = np.concatenate(cam_feats, axis=0).mean(axis=0)  # (D,)
+            mean_norm = np.linalg.norm(cam_mean)
+            if mean_norm < 1e-6:
+                continue
+            mu = cam_mean / mean_norm               # unit vector, (D,)
+            new_descs: dict[int, tuple] = {}
+            for pid, (app_feat, shape_feat) in person_descs[vid].items():
+                if app_feat is not None:
+                    feats, confs = app_feat          # (N, D), (N,)
+                    proj = (feats @ mu)[:, None] * mu[None, :]  # (N, D)
+                    feats_c = feats - proj
+                    norms = np.linalg.norm(feats_c, axis=1, keepdims=True)
+                    feats_c = np.where(norms > 1e-6, feats_c / norms, feats_c)
+                    app_feat = (feats_c, confs)
+                new_descs[pid] = (app_feat, shape_feat)
+            person_descs[vid] = new_descs
+
         if len(active_vids) < 2:
             logging.info(
                 f"Scene {scene_id}: fewer than 2 videos with descriptors, "
@@ -1462,12 +1500,26 @@ class ParametersExtractor:
                 appearance_weight, shape_weight,
             )
 
+            # ── Full similarity matrix dump ───────────────────────────────
+            header = f"[SIM] {scene_id}  {vid_a} (rows) vs {vid_b} (cols)"
+            col_header = "       " + "  ".join(f"P{p:>3}" for p in pids_b)
+            logging.info(header)
+            logging.info(col_header)
+            for i, pa in enumerate(pids_a):
+                row = "  ".join(f"{sim_mat[i, j]:5.3f}" for j in range(len(pids_b)))
+                logging.info(f"  P{pa:>3}:  {row}")
+
             # Initial assignment via Hungarian.
             row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
             assignment: list[tuple[int, int, float]] = [
                 (pids_a[r], pids_b[c], float(sim_mat[r, c]))
                 for r, c in zip(row_ind, col_ind)
             ]
+
+            hungarian_str = "  ".join(
+                f"P{pa}→P{pb}({s:.3f})" for pa, pb, s in assignment
+            )
+            logging.info(f"[HUN] {scene_id}  {vid_a}↔{vid_b}  proposal: {hungarian_str}")
 
             # With ≤1 match there are no anchors — skip geo validation.
             if len(assignment) <= 1:
@@ -1485,20 +1537,34 @@ class ParametersExtractor:
                     anchors = [(a, b) for j, (a, b, _) in enumerate(assignment) if j != i]
                     geo_scores.append(_geo_score_for_match(pa, pb, vid_a, vid_b, anchors))
 
+                geo_str = "  ".join(
+                    f"P{assignment[i][0]}↔P{assignment[i][1]}="
+                    + (f"{g:.3f}" if g is not None else "N/A")
+                    for i, g in enumerate(geo_scores)
+                )
+                logging.info(f"[GEO] {scene_id}  {vid_a}↔{vid_b}  scores: {geo_str}")
+
                 # Find the match with the worst *available* geo score.
                 # Matches where geo data is unavailable (None) are not vetoed.
                 scored = [(i, g) for i, g in enumerate(geo_scores) if g is not None]
                 if not scored:
+                    logging.info(f"[GEO] {scene_id}  {vid_a}↔{vid_b}  no geo data — keeping appearance assignment")
                     break  # no geo data at all → keep appearance assignment
                 worst_i, worst_geo = min(scored, key=lambda x: x[1])
                 if worst_geo >= GEO_CORR_THRESHOLD:
+                    logging.info(f"[GEO] {scene_id}  {vid_a}↔{vid_b}  all pass (worst={worst_geo:.3f} ≥ {GEO_CORR_THRESHOLD})")
                     break  # all scored matches pass → done
                 if geo_removals >= 1:
+                    logging.info(f"[GEO] {scene_id}  {vid_a}↔{vid_b}  cap reached — stopping (worst={worst_geo:.3f})")
                     break  # cap: one removal already done, anchor set no longer reliable
 
                 # Remove the worst-failing match and try the next-best candidate
                 # for that person in vid_b (must be unclaimed).
-                pa_fail, _, _ = assignment[worst_i]
+                pa_fail, pb_fail, _ = assignment[worst_i]
+                logging.info(
+                    f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
+                    f"veto P{pa_fail}↔P{pb_fail} (geo={worst_geo:.3f} < {GEO_CORR_THRESHOLD})"
+                )
                 assignment.pop(worst_i)
                 claimed_b = {pb for _, pb, _ in assignment}
 
@@ -1508,14 +1574,32 @@ class ParametersExtractor:
                      for ib in range(len(pids_b)) if pids_b[ib] not in claimed_b],
                     reverse=True,
                 )
+                logging.info(
+                    f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
+                    f"replacement candidates for P{pa_fail}: "
+                    + "  ".join(f"P{pb}({s:.3f})" for s, pb in candidates)
+                )
                 replaced = False
                 for cand_sim, cand_pb in candidates:
                     if cand_sim < cross_view_reid_threshold:
+                        logging.info(
+                            f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
+                            f"P{pa_fail}: no replacement above threshold ({cross_view_reid_threshold})"
+                        )
                         break
                     anchors = [(a, b) for a, b, _ in assignment]
                     geo = _geo_score_for_match(pa_fail, cand_pb, vid_a, vid_b, anchors)
+                    logging.info(
+                        f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
+                        f"  try P{pa_fail}→P{cand_pb}({cand_sim:.3f})  geo="
+                        + (f"{geo:.3f}" if geo is not None else "N/A")
+                    )
                     if geo is not None and geo >= GEO_CORR_THRESHOLD:
                         assignment.append((pa_fail, cand_pb, cand_sim))
+                        logging.info(
+                            f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
+                            f"  replaced: P{pa_fail}→P{cand_pb} accepted"
+                        )
                         replaced = True
                         break
 
