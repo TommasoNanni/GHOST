@@ -25,8 +25,9 @@ parameters_extraction:
   bbox_padding: 0.2 # Padding added to the bounding box before cropping the image for SAM3D.
   # Cross-view re-identification (run once per scene after all per-video estimation)
   cross_view_reid_threshold: 0.5 # Min hybrid similarity to accept a cross-view match
-  cross_view_appearance_weight: 0.7 # Weight of DINOv3 appearance features
-  cross_view_shape_weight: 0.3 # Weight of SMPL-X shape (beta) features
+  cross_view_appearance_weight: 0.3 # Weight of DINOv3 appearance features
+  cross_view_shape_weight: 0.2 # Weight of SMPL-X shape (beta) features
+  cross_view_pose_weight: 0.5 # Weight of canonical joint sequence (root-relative 3D keypoints)
 
 synchronization:
   enabled: false  # Set true to run temporal sync before camera alignment (uses random-shift evaluation)

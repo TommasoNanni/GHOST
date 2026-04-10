@@ -1174,6 +1174,7 @@ class ParametersExtractor:
         cross_view_reid_threshold: float,
         appearance_weight: float,
         shape_weight: float,
+        pose_weight: float,
     ) -> None:
         """Cross-view re-identification logic. Called by CrossVideoReidentifier."""
         video_ids = list(video_dirs.keys())
@@ -1257,13 +1258,43 @@ class ParametersExtractor:
                             pdata["pred_cam_t"].copy(),
                         )
 
+                # Canonical pose descriptor: root-relative 3D keypoints with
+                # global orientation removed, one unit vector per frame.
+                # Chamfer over the sequence handles temporal misalignment.
+                pose_feat: tuple[np.ndarray, np.ndarray] | None = None
+                with np.load(str(npz_path)) as pdata2:
+                    if "pred_keypoints_3d" in pdata2 and "smplx_global_orient" in pdata2:
+                        from scipy.spatial.transform import Rotation as _Rot
+                        kps = pdata2["pred_keypoints_3d"].astype(np.float32)      # (N, 70, 3)
+                        gorient = pdata2["smplx_global_orient"].astype(np.float32) # (N, 3)
+                        conf_kps = pdata2.get("pred_joint_confidence")             # (N, 70) or None
+                        N_kps = len(kps)
+                        if N_kps > 0:
+                            # Root-relative: subtract pelvis (joint 0)
+                            kps_rel = kps - kps[:, 0:1, :]                        # (N, 70, 3)
+                            # Remove global orientation: apply R^{-1} per frame
+                            # rot_mats: (N, 3, 3); kps_rel: (N, 70, 3)
+                            # einsum 'nij,nkj->nki' rotates each of the 70 joints
+                            # by its frame's inverse rotation matrix.
+                            rot_mats = _Rot.from_rotvec(gorient).inv().as_matrix()  # (N, 3, 3)
+                            kps_canon = np.einsum('nij,nkj->nki', rot_mats, kps_rel).astype(np.float32)  # (N, 70, 3)
+                            pose_vecs = kps_canon.reshape(N_kps, -1)              # (N, 210)
+                            norms_p = np.linalg.norm(pose_vecs, axis=1, keepdims=True)
+                            pose_vecs = np.where(norms_p > 1e-6, pose_vecs / norms_p, pose_vecs)
+                            frame_conf_p = (
+                                np.mean(conf_kps, axis=-1).astype(np.float32)
+                                if conf_kps is not None and len(conf_kps) == N_kps
+                                else np.ones(N_kps, dtype=np.float32)
+                            )
+                            pose_feat = (pose_vecs, frame_conf_p)
+
                 # app_feat is (feat_matrix (N,D), conf_weights (N,)) or None
                 app_feat: tuple[np.ndarray, np.ndarray] | None = app_gallery.get(pid)
 
-                if app_feat is None and shape_feat is None:
+                if app_feat is None and shape_feat is None and pose_feat is None:
                     continue
 
-                descs[pid] = (app_feat, shape_feat)
+                descs[pid] = (app_feat, shape_feat, pose_feat)
 
             if descs:
                 person_descs[vid_id] = descs
@@ -1271,42 +1302,11 @@ class ParametersExtractor:
 
         active_vids = [v for v in video_ids if v in person_descs]
 
-        # ── 1b. Per-camera appearance centering ───────────────────────────
-        # DINOv2 embeddings carry both a "generic person" component and a
-        # camera-specific component (viewpoint, lighting, image quality).
-        # We remove the latter by centering per-camera: for each camera,
-        # compute the mean of all per-frame feature vectors of all people
-        # visible in that camera, project it out, and renormalise.
-        #
-        #   μ̂_cam = mean of all feature vectors in this camera, L2-normalised
-        #   e'     = e - (e · μ̂_cam) μ̂_cam,  then re-normalised to unit length
-        #
-        # Per-camera centering avoids the bias introduced by cameras with more
-        # people (e.g. a background-heavy camera would dominate a scene-wide mean).
-        # This is done in-memory only; appearance_gallery.npz is not modified.
-        for vid in active_vids:
-            cam_feats: list[np.ndarray] = []
-            for pid, (app_feat, _) in person_descs[vid].items():
-                if app_feat is not None:
-                    cam_feats.append(app_feat[0])   # (N, D)
-            if not cam_feats:
-                continue
-            cam_mean = np.concatenate(cam_feats, axis=0).mean(axis=0)  # (D,)
-            mean_norm = np.linalg.norm(cam_mean)
-            if mean_norm < 1e-6:
-                continue
-            mu = cam_mean / mean_norm               # unit vector, (D,)
-            new_descs: dict[int, tuple] = {}
-            for pid, (app_feat, shape_feat) in person_descs[vid].items():
-                if app_feat is not None:
-                    feats, confs = app_feat          # (N, D), (N,)
-                    proj = (feats @ mu)[:, None] * mu[None, :]  # (N, D)
-                    feats_c = feats - proj
-                    norms = np.linalg.norm(feats_c, axis=1, keepdims=True)
-                    feats_c = np.where(norms > 1e-6, feats_c / norms, feats_c)
-                    app_feat = (feats_c, confs)
-                new_descs[pid] = (app_feat, shape_feat)
-            person_descs[vid] = new_descs
+        # Per-camera appearance centering removed: projecting out the camera mean
+        # destroys the identity signal for single-person cameras (the mean ≈ the
+        # person's own direction, so e' ≈ 0 after projection). Since cameras with
+        # different numbers of people would be in inconsistent spaces anyway
+        # (centered vs uncentered), we use the raw L2-normalised DINOv2 features.
 
         if len(active_vids) < 2:
             logging.info(
@@ -1344,6 +1344,37 @@ class ParametersExtractor:
                 _find((_vid, _pid))
 
         # ── 3. All-pairs Hungarian matching ───────────────────────────────
+        def _xcorr_sim(
+            feats_a: np.ndarray,  # (N, D) L2-normalised
+            feats_b: np.ndarray,  # (M, D) L2-normalised
+            min_overlap: int = 30,
+        ) -> tuple[float, int]:
+            """Cross-correlation similarity over all temporal offsets.
+
+            For each offset τ, computes the mean cosine similarity between
+            A[i] and B[i-τ] over the overlapping frames, then returns the
+            maximum score across all offsets and the corresponding offset.
+
+            Unlike DTW, no warping is allowed within the overlap — every frame
+            must match its temporally-corresponding frame. This makes the score
+            sensitive to whether two people are doing the same thing at the same
+            (relative) time, not just whether they share similar poses at any point.
+            """
+            N, M = len(feats_a), len(feats_b)
+            S = feats_a @ feats_b.T  # (N, M) cosine similarities
+            best_score, best_offset = -1.0, 0
+            # τ > 0: A leads B by τ frames  (diagonal offset -τ in S)
+            # τ < 0: B leads A by |τ| frames (diagonal offset -τ in S)
+            for tau in range(-(M - 1), N):
+                diag = np.diagonal(S, offset=-tau)
+                if len(diag) < min_overlap:
+                    continue
+                score = float(diag.mean())
+                if score > best_score:
+                    best_score = score
+                    best_offset = tau
+            return float(max(0.0, best_score)), best_offset
+
         def _chamfer_sim(
             feats_a: np.ndarray,   # (N, D) L2-normalised
             confs_a: np.ndarray,   # (N,)  unused
@@ -1367,6 +1398,9 @@ class ParametersExtractor:
             descs_b: dict[int, tuple],
             w_app: float,
             w_shape: float,
+            w_pose: float,
+            vid_a: str = "",
+            vid_b: str = "",
         ) -> np.ndarray:
             """Compute (Na, Nb) similarity matrix as a weighted sum of per-modality
             similarities.  Weights are re-normalised per cell so that a missing
@@ -1374,16 +1408,21 @@ class ParametersExtractor:
 
             Appearance uses confidence-weighted Chamfer similarity between the
             full per-tracklet feature matrices.  Shape uses a plain cosine
-            similarity between confidence-weighted mean beta vectors (shape is
-            already a stable summary statistic, no multi-shot needed).
+            similarity between confidence-weighted mean beta vectors.  Pose uses
+            Chamfer over per-frame canonical (root-relative, global-orient-free)
+            joint vectors — handles temporal misalignment the same way as appearance.
             """
             Na, Nb = len(pids_a), len(pids_b)
             sim_mat = np.zeros((Na, Nb), dtype=np.float32)
             weight_mat = np.zeros((Na, Nb), dtype=np.float32)
+            app_mat    = np.full((Na, Nb), np.nan, dtype=np.float32)
+            shape_mat  = np.full((Na, Nb), np.nan, dtype=np.float32)
+            pose_mat   = np.full((Na, Nb), np.nan, dtype=np.float32)
+            offset_mat = np.full((Na, Nb), 0, dtype=np.int32)
 
-            # --- appearance (confidence-weighted Chamfer) ---
+            # --- appearance (Chamfer over per-frame DINOv2 vectors) ---
             for i, pa in enumerate(pids_a):
-                app_a = descs_a[pa][0]   # (N, D), (N,) or None
+                app_a = descs_a[pa][0]
                 if app_a is None:
                     continue
                 feats_a, confs_a = app_a
@@ -1392,7 +1431,9 @@ class ParametersExtractor:
                     if app_b is None:
                         continue
                     feats_b, confs_b = app_b
-                    sim_mat[i, j] += w_app * _chamfer_sim(feats_a, confs_a, feats_b, confs_b)
+                    s = _chamfer_sim(feats_a, confs_a, feats_b, confs_b)
+                    app_mat[i, j] = s
+                    sim_mat[i, j] += w_app * s
                     weight_mat[i, j] += w_app
 
             # --- shape (cosine similarity between mean beta vectors) ---
@@ -1407,8 +1448,26 @@ class ParametersExtractor:
                 mat_b = np.stack([f if f is not None else zero for f in shape_b])
                 shape_sim = mat_a @ mat_b.T   # (Na, Nb)
                 shape_w = np.outer(mask_a, mask_b) * w_shape
+                shape_mat = np.where(np.outer(mask_a, mask_b).astype(bool), shape_sim, np.nan).astype(np.float32)
                 sim_mat += shape_w * shape_sim
                 weight_mat += shape_w
+
+            # --- pose (Chamfer over per-frame canonical joint vectors) ---
+            for i, pa in enumerate(pids_a):
+                pose_a = descs_a[pa][2]
+                if pose_a is None:
+                    continue
+                feats_a, confs_a = pose_a
+                for j, pb in enumerate(pids_b):
+                    pose_b = descs_b[pb][2]
+                    if pose_b is None:
+                        continue
+                    feats_b, confs_b = pose_b
+                    s, off = _xcorr_sim(feats_a, feats_b)
+                    pose_mat[i, j] = s
+                    offset_mat[i, j] = off
+                    sim_mat[i, j] += w_pose * s
+                    weight_mat[i, j] += w_pose
 
             # Normalise by the actual weight used per cell
             sim_mat = np.where(weight_mat > 0, sim_mat / weight_mat, 0.0)
@@ -1497,17 +1556,9 @@ class ParametersExtractor:
             sim_mat = _weighted_sim_mat(
                 pids_a, pids_b,
                 person_descs[vid_a], person_descs[vid_b],
-                appearance_weight, shape_weight,
+                appearance_weight, shape_weight, pose_weight,
+                vid_a=vid_a, vid_b=vid_b,
             )
-
-            # ── Full similarity matrix dump ───────────────────────────────
-            header = f"[SIM] {scene_id}  {vid_a} (rows) vs {vid_b} (cols)"
-            col_header = "       " + "  ".join(f"P{p:>3}" for p in pids_b)
-            logging.info(header)
-            logging.info(col_header)
-            for i, pa in enumerate(pids_a):
-                row = "  ".join(f"{sim_mat[i, j]:5.3f}" for j in range(len(pids_b)))
-                logging.info(f"  P{pa:>3}:  {row}")
 
             # Initial assignment via Hungarian.
             row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
@@ -1515,11 +1566,6 @@ class ParametersExtractor:
                 (pids_a[r], pids_b[c], float(sim_mat[r, c]))
                 for r, c in zip(row_ind, col_ind)
             ]
-
-            hungarian_str = "  ".join(
-                f"P{pa}→P{pb}({s:.3f})" for pa, pb, s in assignment
-            )
-            logging.info(f"[HUN] {scene_id}  {vid_a}↔{vid_b}  proposal: {hungarian_str}")
 
             # With ≤1 match there are no anchors — skip geo validation.
             if len(assignment) <= 1:
@@ -1537,25 +1583,15 @@ class ParametersExtractor:
                     anchors = [(a, b) for j, (a, b, _) in enumerate(assignment) if j != i]
                     geo_scores.append(_geo_score_for_match(pa, pb, vid_a, vid_b, anchors))
 
-                geo_str = "  ".join(
-                    f"P{assignment[i][0]}↔P{assignment[i][1]}="
-                    + (f"{g:.3f}" if g is not None else "N/A")
-                    for i, g in enumerate(geo_scores)
-                )
-                logging.info(f"[GEO] {scene_id}  {vid_a}↔{vid_b}  scores: {geo_str}")
-
                 # Find the match with the worst *available* geo score.
                 # Matches where geo data is unavailable (None) are not vetoed.
                 scored = [(i, g) for i, g in enumerate(geo_scores) if g is not None]
                 if not scored:
-                    logging.info(f"[GEO] {scene_id}  {vid_a}↔{vid_b}  no geo data — keeping appearance assignment")
                     break  # no geo data at all → keep appearance assignment
                 worst_i, worst_geo = min(scored, key=lambda x: x[1])
                 if worst_geo >= GEO_CORR_THRESHOLD:
-                    logging.info(f"[GEO] {scene_id}  {vid_a}↔{vid_b}  all pass (worst={worst_geo:.3f} ≥ {GEO_CORR_THRESHOLD})")
                     break  # all scored matches pass → done
                 if geo_removals >= 1:
-                    logging.info(f"[GEO] {scene_id}  {vid_a}↔{vid_b}  cap reached — stopping (worst={worst_geo:.3f})")
                     break  # cap: one removal already done, anchor set no longer reliable
 
                 # Remove the worst-failing match and try the next-best candidate
@@ -1574,31 +1610,17 @@ class ParametersExtractor:
                      for ib in range(len(pids_b)) if pids_b[ib] not in claimed_b],
                     reverse=True,
                 )
-                logging.info(
-                    f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
-                    f"replacement candidates for P{pa_fail}: "
-                    + "  ".join(f"P{pb}({s:.3f})" for s, pb in candidates)
-                )
                 replaced = False
                 for cand_sim, cand_pb in candidates:
                     if cand_sim < cross_view_reid_threshold:
-                        logging.info(
-                            f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
-                            f"P{pa_fail}: no replacement above threshold ({cross_view_reid_threshold})"
-                        )
                         break
                     anchors = [(a, b) for a, b, _ in assignment]
                     geo = _geo_score_for_match(pa_fail, cand_pb, vid_a, vid_b, anchors)
-                    logging.info(
-                        f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
-                        f"  try P{pa_fail}→P{cand_pb}({cand_sim:.3f})  geo="
-                        + (f"{geo:.3f}" if geo is not None else "N/A")
-                    )
                     if geo is not None and geo >= GEO_CORR_THRESHOLD:
                         assignment.append((pa_fail, cand_pb, cand_sim))
                         logging.info(
                             f"[GEO] {scene_id}  {vid_a}↔{vid_b}  "
-                            f"  replaced: P{pa_fail}→P{cand_pb} accepted"
+                            f"P{pa_fail}→P{cand_pb} accepted (geo={geo:.3f})"
                         )
                         replaced = True
                         break
@@ -1617,22 +1639,20 @@ class ParametersExtractor:
             for vid_b in active_vids[ii + 1:]:
                 matches = _match_with_geo_validation(vid_a, vid_b)
                 for pa, pb, sim in matches:
-                    accepted = sim >= cross_view_reid_threshold
-                    logging.info(
-                        f"[cross-view reid] {scene_id}  "
-                        f"{vid_a}/P{pa} ↔ {vid_b}/P{pb}  sim={sim:.3f}  "
-                        f"({'MATCH' if accepted else f'rejected (thr={cross_view_reid_threshold:.2f})'})"
-                    )
-                    if accepted:
+                    if sim >= cross_view_reid_threshold:
                         edges.append((sim, (vid_a, pa), (vid_b, pb)))
                         _union((vid_a, pa), (vid_b, pb))
 
         # ── 4. Conflict detection and resolution ──────────────────────────
         # A conflict occurs when two persons from the same video end up in
         # the same component (a single camera cannot show the same person
-        # twice under different SAM2 IDs after within-video re-ID).  Resolve
-        # by iteratively removing the weakest edge that bridges conflicting
-        # nodes until no component contains a duplicate video ID.
+        # twice under different SAM2 IDs after within-video re-ID).
+        #
+        # Resolution: find the PATH between the two conflicting nodes in the
+        # edge graph, then remove the minimum-sim edge on that path.
+        # Dead-end nodes attached to a conflict node are irrelevant — they
+        # don't lie on any path between the two duplicates, so they must not
+        # be touched (old degree-based removal would incorrectly remove them).
 
         def _get_components() -> dict[tuple, list[tuple]]:
             comps: dict[tuple, list[tuple]] = {}
@@ -1642,6 +1662,45 @@ class ParametersExtractor:
                     _root = _find(_node)
                     comps.setdefault(_root, []).append(_node)
             return comps
+
+        def _find_path_min_edge(src: tuple, dst: tuple) -> int:
+            """BFS to find a path from src to dst using the current edges list.
+            Returns the index into edges of the minimum-sim edge on that path,
+            or -1 if no path exists.  Only traverses edges in the same UF
+            component as src."""
+            conflict_root = _find(src)
+            # Build adjacency: node → list of (neighbour, global_edge_index, sim)
+            adj: dict[tuple, list[tuple]] = {}
+            for ei, (s, na, nb) in enumerate(edges):
+                if _find(na) != conflict_root:
+                    continue
+                adj.setdefault(na, []).append((nb, ei, s))
+                adj.setdefault(nb, []).append((na, ei, s))
+
+            # BFS tracking the path (prev_node, global_edge_index) per visited node
+            from collections import deque
+            prev: dict[tuple, tuple | None] = {src: None}
+            queue: deque = deque([src])
+            while queue:
+                cur = queue.popleft()
+                if cur == dst:
+                    break
+                for nbr, ei, _ in adj.get(cur, []):
+                    if nbr not in prev:
+                        prev[nbr] = (cur, ei)
+                        queue.append(nbr)
+            else:
+                return -1  # no path found
+
+            # Reconstruct path and return global index of minimum-sim edge
+            path_edge_indices = []
+            cur = dst
+            while prev[cur] is not None:
+                par, ei = prev[cur]
+                path_edge_indices.append(ei)
+                cur = par
+
+            return min(path_edge_indices, key=lambda ei: edges[ei][0])
 
         for _ in range(len(edges) + 1):
             comps = _get_components()
@@ -1657,27 +1716,18 @@ class ParametersExtractor:
                         continue
 
                     conflict_found = True
-                    conflict_root = _find(nodes[0])
 
-                    # Count how many edges each node participates in.
-                    # An edge is suspicious if one of its endpoints has very few
-                    # other connections (i.e. no consensus from other cameras).
-                    node_degree: dict[tuple, int] = {}
-                    for _, na, nb in edges:
-                        node_degree[na] = node_degree.get(na, 0) + 1
-                        node_degree[nb] = node_degree.get(nb, 0) + 1
-
-                    # Remove the edge whose least-connected endpoint has the
-                    # fewest edges (outlier with no consensus). Break ties by
-                    # lowest sim.
-                    worst_score, worst_sim, worst_idx = (float("inf"), float("inf"), -1)
-                    for ei, (sim, na, nb) in enumerate(edges):
-                        if _find(na) == conflict_root:
-                            score = min(node_degree.get(na, 1), node_degree.get(nb, 1))
-                            if (score, sim) < (worst_score, worst_sim):
-                                worst_score, worst_sim, worst_idx = score, sim, ei
+                    # Find the weakest edge on the path between the two
+                    # conflicting nodes (take the first pair of duplicates).
+                    worst_idx = _find_path_min_edge(nodes[0], nodes[1])
 
                     if worst_idx >= 0:
+                        removed_sim, removed_na, removed_nb = edges[worst_idx]
+                        logging.info(
+                            f"Scene {scene_id}: removed conflicting edge "
+                            f"{removed_na[0]}/P{removed_na[1]} ↔ {removed_nb[0]}/P{removed_nb[1]} "
+                            f"(sim={removed_sim:.3f}) — same-video duplicate in {vid_id}"
+                        )
                         edges.pop(worst_idx)
                         parent.clear()
                         rank_uf.clear()
@@ -1686,11 +1736,6 @@ class ParametersExtractor:
                                 _find((_vid, _pid))
                         for _sim, _na, _nb in edges:
                             _union(_na, _nb)
-                        logging.info(
-                            f"Scene {scene_id}: removed conflicting cross-view "
-                            f"edge (sim={worst_sim:.3f}) to resolve "
-                            f"same-video duplicate in {vid_id}"
-                        )
                     break
 
             if not conflict_found:
@@ -2149,21 +2194,26 @@ class CrossVideoReidentifier:
         Weight for the DINOv3 appearance component of the hybrid descriptor.
     shape_weight : float
         Weight for the SMPL-X shape (beta) component.
+    pose_weight : float
+        Weight for the canonical joint sequence (root-relative, global-orient-free).
     """
 
     _THRESHOLD: float = 0.4
-    _APPEARANCE_WEIGHT: float = 0.7
-    _SHAPE_WEIGHT: float = 0.3
+    _APPEARANCE_WEIGHT: float = 0.5
+    _SHAPE_WEIGHT: float = 0.2
+    _POSE_WEIGHT: float = 0.3
 
     def __init__(
         self,
         threshold: float | None = None,
         appearance_weight: float | None = None,
         shape_weight: float | None = None,
+        pose_weight: float | None = None,
     ):
         self.threshold = threshold if threshold is not None else self._THRESHOLD
         self.appearance_weight = appearance_weight if appearance_weight is not None else self._APPEARANCE_WEIGHT
         self.shape_weight = shape_weight if shape_weight is not None else self._SHAPE_WEIGHT
+        self.pose_weight = pose_weight if pose_weight is not None else self._POSE_WEIGHT
 
     def match_across_views(
         self,
@@ -2176,6 +2226,7 @@ class CrossVideoReidentifier:
         cross_view_reid_threshold = self.threshold
         appearance_weight = self.appearance_weight
         shape_weight = self.shape_weight
+        pose_weight = self.pose_weight
 
         if (scene_dir / "cross_view_reid.json").exists():
             logging.info(f"  Scene {scene_id}: cross-view ReID already done, skipping")
@@ -2188,6 +2239,7 @@ class CrossVideoReidentifier:
             cross_view_reid_threshold=cross_view_reid_threshold,
             appearance_weight=appearance_weight,
             shape_weight=shape_weight,
+            pose_weight=pose_weight,
         )
 
 

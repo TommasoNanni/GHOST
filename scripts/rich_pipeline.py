@@ -407,8 +407,9 @@ def main():
         )
         reidentifier = CrossVideoReidentifier(
             threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
-            appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
-            shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
+            appearance_weight = getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.5),
+            shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.2),
+            pose_weight = getattr(CONFIG.parameters_extraction, "cross_view_pose_weight", 0.3),
         )
         process_scene(scene, segmenter, estimator, reidentifier, output_dir)
         del segmenter, estimator, reidentifier

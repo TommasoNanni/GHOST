@@ -23,7 +23,7 @@ from preprocessing.parameters_extraction import CrossVideoReidentifier
 # --- configuration -----------------------------------------------------------
 SOURCE_DIR  = Path("/cluster/project/cvg/students/tnanni/ghost/preprocessing_outputs/backup_scenes")
 OUTPUT_DIR  = Path("/cluster/project/cvg/students/tnanni/ghost/preprocessing_outputs/new_reid_test")
-SCENE       = None      # set to a scene ID string to process only that scene, e.g. "scene_01"
+SCENE       = "ParkingLot1_004_005_greetingchattingeating1"      # set to a scene ID string to process only that scene, e.g. "scene_01"
 FORCE       = True      # re-run even if cross_view_reid.json already exists
 VISUALIZE   = False      # generate *_segmentation_reid.mp4 videos after ReID
 DATA_ROOT   = "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"
@@ -87,8 +87,9 @@ def main() -> None:
 
     reidentifier = CrossVideoReidentifier(
         threshold=getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
-        appearance_weight=getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.7),
-        shape_weight=getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.3),
+        appearance_weight=getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.5),
+        shape_weight=getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.2),
+        pose_weight=getattr(CONFIG.parameters_extraction, "cross_view_pose_weight", 0.3),
     )
 
     scenes = scan_scenes(SOURCE_DIR)
