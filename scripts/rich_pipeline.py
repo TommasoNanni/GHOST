@@ -262,7 +262,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     # correspondences produced by the estimation + ReID steps, then persist
     # the result as camera_alignment.npz in the scene directory.
     print(f"\n--- Step 6: Camera alignment ---")
-    alignment = CameraAlignment().estimate(video_dirs, min_correspondences=30)
+    alignment = CameraAlignment().estimate(video_dirs, min_correspondences=30, scene_dir=scene_output_dir)
     if alignment:
         align_path = CameraAlignment.save(alignment, scene_output_dir)
         print(f"  Estimated {len(alignment)} camera pair(s) → saved to {align_path}")

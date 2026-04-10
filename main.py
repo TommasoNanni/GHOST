@@ -21,6 +21,7 @@ def load_body_data(
     scene,
     video_dir_dict: dict,
     device: str = "cuda",
+    scene_dir: Path | None = None,
 ) -> tuple[list, list]:
     """Load body joints and confidences from pipeline output for synchronization.
 
@@ -32,6 +33,10 @@ def load_body_data(
         Maps video_id -> Path to that video's output directory.
     device : str
         Torch device string.
+    scene_dir : Path, optional
+        Scene-level output directory containing ``cross_view_reid.json``.
+        When provided, only foreground persons are loaded.  Falls back to
+        all persons if the file is missing or the foreground set is empty.
 
     Returns
     -------
@@ -40,6 +45,29 @@ def load_body_data(
     confidences_list : list[list[Tensor]]
         K videos × P persons, each tensor shape (T, J).
     """
+    # Load foreground person IDs from cross_view_reid.json if available.
+    foreground: dict[str, set[int]] = {}
+    if scene_dir is not None:
+        reid_path = Path(scene_dir) / "cross_view_reid.json"
+        if not reid_path.exists():
+            logging.warning(
+                f"load_body_data: cross_view_reid.json not found in {scene_dir} "
+                f"— loading all persons for synchronization (run ReID first)"
+            )
+        else:
+            try:
+                with open(reid_path) as _f:
+                    _saved = json.load(_f)
+                for vid_id, pids in _saved.get("foreground", {}).items():
+                    foreground[vid_id] = {int(p) for p in pids}
+                if not foreground:
+                    logging.warning(
+                        f"load_body_data: foreground set is empty in {reid_path} "
+                        f"— loading all persons for synchronization"
+                    )
+            except Exception as e:
+                logging.warning(f"load_body_data: could not load foreground from {reid_path}: {e}")
+
     body_joints_list = []
     confidences_list = []
 
@@ -51,10 +79,14 @@ def load_body_data(
         if not body_dir.is_dir():
             continue
 
+        fg_pids = foreground.get(video.video_id)
         per_person_joints: list[torch.Tensor] = []
         per_person_confs: list[torch.Tensor] = []
 
         for npz_path in sorted(body_dir.glob("person_*.npz")):
+            pid = int(npz_path.stem.split("_")[1])
+            if fg_pids is not None and pid not in fg_pids:
+                continue
             data = np.load(str(npz_path), allow_pickle=False)
             if "pred_keypoints_3d" not in data:
                 continue
@@ -64,7 +96,7 @@ def load_body_data(
             joints = torch.from_numpy(kpts).float().to(device)  # (T, J, 3)
             T, J = joints.shape[:2]
             if "pred_joint_confidence" in data:
-                conf = torch.from_numpy(data["pred_joint_confidence"]).float().to(device)  # (T, J)
+                conf = torch.from_numpy(data["pred_joint_confidence"]).float().to(device)
             else:
                 conf = torch.ones(T, J, device=device)
             per_person_joints.append(joints)
@@ -166,10 +198,11 @@ def main(args):
     synchronizer = Synchronizer(device=args.device)
     for scene in tqdm(dataset.scenes, desc="Synchronizing scenes"):
         video_dir_dict = scene_directories[scene.scene_id]
+        scene_dir = Path(args.output_dir) / scene.scene_id
 
-        # Load per-video joints and confidences for all people
+        # Load foreground-only joints and confidences for synchronization.
         body_joints_list, confidences_list = load_body_data(
-            scene, video_dir_dict, device=args.device,
+            scene, video_dir_dict, device=args.device, scene_dir=scene_dir,
         )
         if len(body_joints_list) < 2:
             logging.warning(f"Scene {scene.scene_id}: fewer than 2 videos with body data, skipping")

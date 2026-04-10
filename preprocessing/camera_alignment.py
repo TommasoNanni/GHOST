@@ -110,6 +110,7 @@ class CameraAlignment:
         self,
         video_dirs: dict[str, Path],
         min_correspondences: int = 30,
+        scene_dir: Path | None = None,
     ) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
         """Estimate pairwise relative camera poses from per-view body outputs.
 
@@ -121,11 +122,39 @@ class CameraAlignment:
         min_correspondences : int
             Minimum number of 3D point correspondences required to attempt
             estimation for a pair.
+        scene_dir : Path, optional
+            Scene-level output directory containing ``cross_view_reid.json``.
+            When provided, only foreground persons (as identified by cross-view
+            ReID) are used for alignment.  Falls back to all persons if the
+            file is missing or the foreground set is empty.
 
         Returns
         -------
         dict mapping (video_id_A, video_id_B) -> (R, t)
         """
+        # Load foreground person IDs from cross_view_reid.json if available.
+        foreground: dict[str, set[int]] = {}
+        if scene_dir is not None:
+            reid_path = Path(scene_dir) / "cross_view_reid.json"
+            if not reid_path.exists():
+                logging.warning(
+                    f"Camera alignment: cross_view_reid.json not found in {scene_dir} "
+                    f"— falling back to all persons (run ReID first for best results)"
+                )
+            else:
+                try:
+                    with open(reid_path) as _f:
+                        _saved = json.load(_f)
+                    for vid_id, pids in _saved.get("foreground", {}).items():
+                        foreground[vid_id] = {int(p) for p in pids}
+                    if not foreground:
+                        logging.warning(
+                            f"Camera alignment: foreground set is empty in {reid_path} "
+                            f"— falling back to all persons"
+                        )
+                except Exception as e:
+                    logging.warning(f"Camera alignment: could not load foreground from {reid_path}: {e}")
+
         video_ids = list(video_dirs.keys())
         video_persons: dict[str, dict[int, dict[str, np.ndarray]]] = {}
 
@@ -137,19 +166,26 @@ class CameraAlignment:
                 continue
             with open(summary_path) as f:
                 summary = json.load(f)
+            # Restrict to foreground persons when available.
+            fg_pids = foreground.get(vid_id)
             persons: dict[int, dict[str, np.ndarray]] = {}
             for k in summary.get("persons", {}):
                 pid = int(k)
+                if fg_pids is not None and pid not in fg_pids:
+                    continue
                 data = self._load_person_npz(body_dir, pid)
                 if data is not None and "frame_indices" in data:
                     persons[pid] = data
             if persons:
                 video_persons[vid_id] = persons
+            elif fg_pids is not None:
+                logging.warning(
+                    f"Camera alignment: {vid_id} has no foreground persons in body_data/ "
+                    f"(expected pids={sorted(fg_pids)}) — camera excluded from alignment"
+                )
 
         active_vids = [v for v in video_ids if v in video_persons]
         results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
-        # Loop over videos
-        # Iterate all unordered pairs of active videos
         for ii, vid_a in enumerate(active_vids):
             for vid_b in active_vids[ii + 1 :]:
                 persons_a = video_persons[vid_a]
