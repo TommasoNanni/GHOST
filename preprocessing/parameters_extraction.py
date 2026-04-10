@@ -1175,8 +1175,16 @@ class ParametersExtractor:
         appearance_weight: float,
         shape_weight: float,
         pose_weight: float,
-    ) -> None:
-        """Cross-view re-identification logic. Called by CrossVideoReidentifier."""
+    ) -> set[tuple[str, int]]:
+        """Cross-view re-identification logic. Called by CrossVideoReidentifier.
+
+        Returns
+        -------
+        foreground_nodes : set of (video_id, person_id) tuples
+            Persons whose cross-view component spans at least (max_cameras - 1)
+            distinct cameras.  These are the reliable subjects of the scene and
+            should be used exclusively for temporal sync and camera alignment.
+        """
         video_ids = list(video_dirs.keys())
         # person_descs[video_id][person_id] = (app_feat, shape_feat)
         #   app_feat  : L2-normalised DINOv3 float32 vector, or None
@@ -1889,6 +1897,60 @@ class ParametersExtractor:
                 if not conflict_found:
                     break
 
+        # ── 4.95. Foreground detection ────────────────────────────────────
+        # A person is "foreground" (subject of the scene) if their cross-view
+        # component spans at least (max_camera_count - 1) distinct cameras.
+        # The tolerance of 1 handles cases where segmentation missed a
+        # foreground person in a single camera.
+        #
+        # Persons in fewer cameras are "background" — they drift in/out of
+        # a subset of views and have less reliable 3D estimates.
+        #
+        # foreground_nodes is returned so the orchestrator can filter which
+        # persons feed into temporal sync and camera alignment.
+        _comps_for_fg = _get_components()
+        _cam_counts = {
+            root: len({v for v, _ in members})
+            for root, members in _comps_for_fg.items()
+        }
+        _max_cams = max(_cam_counts.values()) if _cam_counts else 0
+        _fg_threshold = max(1, _max_cams - 1)
+        foreground_nodes: set[tuple[str, int]] = set()
+        for root, members in _comps_for_fg.items():
+            if _cam_counts[root] >= _fg_threshold:
+                foreground_nodes.update(members)
+
+        # Set-cover extension: if the foreground set does not yet cover every
+        # active camera, greedily add the next-best components (sorted by
+        # descending camera count) until all cameras have at least one anchor.
+        # This handles cases where no single person covers all cameras and the
+        # high-threshold group misses one or more views.
+        _covered = {v for v, _ in foreground_nodes}
+        _uncovered = set(active_vids) - _covered
+        if _uncovered:
+            _remaining = sorted(
+                [
+                    (root, members)
+                    for root, members in _comps_for_fg.items()
+                    if _cam_counts[root] < _fg_threshold
+                ],
+                key=lambda x: -_cam_counts[x[0]],
+            )
+            for root, members in _remaining:
+                _comp_cams = {v for v, _ in members}
+                if _comp_cams & _uncovered:
+                    foreground_nodes.update(members)
+                    _uncovered -= _comp_cams
+                if not _uncovered:
+                    break
+
+        logging.info(
+            f"Scene {scene_id}: foreground detection — "
+            f"max_cams={_max_cams}, threshold≥{_fg_threshold}, "
+            f"{len(foreground_nodes)} foreground node(s) covering "
+            f"{len({v for v,_ in foreground_nodes})}/{len(active_vids)} camera(s)"
+        )
+
         # ── 5. Assign global IDs ──────────────────────────────────────────
         # Multi-view components (confirmed cross-camera persons) claim their
         # preferred global ID (min local ID across the group) first.
@@ -2013,13 +2075,28 @@ class ParametersExtractor:
 
         # Write scene-level summary. This file also serves as the completion
         # marker checked by match_across_views to skip already-processed scenes.
+        # foreground_nodes are serialised as {vid_id: [pid, ...]} so downstream
+        # stages (temporal sync, camera alignment) can load them without re-running
+        # the full ReID.
         reid_summary_path = scene_dir / "cross_view_reid.json"
+        # Convert foreground_nodes from pre-remap local IDs to post-remap
+        # global IDs — body_data/ files are renamed by step 6 above, so
+        # downstream readers (sync, alignment) must use the global IDs.
+        fg_serialised: dict[str, list[int]] = {}
+        for vid_id, pid in foreground_nodes:
+            global_pid = global_remap.get(vid_id, {}).get(pid, pid)
+            fg_serialised.setdefault(vid_id, []).append(global_pid)
         reid_summary = {
-            vid_id: {str(k): v for k, v in remap.items()}
-            for vid_id, remap in global_remap.items()
+            "remaps": {
+                vid_id: {str(k): v for k, v in remap.items()}
+                for vid_id, remap in global_remap.items()
+            },
+            "foreground": fg_serialised,
         }
         with open(reid_summary_path, "w") as _f:
             json.dump(reid_summary, _f, indent=2)
+
+        return foreground_nodes
 
     @staticmethod
     def _apply_reid_remap(
@@ -2219,8 +2296,16 @@ class CrossVideoReidentifier:
         self,
         scene: Scene,
         video_dirs: dict[str, Path],
-    ) -> None:
-        """Assign consistent global person IDs across all camera views in a scene."""
+    ) -> set[tuple[str, int]]:
+        """Assign consistent global person IDs across all camera views in a scene.
+
+        Returns
+        -------
+        foreground_nodes : set of (video_id, person_id) tuples
+            Foreground persons after ReID (post-remap global IDs).  Empty set
+            if ReID was skipped (already done).  Callers should pass this to
+            temporal sync and camera alignment.
+        """
         scene_id = scene.scene_id
         scene_dir = Path(next(iter(video_dirs.values()))).parent
         cross_view_reid_threshold = self.threshold
@@ -2230,9 +2315,16 @@ class CrossVideoReidentifier:
 
         if (scene_dir / "cross_view_reid.json").exists():
             logging.info(f"  Scene {scene_id}: cross-view ReID already done, skipping")
-            return
+            # Load and return foreground nodes from the saved summary.
+            try:
+                with open(scene_dir / "cross_view_reid.json") as _f:
+                    _saved = json.load(_f)
+                _fg_raw = _saved.get("foreground", {})
+                return {(vid, int(pid)) for vid, pids in _fg_raw.items() for pid in pids}
+            except Exception:
+                return set()
 
-        ParametersExtractor._cross_view_reid_core(
+        foreground_nodes = ParametersExtractor._cross_view_reid_core(
             video_dirs=video_dirs,
             scene_id=scene_id,
             scene_dir=scene_dir,
@@ -2241,5 +2333,6 @@ class CrossVideoReidentifier:
             shape_weight=shape_weight,
             pose_weight=pose_weight,
         )
+        return foreground_nodes
 
 
