@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent / 'MHR' / 'tools' / 'mhr_smpl_conversion'))
 
 import argparse
+import json
 import logging
 import numpy as np
 import torch
@@ -212,6 +213,15 @@ def main(args):
         initial_times = synchronizer.estimate_initial_times(offset_matrix)
 
         logging.info(f"Scene {scene.scene_id} offsets (frames): {initial_times.cpu().tolist()}")
+
+        # Save offsets to disk for downstream steps (geometric post-ReID, fusion).
+        offsets_dict = {
+            video.video_id: int(round(t0))
+            for video, t0 in zip(scene.videos, initial_times.cpu().tolist())
+        }
+        scene_dir.mkdir(parents=True, exist_ok=True)
+        with open(scene_dir / "temporal_offsets.json", "w") as _f:
+            json.dump(offsets_dict, _f, indent=2)
 
         # Apply the estimated offsets to the videos
         for video, t0 in zip(scene.videos, initial_times.cpu().tolist()):

@@ -157,7 +157,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     print(f"\nSegmentation output dirs:")
     for video_id, vdir in video_dirs.items():
         print(f"  {video_id}: {vdir}")
-    """
+    #"""
     # Step 2: Estimate body parameters from segmentation output.
     print(f"\n--- Running body parameter estimation ---")
     estimator.estimate_scene(
@@ -233,6 +233,16 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
                     offset_mat = sync.estimate_offset_matrix(joints_list, confs_list)
                     weights    = sync.cycle_consistency_weights(offset_mat)
                     estimated  = sync.estimate_initial_times(offset_mat, weights)
+
+                    # Save estimated temporal offsets to disk (overwritten each trial;
+                    # after SYNC_N_TRIALS=1 the file reflects the single trial result).
+                    offsets_dict = {
+                        c: int(round(t))
+                        for c, t in zip(cam_ids, estimated.cpu().tolist())
+                    }
+                    with open(scene_output_dir / "temporal_offsets.json", "w") as _f:
+                        json.dump(offsets_dict, _f, indent=2)
+                    print(f"  Saved estimated temporal offsets → temporal_offsets.json")
 
                     true_t = torch.tensor([true_shifts[c] for c in cam_ids], dtype=torch.float32)
                     true_t = true_t - true_t.min()
@@ -370,7 +380,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
                 print(f"  WARNING: skipping visualisation — {e}")
     else:
         print(f"\n--- Skipping re-ID visualisation (cross-view ReID was already done) ---")
-    """
+    #"""
 
 def main():
     rich_data_root = CONFIG.data.rich_data_root

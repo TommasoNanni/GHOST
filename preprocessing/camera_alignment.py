@@ -123,10 +123,11 @@ class CameraAlignment:
             Minimum number of 3D point correspondences required to attempt
             estimation for a pair.
         scene_dir : Path, optional
-            Scene-level output directory containing ``cross_view_reid.json``.
-            When provided, only foreground persons (as identified by cross-view
-            ReID) are used for alignment.  Falls back to all persons if the
-            file is missing or the foreground set is empty.
+            Scene-level output directory containing ``cross_view_reid.json``
+            and ``temporal_offsets.json``.  When provided, only foreground
+            persons are used for alignment and frame indices are adjusted for
+            temporal desynchronisation before matching.  Falls back to all
+            persons / zero offsets if the files are missing or empty.
 
         Returns
         -------
@@ -154,6 +155,24 @@ class CameraAlignment:
                         )
                 except Exception as e:
                     logging.warning(f"Camera alignment: could not load foreground from {reid_path}: {e}")
+
+        # Load temporal offsets from temporal_offsets.json if available.
+        # offsets[vid_id] = global start frame of that camera (0 = reference).
+        offsets: dict[str, int] = {}
+        if scene_dir is not None:
+            offsets_path = Path(scene_dir) / "temporal_offsets.json"
+            if not offsets_path.exists():
+                logging.warning(
+                    f"Camera alignment: temporal_offsets.json not found in {scene_dir} "
+                    f"— assuming all cameras are synchronised (run sync first)"
+                )
+            else:
+                try:
+                    with open(offsets_path) as _f:
+                        offsets = {k: int(v) for k, v in json.load(_f).items()}
+                    logging.info(f"Camera alignment: loaded temporal offsets for {len(offsets)} camera(s)")
+                except Exception as e:
+                    logging.warning(f"Camera alignment: could not load temporal offsets from {offsets_path}: {e}")
 
         video_ids = list(video_dirs.keys())
         video_persons: dict[str, dict[int, dict[str, np.ndarray]]] = {}
@@ -198,18 +217,21 @@ class CameraAlignment:
                 pts_a_parts: list[np.ndarray] = []
                 pts_b_parts: list[np.ndarray] = []
 
-                # Gather correspondences across all shared persons and frames
+                # Gather correspondences across all shared persons and frames.
+                # Frame fi_a in cam_A is at the same physical time as
+                # fi_b = fi_a + (offset_a - offset_b) in cam_B.
+                delta = offsets.get(vid_a, 0) - offsets.get(vid_b, 0)
                 for pid in shared_pids:
                     data_a = persons_a[pid]
                     data_b = persons_b[pid]
                     frames_a = {int(fi): idx for idx, fi in enumerate(data_a["frame_indices"])}
                     frames_b = {int(fi): idx for idx, fi in enumerate(data_b["frame_indices"])}
-                    common_frames = sorted(set(frames_a) & set(frames_b))
+                    common_frames = sorted(fi for fi in frames_a if (fi + delta) in frames_b)
                     if not common_frames:
                         continue
                     for fi in common_frames:
                         row_a = frames_a[fi]
-                        row_b = frames_b[fi]
+                        row_b = frames_b[fi + delta]
                         joints_a = self._absolute_joints(data_a, row_a)
                         joints_b = self._absolute_joints(data_b, row_b)
                         if joints_a is None or joints_b is None:
