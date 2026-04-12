@@ -694,10 +694,12 @@ class RICHFusionDatapoint(FusionDatapoint):
     def load_body_data(self, **kwargs: Any) -> None:
         # Ghost pipeline output -- same structure as EgoExo.
         # Identify the per-video folders of predictions
+        exclude_cameras: list[str] = kwargs.get("exclude_cameras", [])
         self._cam_dirs = sorted(
             d
             for d in self.scene_dir.iterdir()
             if d.is_dir() and (d / "body_data").is_dir()
+            and d.name not in exclude_cameras
         )
         # Loop on videos
         for cam_dir in self._cam_dirs:

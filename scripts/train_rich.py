@@ -56,9 +56,12 @@ SCENES_ROOT = Path(CONFIG.data.output_directory)
 # Add scene directory names here to skip them.
 SKIP_SCENES: list[str] = [
     "ParkingLot2_008_pushup2",
-    "Pavallion_003_018_tossball",
     "ParkingLot1_002_burpee3",
 ]
+# Per-scene cameras to exclude (e.g. track-stealing artefacts).
+SKIP_CAMERAS: dict[str, list[str]] = {
+    "Pavallion_003_018_tossball": ["cam_06"],
+}
 
 NUM_VAL_SCENES = 2
 DISABLED_LOSSES: list[str] = []
@@ -71,6 +74,7 @@ def load_datapoints(scenes: list[Path]) -> list[RICHFusionDatapoint]:
             dp = RICHFusionDatapoint(
                 scene_dir=scene_dir,
                 rich_data_root=CONFIG.data.rich_data_root,
+                exclude_cameras=SKIP_CAMERAS.get(scene_dir.name, []),
             )
             datapoints.append(dp)
             logger.info(f"  loaded {scene_dir.name}")
