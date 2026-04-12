@@ -70,8 +70,8 @@ class InVideoReidentifier:
     ----------
     reid_threshold : float
         Minimum cosine similarity to accept a ReID merge.
-    gallery_ema_alpha : float
-        EMA coefficient for gallery descriptor updates.
+    gallery_max_size : int
+        Maximum number of frames kept in each person's gallery (top-K by confidence).
     reid_match_window : int
         Frames to retry ReID before finalising a new person.
     fps : float
@@ -87,20 +87,21 @@ class InVideoReidentifier:
     def __init__(
         self,
         reid_threshold: float = 0.65,
-        gallery_ema_alpha: float = 0.9,
         reid_match_window: int = 5,
         fps: float = 15.0,
         gpu_label: str = "",
         video_id: str = "",
+        gallery_max_size: int = 30,
     ):
         self.reid_threshold = reid_threshold
-        self.gallery_ema_alpha = gallery_ema_alpha
         self.reid_match_window = reid_match_window
         self.gap_threshold: int = max(1, round(fps))
         self.gpu_label = gpu_label
         self.video_id = video_id
+        self.gallery_max_size = gallery_max_size
 
-        self._person_gallery: dict[int, np.ndarray] = {}
+        # Gallery: pid → list of (feat, confidence) pairs, kept as top-K by confidence.
+        self._person_gallery_buffer: dict[int, list[tuple[np.ndarray, float]]] = {}
         self._person_feat_buffer: dict[int, list[tuple[int, np.ndarray]]] = {}
         self._id_remap: dict[int, int] = {}
         self._pending_reid: dict[int, int] = {}
@@ -123,12 +124,34 @@ class InVideoReidentifier:
             if count >= self._COVISIBILITY_THRESHOLD
         }
 
+    def _gallery_descriptor(self, pid: int) -> np.ndarray | None:
+        """Return the confidence-weighted mean descriptor for a gallery entry."""
+        buf = self._person_gallery_buffer.get(pid)
+        if not buf:
+            return None
+        feats = np.stack([f for f, _ in buf])       # (N, D)
+        confs = np.array([c for _, c in buf], dtype=np.float32)  # (N,)
+        total = confs.sum()
+        weights = confs / total if total > 0 else np.ones(len(confs), dtype=np.float32) / len(confs)
+        desc = (feats * weights[:, None]).sum(axis=0)
+        norm = np.linalg.norm(desc)
+        return desc / norm if norm > 0 else desc
+
+    def _update_gallery(self, pid: int, feat: np.ndarray, confidence: float) -> None:
+        """Append (feat, confidence) to the gallery buffer, keeping top-K by confidence."""
+        buf = self._person_gallery_buffer.setdefault(pid, [])
+        buf.append((feat.copy(), confidence))
+        if len(buf) > self.gallery_max_size:
+            min_idx = min(range(len(buf)), key=lambda i: buf[i][1])
+            buf.pop(min_idx)
+
     def process_detection(
         self,
         person_id: int,
         feat: np.ndarray | None,
         frame_idx: int,
         valid_persons: list,
+        confidence: float | None = None,
     ) -> int:
         """Process one detection and return its canonical person ID.
 
@@ -142,8 +165,12 @@ class InVideoReidentifier:
             Current frame index within this video.
         valid_persons : list
             All (person_id, ...) tuples in this frame — for co-visibility exclusion.
+        confidence : float or None
+            Mean per-joint confidence from SAM3D for this detection.  Used to
+            weight gallery entries so that clear, unoccluded frames dominate.
         """
         canonical_id: int = self._id_remap.get(person_id, person_id)
+        conf = confidence if confidence is not None else 0.0
 
         # Gap severing
         if person_id in self._track_last_seen:
@@ -159,25 +186,27 @@ class InVideoReidentifier:
 
         if feat is not None:
             should_try_reid = False
-            if person_id not in self._person_gallery and person_id not in self._id_remap:
+            if person_id not in self._person_gallery_buffer and person_id not in self._id_remap:
                 should_try_reid = True
                 if person_id not in self._pending_reid:
                     self._pending_reid[person_id] = self.reid_match_window
             elif person_id in self._pending_reid:
                 should_try_reid = True
 
-            if should_try_reid and self._person_gallery:
+            if should_try_reid and self._person_gallery_buffer:
                 frame_canonical_ids = {
                     self._id_remap.get(p[0], p[0]) for p in valid_persons
                 }
                 if person_id in self._severed_ids:
                     frame_canonical_ids.discard(canonical_id)
 
-                sims = {
-                    pid: float(np.dot(feat, gfeat))
-                    for pid, gfeat in self._person_gallery.items()
-                    if pid not in frame_canonical_ids
-                }
+                sims = {}
+                for pid, _ in self._person_gallery_buffer.items():
+                    if pid in frame_canonical_ids:
+                        continue
+                    desc = self._gallery_descriptor(pid)
+                    if desc is not None:
+                        sims[pid] = float(np.dot(feat, desc))
                 best_id = max(sims, key=lambda pid: sims[pid]) if sims else None
 
                 if (
@@ -189,7 +218,16 @@ class InVideoReidentifier:
                     canonical_id = best_id
                     self._pending_reid.pop(person_id, None)
                     self._severed_ids.discard(person_id)
-                    if person_id in self._person_feat_buffer:
+                    # Merge gallery buffers into the canonical person's buffer.
+                    if person_id != best_id and person_id in self._person_gallery_buffer:
+                        self._person_gallery_buffer.setdefault(best_id, []).extend(
+                            self._person_gallery_buffer.pop(person_id)
+                        )
+                        buf = self._person_gallery_buffer[best_id]
+                        if len(buf) > self.gallery_max_size:
+                            buf.sort(key=lambda x: x[1], reverse=True)
+                            self._person_gallery_buffer[best_id] = buf[:self.gallery_max_size]
+                    if person_id != best_id and person_id in self._person_feat_buffer:
                         self._person_feat_buffer.setdefault(best_id, []).extend(
                             self._person_feat_buffer.pop(person_id)
                         )
@@ -211,26 +249,23 @@ class InVideoReidentifier:
                     if person_id in self._pending_reid:
                         self._pending_reid[person_id] -= 1
                         if self._pending_reid[person_id] <= 0:
-                            self._person_gallery[person_id] = feat.copy()
+                            self._update_gallery(person_id, feat, conf)
                             self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
                             del self._pending_reid[person_id]
                             self._severed_ids.discard(person_id)
                     else:
-                        self._person_gallery[person_id] = feat.copy()
+                        self._update_gallery(person_id, feat, conf)
                         self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
                         self._severed_ids.discard(person_id)
 
-            elif should_try_reid and not self._person_gallery:
-                self._person_gallery[person_id] = feat.copy()
+            elif should_try_reid and not self._person_gallery_buffer:
+                self._update_gallery(person_id, feat, conf)
                 self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
                 self._pending_reid.pop(person_id, None)
 
-            # EMA gallery update for the canonical person.
-            if canonical_id in self._person_gallery:
-                alpha = self.gallery_ema_alpha
-                g = alpha * self._person_gallery[canonical_id] + (1 - alpha) * feat
-                norm = np.linalg.norm(g)
-                self._person_gallery[canonical_id] = g / norm if norm > 0 else g
+            # Update the canonical person's gallery with this frame.
+            if canonical_id in self._person_gallery_buffer:
+                self._update_gallery(canonical_id, feat, conf)
                 self._person_feat_buffer.setdefault(canonical_id, []).append((frame_idx, feat.copy()))
 
         self._track_last_seen[person_id] = frame_idx
@@ -277,7 +312,7 @@ class ParametersExtractor:
 
     # Re-identification defaults — overridden by constructor args (from config).
     _REID_THRESHOLD: float = 0.65
-    _GALLERY_EMA_ALPHA: float = 0.9
+    _GALLERY_MAX_SIZE: int = 30
     _REID_MATCH_WINDOW: int = 5
 
     def __init__(
@@ -288,7 +323,6 @@ class ParametersExtractor:
         smplx_model_path: str | None = None,
         mhr_model_path: str | None = None,
         reid_threshold: float | None = None,
-        gallery_ema_alpha: float | None = None,
         reid_match_window: int | None = None,
     ):
         self.sam3d_hf_repo = sam3d_hf_repo
@@ -297,7 +331,6 @@ class ParametersExtractor:
         self.smplx_model_path = smplx_model_path
         self.mhr_model_path = mhr_model_path
         self.reid_threshold = reid_threshold if reid_threshold is not None else self._REID_THRESHOLD
-        self.gallery_ema_alpha = gallery_ema_alpha if gallery_ema_alpha is not None else self._GALLERY_EMA_ALPHA
         self.reid_match_window = reid_match_window if reid_match_window is not None else self._REID_MATCH_WINDOW
 
         self._estimator: object | None = None
@@ -399,7 +432,6 @@ class ParametersExtractor:
                     param_keys,
                     frames_dir=str(video.frames_home) if video.frames_home else None,
                     reid_threshold=self.reid_threshold,
-                    gallery_ema_alpha=self.gallery_ema_alpha,
                     reid_match_window=self.reid_match_window,
                     fps=video.fps,
                     converter=converter,
@@ -451,7 +483,6 @@ class ParametersExtractor:
                     self.bbox_padding,
                     param_keys,
                     self.reid_threshold,
-                    self.gallery_ema_alpha,
                     self.reid_match_window,
                     self.mhr_model_path,
                     self.smplx_model_path,
@@ -472,7 +503,6 @@ class ParametersExtractor:
         bbox_padding: float,
         param_keys: tuple[str, ...],
         reid_threshold: float = 0.65,
-        gallery_ema_alpha: float = 0.9,
         reid_match_window: int = 5,
         mhr_model_path: str | None = None,
         smplx_model_path: str | None = None,
@@ -538,7 +568,6 @@ class ParametersExtractor:
                     frames_dir=frames_dir,
                     gpu_label=gpu_label,
                     reid_threshold=reid_threshold,
-                    gallery_ema_alpha=gallery_ema_alpha,
                     reid_match_window=reid_match_window,
                     fps=video_fps,
                     converter=converter,
@@ -585,7 +614,6 @@ class ParametersExtractor:
         frames_dir: str | None = None,
         gpu_label: str = "",
         reid_threshold: float = 0.65,
-        gallery_ema_alpha: float = 0.9,
         reid_match_window: int = 5,
         fps: float = 15.0,
         converter=None,
@@ -625,7 +653,6 @@ class ParametersExtractor:
 
         reidentifier = InVideoReidentifier(
             reid_threshold=reid_threshold,
-            gallery_ema_alpha=gallery_ema_alpha,
             reid_match_window=reid_match_window,
             fps=fps,
             gpu_label=gpu_label,
@@ -786,9 +813,6 @@ class ParametersExtractor:
                     if vis_feats is not None and i < len(vis_feats)
                     else None
                 )
-                canonical_id: int = reidentifier.process_detection(
-                    person_id, feat_i, frame_idx, valid_persons
-                )
 
                 params = {"bbox": np.array([x1, y1, x2, y2], dtype=np.float32)}
 
@@ -810,6 +834,7 @@ class ParametersExtractor:
                             params[key] = np.asarray(val, dtype=np.float32)
 
                 # --- Per-joint confidence (MHR-based; overwritten by Pass 2 when converter present) ---
+                # Computed before ReID so the scalar mean can weight gallery entries.
                 kp3d = params.get("pred_keypoints_3d")
                 kp2d = params.get("pred_keypoints_2d")
                 cam_t = params.get("pred_cam_t")
@@ -848,6 +873,15 @@ class ParametersExtractor:
                     params["pred_joint_confidence"] = np.ones(
                         kp3d.shape[0], dtype=np.float32
                     )
+
+                reid_confidence: float | None = None
+                _conf_arr = params.get("pred_joint_confidence")
+                if _conf_arr is not None:
+                    reid_confidence = float(_conf_arr.mean())
+
+                canonical_id: int = reidentifier.process_detection(
+                    person_id, feat_i, frame_idx, valid_persons, confidence=reid_confidence
+                )
 
                 tracks.setdefault(canonical_id, {})[frame_idx] = params
 

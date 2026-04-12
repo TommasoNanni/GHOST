@@ -157,7 +157,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     print(f"\nSegmentation output dirs:")
     for video_id, vdir in video_dirs.items():
         print(f"  {video_id}: {vdir}")
-    #"""
+    """
     # Step 2: Estimate body parameters from segmentation output.
     print(f"\n--- Running body parameter estimation ---")
     estimator.estimate_scene(
@@ -380,7 +380,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
                 print(f"  WARNING: skipping visualisation — {e}")
     else:
         print(f"\n--- Skipping re-ID visualisation (cross-view ReID was already done) ---")
-    #"""
+    """
 
 def main():
     rich_data_root = CONFIG.data.rich_data_root
@@ -392,7 +392,8 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
-    # ds.scenes = [s for s in ds.scenes if "tossball" in s.scene_id]
+    _keep = {"BBQ_001_juggle", "LectureHall_018_wipingchairs1", "ParkingLot1_004_005_greetingchattingeating1", "Pavallion_003_018_tossball"}
+    ds.scenes = [s for s in ds.scenes if s.scene_id in _keep]
 
     for scene in ds.scenes:
         # Re-instantiate per scene so no Python-level instance state (gallery
@@ -412,7 +413,6 @@ def main():
             smplx_model_path = CONFIG.data.smplx_model_path,
             mhr_model_path  = CONFIG.data.mhr_model_path,
             reid_threshold = CONFIG.parameters_extraction.reid_threshold,
-            gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
             reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
         )
         reidentifier = CrossVideoReidentifier(

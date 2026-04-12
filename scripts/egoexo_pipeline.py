@@ -54,7 +54,6 @@ def main():
         smplx_model_path = CONFIG.data.smplx_model_path,
         mhr_model_path  = CONFIG.data.mhr_model_path,
         reid_threshold = CONFIG.parameters_extraction.reid_threshold,
-        gallery_ema_alpha = CONFIG.parameters_extraction.gallery_moving_average_alpha,
         reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
     )
     reidentifier = CrossVideoReidentifier(
