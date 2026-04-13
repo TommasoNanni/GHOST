@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from data.video_dataset import Scene
-from preprocessing.parameters_extraction import ParametersExtractor
+from preprocessing.cross_view_reidentifier import CrossVideoReidentifier
 
 
 class GeometricReidentifier:
@@ -665,5 +665,5 @@ class GeometricReidentifier:
                     new_gallery[new_key] = gdata[k]
                 np.savez(str(gallery_path), **new_gallery)
 
-            ParametersExtractor._apply_reid_remap(vid_dir, full_remap)
+            CrossVideoReidentifier.apply_reid_remap(vid_dir, full_remap)
             logging.info(f"  {vid_id}: geometric ReID — {len(full_remap)} remap(s): {full_remap}")
