@@ -18,7 +18,6 @@ segmentation:
 
 parameters_extraction:
   reid_threshold: 0.55
-  gallery_moving_average_alpha: 0.85
   reid_match_window: 20 # Number of frames to retry ReID matching for new tracks
   sam3d_id: "facebook/sam-3d-body-dinov3"
   sam3d_step: 1 # Predict using sam3d every sam3d_step frames
@@ -28,6 +27,8 @@ parameters_extraction:
   cross_view_appearance_weight: 0.3 # Weight of DINOv3 appearance features
   cross_view_shape_weight: 0.2 # Weight of SMPL-X shape (beta) features
   cross_view_pose_weight: 0.5 # Weight of canonical joint sequence (root-relative 3D keypoints)
+  geo_reid_distance_threshold: 0.5 # First-pass max median world-space distance (m) for background ReID
+  geo_reid_second_pass_threshold: 1.5 # Second-pass threshold for displaced nodes + singletons
 
 synchronization:
   enabled: false  # Set true to run temporal sync before camera alignment (uses random-shift evaluation)

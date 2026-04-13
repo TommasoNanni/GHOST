@@ -802,10 +802,25 @@ class CameraWeightedPooling(nn.Module):
             nn.Linear(d_dim // 2, 1)
         )
 
-    def forward(self, x: torch.Tensor, k_dim: int = 2) -> torch.Tensor:
-        # x: [B, T, K, P, (J), D]
-        scores = self.score_net(x) # [B, T, K, P, (J), 1]
-        weights = F.softmax(scores, dim=k_dim)
+    def forward(self, x: torch.Tensor, person_visible: torch.Tensor, k_dim: int = 2) -> torch.Tensor:
+        # x:              (B, T, K, P, ..., D)
+        # person_visible: (B, T, K, P) — 1 present, 0 absent
+        scores = self.score_net(x)  # (B, T, K, P, ..., 1)
+
+        # Broadcast person_visible to match extra dims (e.g. J=54) and the trailing score dim.
+        mask = person_visible
+        for _ in range(scores.dim() - mask.dim()):
+            mask = mask.unsqueeze(-1)  # (B, T, K, P, ..., 1)
+
+        scores = scores.masked_fill(mask == 0, float('-inf'))
+        all_absent = (mask == 0).all(dim=k_dim, keepdim=True)
+
+        # Guard: fill all-absent rows with 0.0 before softmax so NaN never enters the graph.
+        # Same pattern as _safe_mha / _safe_flex_attention.
+        safe_scores = scores.masked_fill(all_absent, 0.0)
+        weights = F.softmax(safe_scores, dim=k_dim)
+        weights = weights.masked_fill(all_absent, 0.0)
+
         return torch.sum(x * weights, dim=k_dim)
 
 
@@ -976,7 +991,7 @@ class SSTOutputHeads(nn.Module):
         # STEP 2: Kinematic joints 1-54
         # Camera-independent local rotations: pool across K then decode delta.
         kin = self.pose_norm(kin_stream)                          # (B, T, K, P, 54, D)
-        kin_pooled = self.pose_pool(kin, k_dim=2)                 # (B, T, P, 54, D)
+        kin_pooled = self.pose_pool(kin, person_visible, k_dim=2)  # (B, T, P, 54, D)
         kin_delta = self.pose_head_aggr(
             kin_pooled.reshape(B * T * P * 54, D)
         ).reshape(B, T, P, 54, 6)
