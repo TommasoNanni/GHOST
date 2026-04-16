@@ -253,7 +253,7 @@ class ParametersExtractor:
         for _ in range(num_workers):
             task_queue.put(None)
 
-        processes = []
+        processes: list[tuple[int, mp.Process]] = []
         for gpu_id in range(num_workers):
             # Launch processes in parallel on the available GPUs
             p = mp.Process(
@@ -272,10 +272,16 @@ class ParametersExtractor:
                 ),
             )
             p.start()
-            processes.append(p)
+            processes.append((gpu_id, p))
 
-        for p in processes:
+        for gpu_id, p in processes:
             p.join()
+            if p.exitcode != 0:
+                logging.error(
+                    f"[GPU {gpu_id}] Worker process (pid={p.pid}) terminated with "
+                    f"exit code {p.exitcode} — videos assigned to this GPU may be "
+                    f"incomplete or missing"
+                )
 
     @staticmethod
     def _gpu_worker(
@@ -317,54 +323,63 @@ class ParametersExtractor:
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
 
-        logging.info(f"{gpu_label}Loading SAM3D...")
         try:
-            from notebook.utils import setup_sam_3d_body
-        except ImportError as e:
-            raise ImportError(
-                "sam-3d-body package not installed. "
-                "Please install it and ensure notebook.utils is available."
-            ) from e
-        estimator = setup_sam_3d_body(hf_repo_id=sam3d_hf_repo)
-        logging.info(f"{gpu_label}SAM3D loaded.")
-
-        converter = ParametersExtractor._create_converter(mhr_model_path, smplx_model_path)
-        if converter is not None:
-            logging.info(f"{gpu_label}SMPLX converter initialised.")
-
-        # finish the queue, until a None trigger is hit
-        while True:
-            task = task_queue.get()  # blocks until a task is available
-            if task is None:
-                break
-
-            video_id, video_dir, frames_dir, video_fps = task
-            logging.info(f"{gpu_label}Processing {video_id}")
+            logging.info(f"{gpu_label}Loading SAM3D...")
             try:
-                ParametersExtractor._process_video_core(
-                    estimator,
-                    video_id,
-                    video_dir,
-                    sam3d_step,
-                    bbox_padding,
-                    param_keys,
-                    frames_dir=frames_dir,
-                    gpu_label=gpu_label,
-                    reid_threshold=reid_threshold,
-                    reid_match_window=reid_match_window,
-                    fps=video_fps,
-                    converter=converter,
-                )
-            except Exception as e:
-                logging.error(f"{gpu_label}Error processing {video_id}: {e}")
+                from notebook.utils import setup_sam_3d_body
+            except ImportError as e:
+                raise ImportError(
+                    "sam-3d-body package not installed. "
+                    "Please install it and ensure notebook.utils is available."
+                ) from e
+            estimator = setup_sam_3d_body(hf_repo_id=sam3d_hf_repo)
+            logging.info(f"{gpu_label}SAM3D loaded.")
 
+            converter = ParametersExtractor._create_converter(mhr_model_path, smplx_model_path)
+            if converter is not None:
+                logging.info(f"{gpu_label}SMPLX converter initialised.")
+
+            # finish the queue, until a None trigger is hit
+            while True:
+                task = task_queue.get()  # blocks until a task is available
+                if task is None:
+                    break
+
+                video_id, video_dir, frames_dir, video_fps = task
+                logging.info(f"{gpu_label}Processing {video_id}")
+                try:
+                    ParametersExtractor._process_video_core(
+                        estimator,
+                        video_id,
+                        video_dir,
+                        sam3d_step,
+                        bbox_padding,
+                        param_keys,
+                        frames_dir=frames_dir,
+                        gpu_label=gpu_label,
+                        reid_threshold=reid_threshold,
+                        reid_match_window=reid_match_window,
+                        fps=video_fps,
+                        converter=converter,
+                    )
+                except Exception as e:
+                    logging.error(
+                        f"{gpu_label}Error processing {video_id}: {e}", exc_info=True
+                    )
+
+                gc.collect()
+                torch.cuda.empty_cache()
+
+            del estimator
             gc.collect()
             torch.cuda.empty_cache()
-
-        del estimator
-        gc.collect()
-        torch.cuda.empty_cache()
-        logging.info(f"{gpu_label}Worker done.")
+            logging.info(f"{gpu_label}Worker done.")
+        except Exception:
+            logging.error(
+                f"{gpu_label}Worker crashed during initialisation or processing",
+                exc_info=True,
+            )
+            raise
 
     # Model-agnostic SAM3D output keys saved regardless of conversion.
     _AGNOSTIC_KEYS: tuple[str, ...] = (
@@ -693,11 +708,13 @@ class ParametersExtractor:
                         return_smpl_parameters=True,
                         return_smpl_vertices=True,
                         return_fitting_errors=False,
+                        batch_size=64,
                     )
                 except Exception as _e:
                     logging.warning(
                         f"{gpu_label}Batched SMPLX conversion failed person "
-                        f"{canonical_id} in {video_id}: {_e}"
+                        f"{canonical_id} in {video_id}: {_e}",
+                        exc_info=True,
                     )
                     continue
 
@@ -710,33 +727,67 @@ class ParametersExtractor:
                         else:
                             smplx_np[f"smplx_{_pk}"] = np.asarray(_pv, dtype=np.float32)
 
-                # Batch SMPL-X forward for joints (one pass for all frames).
+                # Copy vertices to numpy now, then free the GPU tensor immediately.
+                # result_vertices is (N, 10475, 3) on GPU — ~147 MB for 1166 frames.
+                # Holding it while running the joints forward below causes OOM.
+                smplx_verts_np: np.ndarray | None = (
+                    conv_result.result_vertices.cpu().numpy().astype(np.float32)
+                    if conv_result.result_vertices is not None
+                    else None
+                )
+                del conv_result
+                torch.cuda.empty_cache()
+
+                # Batch SMPL-X forward for joints, in chunks to avoid OOM.
+                _CHUNK = 128
                 smplx_joints_batch: np.ndarray | None = None
-                if conv_result.result_parameters is not None and "smplx_betas" in smplx_np:
+                if "smplx_betas" in smplx_np:
                     try:
+                        _betas_np = smplx_np["smplx_betas"]
+                        _body_pose_np = smplx_np["smplx_body_pose"]
+                        N = _body_pose_np.shape[0]
+                        # betas may be (10,) or (1, 10) — broadcast to (N, 10) in numpy.
+                        if _betas_np.ndim == 1:
+                            _betas_np = _betas_np[None]
+                        if _betas_np.shape[0] == 1 and N > 1:
+                            _betas_np = np.broadcast_to(_betas_np, (N, _betas_np.shape[1])).copy()
+
+                        _lhp_np = smplx_np.get("smplx_left_hand_pose")
+                        _rhp_np = smplx_np.get("smplx_right_hand_pose")
+                        _expr_np = smplx_np.get("smplx_expression")
+
+                        chunks = []
                         with torch.no_grad():
-                            _betas = torch.from_numpy(smplx_np["smplx_betas"]).float().to(_smplx_device)
-                            _body_pose = torch.from_numpy(smplx_np["smplx_body_pose"]).float().to(_smplx_device)
-                            _global_orient = torch.from_numpy(smplx_np["smplx_global_orient"]).float().to(_smplx_device)
-                            _transl = torch.from_numpy(smplx_np["smplx_transl"]).float().to(_smplx_device)
-                            # betas may be (10,) or (1, 10) (one set per sequence)
-                            # while pose params are (N_frames, *) — expand to match.
-                            if _betas.dim() == 1:
-                                _betas = _betas.unsqueeze(0)
-                            if _betas.shape[0] == 1 and _body_pose.shape[0] > 1:
-                                _betas = _betas.expand(_body_pose.shape[0], -1)
-                            _smplx_out = converter._smpl_model(
-                                betas=_betas,
-                                body_pose=_body_pose,
-                                global_orient=_global_orient,
-                                transl=_transl,
-                            )
-                        # (N_frames, J_total, 3) → keep first 55
-                        smplx_joints_batch = _smplx_out.joints[:, :55].cpu().numpy().astype(np.float32)
+                            for _s in range(0, N, _CHUNK):
+                                _e = min(_s + _CHUNK, N)
+                                _c = _e - _s
+                                _b = torch.from_numpy(_betas_np[_s:_e]).float().to(_smplx_device)
+                                _bp = torch.from_numpy(_body_pose_np[_s:_e]).float().to(_smplx_device)
+                                _go = torch.from_numpy(smplx_np["smplx_global_orient"][_s:_e]).float().to(_smplx_device)
+                                _tr = torch.from_numpy(smplx_np["smplx_transl"][_s:_e]).float().to(_smplx_device)
+                                _lh = torch.from_numpy(_lhp_np[_s:_e]).float().to(_smplx_device) if _lhp_np is not None else torch.zeros(_c, converter._hand_pose_dim, device=_smplx_device)
+                                _rh = torch.from_numpy(_rhp_np[_s:_e]).float().to(_smplx_device) if _rhp_np is not None else torch.zeros(_c, converter._hand_pose_dim, device=_smplx_device)
+                                _ex = torch.from_numpy(_expr_np[_s:_e]).float().to(_smplx_device) if _expr_np is not None else torch.zeros(_c, converter._smpl_model.num_expression_coeffs, device=_smplx_device)
+                                _z1 = torch.zeros(_c, 1, 3, device=_smplx_device)
+                                _out = converter._smpl_model(
+                                    betas=_b,
+                                    body_pose=_bp,
+                                    global_orient=_go,
+                                    transl=_tr,
+                                    jaw_pose=_z1,
+                                    leye_pose=_z1,
+                                    reye_pose=_z1,
+                                    left_hand_pose=_lh,
+                                    right_hand_pose=_rh,
+                                    expression=_ex,
+                                )
+                                chunks.append(_out.joints[:, :55].cpu().numpy().astype(np.float32))
+                        smplx_joints_batch = np.concatenate(chunks, axis=0)
                     except Exception as _je:
                         logging.warning(
                             f"{gpu_label}Batched SMPLX joints failed person "
-                            f"{canonical_id} in {video_id}: {_je}"
+                            f"{canonical_id} in {video_id}: {_je}",
+                            exc_info=True,
                         )
 
                 for j, (frame_idx, _body, orig_pid, f_mask_key, img_h, img_w) in enumerate(frame_list):
@@ -750,12 +801,12 @@ class ParametersExtractor:
 
                     # Override confidence with SMPL-X vertices + joints.
                     if (
-                        conv_result.result_vertices is not None
+                        smplx_verts_np is not None
                         and smplx_joints_batch is not None
                         and _mask_zip is not None
                         and f_mask_key in _mask_zip.namelist()
                     ):
-                        smplx_verts_cam = np.asarray(conv_result.result_vertices[j], dtype=np.float32)
+                        smplx_verts_cam = smplx_verts_np[j]
                         smplx_joints_cam = smplx_joints_batch[j]  # (55, 3) camera space
 
                         kp3d = frame_params.get("pred_keypoints_3d")

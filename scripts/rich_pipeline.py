@@ -19,16 +19,18 @@ from configuration import CONFIG
 from data.video_dataset import RichDataset
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from preprocessing.camera_alignment import CameraAlignment
+from preprocessing.geometric_reidentifier import GeometricReidentifier
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction import ParametersExtractor, CrossVideoReidentifier
 from synchronize_videos.synchronizer import Synchronizer
 from utilities.visualize_segmented_reids import visualize_reid
 
 # ── Temporal-sync evaluation constants (random-shift test) ─────────────────────
-SYNC_MAX_SHIFT = 148   # maximum absolute shift in frames
-SYNC_N_TRIALS  = 1     # random-shift trials per scene
-SYNC_SEED      = 42    # RNG seed
-SYNC_DEVICE    = "cuda" if torch.cuda.is_available() else "cpu"
+SYNC_MAX_SHIFT   = 148   # maximum absolute shift in frames
+SYNC_N_TRIALS    = 1     # random-shift trials per scene
+SYNC_SEED        = 42    # RNG seed
+SYNC_DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
+SYNC_MIN_OVERLAP = 100   # min frames of overlap required for a valid offset estimate
 
 
 def _load_body_data(
@@ -157,13 +159,25 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     print(f"\nSegmentation output dirs:")
     for video_id, vdir in video_dirs.items():
         print(f"  {video_id}: {vdir}")
-    """
+    # """
     # Step 2: Estimate body parameters from segmentation output.
     print(f"\n--- Running body parameter estimation ---")
     estimator.estimate_scene(
         scene=scene,
         video_dirs=video_dirs,
     )
+
+    # Guard: skip ReID if any camera is missing body data (incomplete estimation)
+    missing_body = [
+        vid_id for vid_id, vid_dir in video_dirs.items()
+        if not any((Path(vid_dir) / "body_data").glob("person_*.npz"))
+    ]
+    if missing_body:
+        print(
+            f"  WARNING: body estimation incomplete for cameras {missing_body} — "
+            f"skipping cross-view ReID and subsequent steps for this scene."
+        )
+        return
 
     # Step 3: Match person IDs across camera views
     print(f"\n--- Running cross-view person re-identification ---")
@@ -181,7 +195,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     # MHR → SMPLX conversion happens automatically inside estimate_scene when
     # smplx_model_path and mhr_model_path are configured. Here we verify the
     # resulting smplx_* fields are present in the saved npz files.
-    print(f"\n--- Step 4: Verifying MHR → SMPLX conversion output ---")
+    print(f"\n---Verifying MHR → SMPLX conversion output ---")
     smplx_fields_found = {}
     for video_id, video_dir in video_dirs.items():
         body_dir = Path(video_dir) / "body_data"
@@ -193,11 +207,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
             smplx_keys = [k for k in data if k.startswith("smplx_")]
             if smplx_keys:
                 smplx_fields_found.setdefault(video_id, {})[npz_path.name] = smplx_keys
-    if smplx_fields_found:
-        for vid, files in smplx_fields_found.items():
-            for fname, keys in files.items():
-                print(f"  {vid}/{fname}: {keys}")
-    else:
+    if not smplx_fields_found:
         print(
             "  WARNING: No smplx_* fields found. "
             "Check that smplx_model_path and mhr_model_path are set in CONFIG."
@@ -220,7 +230,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
                 cam_ids = list(cam_data.keys())
                 print(f"  Cameras: {cam_ids}")
                 print(f"  Common persons: {pids}")
-                sync = Synchronizer(device=SYNC_DEVICE)
+                sync = Synchronizer(method="cross_corr", device=SYNC_DEVICE, min_overlap=SYNC_MIN_OVERLAP)
                 rng  = np.random.default_rng(SYNC_SEED)
                 results = []
                 for trial in range(SYNC_N_TRIALS):
@@ -278,16 +288,24 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
         print(f"  Estimated {len(alignment)} camera pair(s) → saved to {align_path}")
         for (vid_a, vid_b), (R, t) in alignment.items():
             centre = CameraAlignment.camera_center_in_A(R, t)
-            print(
-                f"  {vid_a} ← {vid_b}: "
-                f"|t|={np.linalg.norm(t):.3f} m, "
-                f"cam_B in A={centre.round(3).tolist()}"
-            )
+            # print(
+            #     f"  {vid_a} ← {vid_b}: "
+            #     f"|t|={np.linalg.norm(t):.3f} m, "
+            #     f"cam_B in A={centre.round(3).tolist()}"
+            # )
     else:
         print(
             "  WARNING: No camera pairs could be aligned. "
             "Check that cross-view ReID found shared persons across videos."
         )
+
+    # Step 6b: Geometric post-ReID
+    geo_reid = GeometricReidentifier(
+        distance_threshold=CONFIG.parameters_extraction.geo_reid_distance_threshold,
+        min_overlap_frames=10,
+        second_pass_threshold=CONFIG.parameters_extraction.geo_reid_second_pass_threshold,
+    )
+    geo_reid.reidentify(scene=scene, video_dirs=video_dirs)
 
     # Step 7: FusionDatapoint compatibility check
     print(f"\n--- Step 7: FusionDatapoint compatibility check ---")
@@ -308,6 +326,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     except Exception as e:
         print(f"  ERROR: FusionDatapoint failed to load: {e}")
 
+    """
     # Step 8: Inspect output format for each video
     print(f"\n=== Body parameter output format ===")
     for video_id, video_dir in video_dirs.items():
@@ -344,24 +363,13 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
             for key, arr in sorted(data.items()):
                 print(f"    {key}: shape={arr.shape}, dtype={arr.dtype}, min={arr.min():.4f}, max={arr.max():.4f}")
 
-            # if "frame_indices" in data:
-            #     print(f"    -> frame_indices (first 5): {data['frame_indices'][:5].tolist()}")
-            # if "pred_keypoints_3d" in data:
-            #     kp3d = data["pred_keypoints_3d"]
-            #     print(f"    -> pred_keypoints_3d[0] (first joint): {kp3d[0, 0].tolist()}")
-            # if "pred_cam_t" in data:
-            #     print(f"    -> pred_cam_t[0]: {data['pred_cam_t'][0].tolist()}")
-            # if "bbox" in data:
-            #     print(f"    -> bbox[0]: {data['bbox'][0].tolist()}")
-
         summary_path = body_dir / "body_params_summary.json"
         if summary_path.exists():
             with open(summary_path) as f:
                 summary = json.load(f)
-            # print(f"\n  Summary JSON for {video_id}:")
-            # print(f"  {json.dumps(summary, indent=4)}")
         else:
             print(f"  WARNING: summary JSON not found at {summary_path}")
+    """
 
     # Step 9: Visualise the re-ID corrected segmentation (only if ReID ran this session).
     if not _reid_already_done:
@@ -380,7 +388,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
                 print(f"  WARNING: skipping visualisation — {e}")
     else:
         print(f"\n--- Skipping re-ID visualisation (cross-view ReID was already done) ---")
-    """
+    # """
 
 def main():
     rich_data_root = CONFIG.data.rich_data_root
@@ -392,8 +400,14 @@ def main():
         slice=scenes_slice,
         max_side=getattr(CONFIG.data, "rich_max_side", None),
     )
-    _keep = {"BBQ_001_juggle", "LectureHall_018_wipingchairs1", "ParkingLot1_004_005_greetingchattingeating1", "Pavallion_003_018_tossball"}
-    ds.scenes = [s for s in ds.scenes if s.scene_id in _keep]
+    # _keep = {"BBQ_001_juggle", "LectureHall_018_wipingchairs1", "ParkingLot1_004_005_greetingchattingeating1", "Pavallion_003_018_tossball"}
+    # ds.scenes = [s for s in ds.scenes if s.scene_id in _keep]
+
+    import gc as _gc
+
+    # Accumulate results across all scenes for the final summary.
+    failed_videos_by_scene: dict[str, list[str]] = {}  # scene_id → missing camera ids
+    needs_reid: list[str] = []                          # scenes with body data but no ReID
 
     for scene in ds.scenes:
         # Re-instantiate per scene so no Python-level instance state (gallery
@@ -405,7 +419,6 @@ def main():
             new_det_thresh=CONFIG.segmentation.new_det_thresh,
             score_threshold_detection=CONFIG.segmentation.score_threshold_detection,
         )
-        
         estimator = ParametersExtractor(
             sam3d_hf_repo = CONFIG.parameters_extraction.sam3d_id,
             sam3d_step = CONFIG.parameters_extraction.sam3d_step,
@@ -421,10 +434,48 @@ def main():
             shape_weight = getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.2),
             pose_weight = getattr(CONFIG.parameters_extraction, "cross_view_pose_weight", 0.3),
         )
-        process_scene(scene, segmenter, estimator, reidentifier, output_dir)
-        del segmenter, estimator, reidentifier
-        import gc as _gc; _gc.collect()
-        torch.cuda.empty_cache()
+        try:
+            process_scene(scene, segmenter, estimator, reidentifier, output_dir)
+        except Exception as e:
+            logging.error(
+                f"Scene {scene.scene_id} raised an unexpected error: {e}", exc_info=True
+            )
+        finally:
+            del segmenter, estimator, reidentifier
+            _gc.collect()
+            torch.cuda.empty_cache()
+
+        # Inspect output regardless of how the scene ended (success / early return /
+        # crash) to build an accurate post-run summary.
+        scene_dir = Path(output_dir) / scene.scene_id
+        missing = [
+            v.video_id for v in scene.videos
+            if not any((scene_dir / v.video_id / "body_data").glob("person_*.npz"))
+        ]
+        if missing:
+            failed_videos_by_scene[scene.scene_id] = missing
+        reid_done = (scene_dir / "cross_view_reid.json").exists()
+        has_any_body = len(missing) < len(scene.videos)
+        if has_any_body and not reid_done:
+            needs_reid.append(scene.scene_id)
+
+    # ── Final summary ──────────────────────────────────────────────────────────
+    print("\n" + "=" * 64)
+    print("PIPELINE SUMMARY")
+    print("=" * 64)
+    if failed_videos_by_scene:
+        print(f"\nScenes with missing body data ({len(failed_videos_by_scene)}):")
+        for scene_id, cams in failed_videos_by_scene.items():
+            print(f"  {scene_id}: missing cameras → {cams}")
+    else:
+        print("\nBody estimation completed for all cameras in all scenes.")
+    if needs_reid:
+        print(f"\nScenes with body data but no cross-view ReID ({len(needs_reid)}):")
+        for scene_id in needs_reid:
+            print(f"  {scene_id}")
+    else:
+        print("\nCross-view ReID completed for all scenes.")
+    print("=" * 64)
 
 
 if __name__ == "__main__":
