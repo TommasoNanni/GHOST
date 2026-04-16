@@ -28,11 +28,10 @@ import torch
 from synchronize_videos.synchronizer import Synchronizer
 
 VERBOSE     = False   # set True to see per-person DTW offsets and shift distributions
-SCENES_ROOT = Path("test_outputs/rich9_segmentation_test")
+SCENES_ROOT = Path("preprocessing_outputs/new_reid_test")
 # Scene folder names (relative to SCENES_ROOT) to skip entirely.
 # Add scenes here when you know cross-view re-ID is bad on them.
 SKIP_SCENES: list[str] = [
-    "BBQ_001_juggle",
     "Pavallion_003_018_tossball"
 ]
 N_TRIALS  = 10    # random-shift trials per scene
@@ -109,12 +108,19 @@ def apply_shifts(
     cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]],
     shifts: dict[str, int],
     pids: list[int],
-) -> tuple[list[list[torch.Tensor]], list[list[torch.Tensor]]]:
-    """Give each camera all frames from its natural start position to end of recording."""
+    min_overlap: int = 100,
+) -> tuple[list[list[torch.Tensor]], list[list[torch.Tensor]]] | None:
+    """Slice sequences to simulate temporal offsets.
+
+    Each camera starts at a different offset and keeps all its remaining
+    frames — no common end time, no common length, fully independent.
+    Returns None if any camera ends up with fewer than min_overlap frames
+    (the overlap between any pair is at most the shorter sequence length).
+    """
     cam_ids = list(shifts.keys())
-    T_base  = min(cam_data[c][p][0].shape[0] for c in cam_ids for p in pids)
     max_s   = max(shifts.values())
-    logger.info(f"  T_base={T_base}  shift_spread={max_s - min(shifts.values())}")
+    spread  = max_s - min(shifts.values())
+    logger.info(f"  shift_spread={spread}")
 
     joints_list: list[list[torch.Tensor]] = []
     confs_list:  list[list[torch.Tensor]] = []
@@ -124,8 +130,15 @@ def apply_shifts(
         per_person_joints, per_person_confs = [], []
         for pid in pids:
             rotations, conf = cam_data[cam_id][pid]
-            per_person_joints.append(rotations[s : T_base].to(DEVICE))
-            per_person_confs .append(conf     [s : T_base].to(DEVICE))
+            remaining = rotations.shape[0] - s
+            if remaining < min_overlap:
+                logger.warning(
+                    f"  {cam_id} has only {remaining} frames after shift "
+                    f"(need ≥{min_overlap}) — skipping sync"
+                )
+                return None
+            per_person_joints.append(rotations[s:].to(DEVICE))
+            per_person_confs .append(conf     [s:].to(DEVICE))
         joints_list.append(per_person_joints)
         confs_list .append(per_person_confs)
 
@@ -141,7 +154,10 @@ def run_trial(
     """Run one alignment experiment and return a result dict."""
     cam_ids = list(true_shifts.keys())
 
-    joints_list, confs_list = apply_shifts(cam_data, true_shifts, pids)
+    result_shifts = apply_shifts(cam_data, true_shifts, pids)
+    if result_shifts is None:
+        return None
+    joints_list, confs_list = result_shifts
 
     offset_mat = sync.estimate_offset_matrix(joints_list, confs_list)
     weights    = sync.cycle_consistency_weights(offset_mat)
@@ -214,6 +230,9 @@ def run_scene(
         logger.info(f"\n  ── Trial {trial + 1}/{N_TRIALS}  true shifts: {true_shifts}")
 
         result = run_trial(cam_data, pids, true_shifts, sync)
+        if result is None:
+            logger.warning(f"  Trial {trial + 1} skipped (insufficient frames after shift)")
+            continue
         results.append(result)
 
         for cam_id, true_t, est, err in zip(cam_ids, result["true_times"], result["estimated"], result["errors"]):
@@ -222,6 +241,10 @@ def run_scene(
         logger.info(f"     MAE={result['mae']:.2f}  "
                     f"within-1={result['within_1']*100:.0f}%  "
                     f"within-2={result['within_2']*100:.0f}%")
+
+    if not results:
+        logger.warning(f"  All trials skipped for {scene_dir.name} — no usable results")
+        return None
 
     all_mae      = [r["mae"]      for r in results]
     all_within_1 = [r["within_1"] for r in results]
@@ -264,7 +287,7 @@ if __name__ == "__main__":
 
     logger.info(f"Found {len(scene_dirs)} scene(s): {[d.name for d in scene_dirs]}")
 
-    sync = Synchronizer(device=DEVICE)
+    sync = Synchronizer(method="cross_corr", device=DEVICE, min_overlap=100)
     rng  = np.random.default_rng(SEED)
 
     scene_summaries = []

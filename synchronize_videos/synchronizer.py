@@ -21,12 +21,14 @@ class Synchronizer:
         device: str = "cuda",
         q: int = 2,
         min_overlap: int = 100,
+        verbose: bool = False,
     ):
         self.method = method
         self.only_overlap = only_overlap
         self.device = device
         self.q = q
         self.min_overlap = min_overlap
+        self.verbose = verbose
 
     def _compute_cost_matrix(
         self,
@@ -153,14 +155,15 @@ class Synchronizer:
         sorted_offsets = sorted(scores.items(), key=lambda x: x[1])
         best_k, best_score = sorted_offsets[0]
 
-        top10 = sorted_offsets[:10]
-        top10_str = "  ".join(
-            f"k={k:+d}(×{s / best_score:.2f})" for k, s in top10
-        )
-        logger.debug(
-            f"    cross-corr top-10: {top10_str}"
-            f"  → best offset={best_k:+d}  median_cost={best_score:.4f}"
-        )
+        if self.verbose:
+            top10 = sorted_offsets[:10]
+            top10_str = "  ".join(
+                f"k={k:+d}(×{s / best_score:.2f})" for k, s in top10
+            )
+            logger.debug(
+                f"    cross-corr top-10: {top10_str}"
+                f"  → best offset={best_k:+d}  median_cost={best_score:.4f}"
+            )
         return float(best_k)
 
     def _estimate_single_person_offset(
@@ -194,14 +197,14 @@ class Synchronizer:
         shifts = path[:, 1] - path[:, 0]
         offset = torch.mode(shifts).values.item()
 
-        # Log the distribution of shifts to diagnose ambiguity
-        unique, counts = torch.unique(shifts, return_counts=True)
-        top_k = min(5, len(unique))
-        top_idx = counts.topk(top_k).indices
-        dist_str = "  ".join(
-            f"{unique[i].item():+d}×{counts[i].item()}" for i in top_idx
-        )
-        logger.debug(f"    shift distribution (top-{top_k}): {dist_str}  → chosen={offset:+.0f}")
+        if self.verbose:
+            unique, counts = torch.unique(shifts, return_counts=True)
+            top_k = min(5, len(unique))
+            top_idx = counts.topk(top_k).indices
+            dist_str = "  ".join(
+                f"{unique[i].item():+d}×{counts[i].item()}" for i in top_idx
+            )
+            logger.debug(f"    shift distribution (top-{top_k}): {dist_str}  → chosen={offset:+.0f}")
 
         return offset
 
@@ -248,12 +251,14 @@ class Synchronizer:
                     i_idx = torch.arange(i0, i1, device=cost.device)
                     p_scores[k] = cost[i_idx, i_idx + k].median().item()
                 if not p_scores:
-                    logger.debug(f"    person {p}: no valid overlap — skipping")
+                    if self.verbose:
+                        logger.debug(f"    person {p}: no valid overlap — skipping")
                     continue
-                logger.debug(
-                    f"    person {p}: best k={min(p_scores, key=p_scores.get):+d}"
-                    f"  median_cost={min(p_scores.values()):.4f}"
-                )
+                if self.verbose:
+                    logger.debug(
+                        f"    person {p}: best k={min(p_scores, key=p_scores.get):+d}"
+                        f"  median_cost={min(p_scores.values()):.4f}"
+                    )
                 per_person_costs.append(p_scores)
 
             if not per_person_costs:
@@ -274,7 +279,8 @@ class Synchronizer:
                 for k in common_ks
             }
             best_k = min(combined, key=combined.__getitem__)
-            logger.debug(f"    joint offset={best_k:+d}  combined_cost={combined[best_k]:.4f}")
+            if self.verbose:
+                logger.debug(f"    joint offset={best_k:+d}  combined_cost={combined[best_k]:.4f}")
             return float(best_k)
 
         per_person_offsets = []
@@ -283,11 +289,13 @@ class Synchronizer:
                 body_joints_1[p], body_joints_2[p],
                 confidences_1[p], confidences_2[p],
             )
-            logger.debug(f"    person {p}: raw offset = {off:+.0f}")
+            if self.verbose:
+                logger.debug(f"    person {p}: raw offset = {off:+.0f}")
             per_person_offsets.append(off)
 
         median_offset = torch.median(torch.tensor(per_person_offsets, dtype=torch.float32)).item()
-        logger.debug(f"    per-person offsets: {per_person_offsets}  → median = {median_offset:+.1f}")
+        if self.verbose:
+            logger.debug(f"    per-person offsets: {per_person_offsets}  → median = {median_offset:+.1f}")
         return median_offset
 
     def estimate_offset_matrix(
