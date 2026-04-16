@@ -69,25 +69,25 @@ SCENES=(
     # "ParkingLot1_007_overfence2.tar.gz" # DOWNLOADED
     # "ParkingLot2_008_burpeejump1.tar.gz" # DOWNLOADED
     # "ParkingLot2_008_eating1.tar.gz" # DOWNLOADED
-    "ParkingLot2_008_overfence1.tar.gz"
-    "ParkingLot2_008_overfence3.tar.gz"
-    "ParkingLot2_008_phonetalk1.tar.gz"
-    "ParkingLot2_008_pushup1.tar.gz"
+    # "ParkingLot2_008_overfence1.tar.gz" # DOWNLOADED
+    # "ParkingLot2_008_overfence3.tar.gz" # DOWNLOADED
+    # "ParkingLot2_008_phonetalk1.tar.gz" # DOWNLOADED
+    # "ParkingLot2_008_pushup1.tar.gz" # DOWNLOADED
     # "ParkingLot2_008_pushup2.tar.gz" # DOWNLOADED
-    "ParkingLot2_014_burpeejump1.tar.gz"
-    "ParkingLot2_014_burpeejump2.tar.gz"
-    "ParkingLot2_014_overfence3.tar.gz"
-    # "ParkingLot2_014_phonetalk2.tar.gz"
-    # "ParkingLot2_014_pushup2.tar.gz"
-    # "ParkingLot2_014_takingphotos2.tar.gz"
-    # "ParkingLot2_015_burpeejump2.tar.gz"
-    # "ParkingLot2_015_overfence1.tar.gz"
+    # "ParkingLot2_014_burpeejump1.tar.gz" # DOWNLOADED
+    # "ParkingLot2_014_burpeejump2.tar.gz" # DOWNLOADED
+    # "ParkingLot2_014_overfence3.tar.gz" # DOWNLOADED
+    # "ParkingLot2_014_phonetalk2.tar.gz" # DOWNLOADED
+    # "ParkingLot2_014_pushup2.tar.gz" # DOWNLOADED
+    # "ParkingLot2_014_takingphotos2.tar.gz" # DOWNLOADED
+    # "ParkingLot2_015_burpeejump2.tar.gz" # DOWNLOADED
+    # "ParkingLot2_015_overfence1.tar.gz" # DOWNLOADED
     # "ParkingLot2_015_pushup1.tar.gz" # DOWNLOADED
-    # "ParkingLot2_016_burpeejump2.tar.gz"
-    # "ParkingLot2_016_overfence2.tar.gz"
-    # "ParkingLot2_016_pushup1.tar.gz"
-    # "ParkingLot2_016_pushup2.tar.gz"
-    # "ParkingLot2_016_stretching1.tar.gz"
+    # "ParkingLot2_016_burpeejump2.tar.gz" # DOWNLOADED
+    # "ParkingLot2_016_overfence2.tar.gz" # DOWNLOADED
+    # "ParkingLot2_016_pushup1.tar.gz" # DOWNLOADED
+    # "ParkingLot2_016_pushup2.tar.gz" # DOWNLOADED
+    # "ParkingLot2_016_stretching1.tar.gz" # DOWNLOADED
     # "Pavallion_000_phonesiteat.tar.gz" # DOWNLOADED
     # "Pavallion_000_plankjack.tar.gz" # DOWNLOADED
     # "Pavallion_000_sidebalancerun.tar.gz" # DOWNLOADED
@@ -102,11 +102,11 @@ SCENES=(
     # "Pavallion_013_phonesiteat.tar.gz" # DOWNLOADED
     # "Pavallion_013_plankjack.tar.gz" # DOWNLOADED
     # "Pavallion_013_yoga2.tar.gz" # DOWNLOADED
-    # "ParkingLot2_015_eating2.tar.gz"
-    # "ParkingLot1_004_phonetalk1.tar.gz"
-    # "Pavallion_006_plankjack.tar.gz"
-    # "Pavallion_006_sidebalancerun.tar.gz"
-    # "ParkingLot2_008_overfence2.tar.gz"
+    # "ParkingLot2_015_eating2.tar.gz" # DOWNLOADED
+    # "ParkingLot1_004_phonetalk1.tar.gz" # DOWNLOADED
+    # "Pavallion_006_plankjack.tar.gz" # DOWNLOADED
+    # "Pavallion_006_sidebalancerun.tar.gz" # DOWNLOADED
+    # "ParkingLot2_008_overfence2.tar.gz" # DOWNLOADED
 )
 
 # ── Per-scene pipeline ────────────────────────────────────────────────────────
