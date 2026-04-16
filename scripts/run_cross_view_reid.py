@@ -31,11 +31,11 @@ from preprocessing.geometric_reidentifier import GeometricReidentifier
 from synchronize_videos.synchronizer import Synchronizer
 
 # --- configuration -----------------------------------------------------------
-SOURCE_DIR  = Path("/cluster/project/cvg/students/tnanni/ghost/preprocessing_outputs/backup_scenes")
+SOURCE_DIR  = Path("/cluster/project/cvg/students/tnanni/ghost/preprocessing_outputs/new_within")
 OUTPUT_DIR  = Path("/cluster/project/cvg/students/tnanni/ghost/preprocessing_outputs/new_reid_test")
-SCENE       = None      # set to a scene ID string to process only that scene, e.g. "scene_01"
+SCENE       = "LectureHall_018_wipingchairs1"      # set to a scene ID string to process only that scene, e.g. "scene_01"
 FORCE       = True      # re-run even if cross_view_reid.json already exists
-VISUALIZE   = True      # generate *_segmentation_reid.mp4 videos after ReID
+VISUALIZE   = False      # generate *_segmentation_reid.mp4 videos after ReID
 DATA_ROOT   = "/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"
 # temporal sync evaluation
 SYNC_MAX_SHIFT   = 50    # maximum absolute random shift in frames
@@ -429,7 +429,11 @@ def main() -> None:
 
         # ── Geometric post-ReID ───────────────────────────────────────────────
         print(f"\n--- Geometric post-ReID ---")
-        geo_reid = GeometricReidentifier(distance_threshold=0.5, min_overlap_frames=10)
+        geo_reid = GeometricReidentifier(
+            distance_threshold=CONFIG.parameters_extraction.geo_reid_distance_threshold,
+            min_overlap_frames=10,
+            second_pass_threshold=CONFIG.parameters_extraction.geo_reid_second_pass_threshold,
+        )
         geo_reid.reidentify(scene=mock_scene, video_dirs=video_dirs)
 
         if VISUALIZE:
