@@ -364,7 +364,7 @@ class Synchronizer:
         count = 0
         for i in range(K):
             for j in range(i + 1, K):
-                w = weights[i, j].item() if weights is not None else 1.0
+                w = weights[i, j].item() ** 0.5 if weights is not None else 1.0
                 if j >= 1:
                     A[count, j - 1] = w
                 if i >= 1:
