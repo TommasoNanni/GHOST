@@ -2,7 +2,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --account=ls_polle
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=15
+#SBATCH --cpus-per-task=24
 #SBATCH --mem-per-cpu=8G
 #SBATCH --gpus=2
 #SBATCH --gres=gpumem:40G 
