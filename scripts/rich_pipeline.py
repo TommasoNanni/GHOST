@@ -23,6 +23,7 @@ from preprocessing.geometric_reidentifier import GeometricReidentifier
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction import ParametersExtractor, CrossVideoReidentifier
 from synchronize_videos.synchronizer import Synchronizer
+from utilities.body_data import load_person_smplx_pose
 from utilities.visualize_segmented_reids import visualize_reid
 
 # ── Temporal-sync evaluation constants (random-shift test) ─────────────────────
@@ -55,22 +56,11 @@ def _load_body_data(
         persons: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
         for npz_path in sorted(body_dir.glob("person_*.npz")):
             pid = int(npz_path.stem.split("_")[1])
-            with np.load(str(npz_path)) as d:
-                required = {"smplx_body_pose", "smplx_left_hand_pose",
-                            "smplx_right_hand_pose", "pred_joint_confidence"}
-                if not required.issubset(d.files):
-                    print(f"  WARNING: {npz_path.name} missing pose keys, skipping")
-                    continue
-                pose = np.concatenate([
-                    d["smplx_body_pose"],        # (T, 63) — 21 joints
-                    d["smplx_left_hand_pose"],   # (T, 45) — 15 joints
-                    d["smplx_right_hand_pose"],  # (T, 45) — 15 joints
-                ], axis=1)                       # (T, 153)
-                rotations = torch.from_numpy(pose.astype(np.float32)).reshape(-1, 51, 3)
-                conf = torch.from_numpy(
-                    d["pred_joint_confidence"][:, 1:52].astype(np.float32)
-                )  # (T, 51)
-            persons[pid] = (rotations, conf)
+            result = load_person_smplx_pose(npz_path)
+            if result is None:
+                print(f"  WARNING: {npz_path.name} missing pose keys, skipping")
+                continue
+            persons[pid] = result
         if persons:
             cam_data[cam_id] = persons
     return cam_data
@@ -85,30 +75,39 @@ def _common_persons(cam_data: dict[str, dict[int, tuple]]) -> list[int]:
 def _apply_shifts(
     cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]],
     shifts: dict[str, int],
+    end_cuts: dict[str, int],
     pids: list[int],
-) -> tuple[list[list[torch.Tensor]], list[list[torch.Tensor]]]:
-    """Slice each camera's sequence to simulate temporal offsets.
+    min_overlap: int = SYNC_MIN_OVERLAP,
+) -> tuple[list[list[torch.Tensor]], list[list[torch.Tensor]]] | None:
+    """Slice each camera's sequence to simulate temporal offsets and random end times.
 
-    Mirrors ``apply_shifts`` in evaluation/alignment_experiments.py exactly:
-    - T_base = min sequence length across all (cam, person) pairs
-    - max_s  = max(shifts)
-    - camera c gets frames [max_s - shifts[c] : T_base], so the latest-starting
-      camera (shift == max_s) gets s=0 and all T_base frames.
+    Each camera starts at a different offset and ends at a different frame,
+    simulating realistic asynchronous recordings with no common start or end.
+    Returns None if any camera ends up with fewer than min_overlap frames.
     """
     cam_ids = list(shifts.keys())
-    T_base  = min(cam_data[c][p][0].shape[0] for c in cam_ids for p in pids)
     max_s   = max(shifts.values())
-    print(f"  T_base={T_base}  shift_spread={max_s - min(shifts.values())}")
+    print(f"  shift_spread={max_s - min(shifts.values())}")
 
     joints_list: list[list[torch.Tensor]] = []
     confs_list:  list[list[torch.Tensor]] = []
     for cam_id in cam_ids:
-        s = max_s - shifts[cam_id]   # latest camera → s=0 → all T_base frames
+        s  = max_s - shifts[cam_id]
+        ec = end_cuts[cam_id]
         per_person_joints, per_person_confs = [], []
         for pid in pids:
             rotations, conf = cam_data[cam_id][pid]
-            per_person_joints.append(rotations[s : T_base].to(SYNC_DEVICE))
-            per_person_confs .append(conf     [s : T_base].to(SYNC_DEVICE))
+            T   = rotations.shape[0]
+            end = T - ec if ec > 0 else T
+            remaining = end - s
+            if remaining < min_overlap:
+                print(
+                    f"  WARNING: {cam_id} has only {remaining} frames after shift "
+                    f"(need ≥{min_overlap}) — skipping sync"
+                )
+                return None
+            per_person_joints.append(rotations[s:end].to(SYNC_DEVICE))
+            per_person_confs .append(conf     [s:end].to(SYNC_DEVICE))
         joints_list.append(per_person_joints)
         confs_list .append(per_person_confs)
     return joints_list, confs_list
@@ -237,22 +236,18 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
                     raw_shifts  = [0] + rng.integers(-SYNC_MAX_SHIFT, SYNC_MAX_SHIFT + 1,
                                                       size=len(cam_ids) - 1).tolist()
                     true_shifts = {c: int(s) for c, s in zip(cam_ids, raw_shifts)}
-                    print(f"  Trial {trial + 1}/{SYNC_N_TRIALS}  true shifts: {true_shifts}")
+                    end_cuts    = {c: int(e) for c, e in zip(cam_ids, rng.integers(
+                        0, SYNC_MAX_SHIFT + 1, size=len(cam_ids)
+                    ).tolist())}
+                    print(f"  Trial {trial + 1}/{SYNC_N_TRIALS}  true shifts: {true_shifts}  end_cuts: {end_cuts}")
 
-                    joints_list, confs_list = _apply_shifts(cam_data, true_shifts, pids)
+                    result = _apply_shifts(cam_data, true_shifts, end_cuts, pids)
+                    if result is None:
+                        continue
+                    joints_list, confs_list = result
                     offset_mat = sync.estimate_offset_matrix(joints_list, confs_list)
                     weights    = sync.cycle_consistency_weights(offset_mat)
                     estimated  = sync.estimate_initial_times(offset_mat, weights)
-
-                    # Save estimated temporal offsets to disk (overwritten each trial;
-                    # after SYNC_N_TRIALS=1 the file reflects the single trial result).
-                    offsets_dict = {
-                        c: int(round(t))
-                        for c, t in zip(cam_ids, estimated.cpu().tolist())
-                    }
-                    with open(scene_output_dir / "temporal_offsets.json", "w") as _f:
-                        json.dump(offsets_dict, _f, indent=2)
-                    print(f"  Saved estimated temporal offsets → temporal_offsets.json")
 
                     true_t = torch.tensor([true_shifts[c] for c in cam_ids], dtype=torch.float32)
                     true_t = true_t - true_t.min()
@@ -391,6 +386,12 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     # """
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--scene-start", type=int, default=None)
+    parser.add_argument("--scene-end",   type=int, default=None)
+    args = parser.parse_args()
+
     rich_data_root = CONFIG.data.rich_data_root
     output_dir = CONFIG.data.output_directory
     scenes_slice = CONFIG.data.slice
@@ -402,6 +403,10 @@ def main():
     )
     # _keep = {"BBQ_001_juggle", "LectureHall_018_wipingchairs1", "ParkingLot1_004_005_greetingchattingeating1", "Pavallion_003_018_tossball"}
     # ds.scenes = [s for s in ds.scenes if s.scene_id in _keep]
+
+    if args.scene_start is not None or args.scene_end is not None:
+        ds.scenes = ds.scenes[args.scene_start:args.scene_end]
+        print(f"Processing scenes [{args.scene_start}:{args.scene_end}] → {len(ds.scenes)} scenes")
 
     import gc as _gc
 

@@ -104,6 +104,7 @@ class FusionDatapoint(Dataset, ABC):
         self._gt_matched_ghost_pids: set[int] | None = None
 
         self.load_body_data(**kwargs)       # fills the _raw and the _cam_dirs fields
+        self._apply_temporal_offsets()      # shift frame_indices to global timeline if offsets available
         self.load_cameras(**kwargs)         # fills the _cameras with predicted cameras
         self.load_ground_truth(**kwargs)    # fills the _gt with GT data
         self._transform_to_world_frame()    # Projects the 3D quantities in the "world" (=cam0) system
@@ -274,6 +275,27 @@ class FusionDatapoint(Dataset, ABC):
         """
 
     # Internal book-keeping (not overridden)
+
+    def _apply_temporal_offsets(self) -> None:
+        """Shift each camera's frame_indices by its temporal offset.
+
+        Reads temporal_offsets.json from scene_dir (written by the synchronizer
+        for genuinely async inputs). Each camera's frame_indices are shifted so
+        all cameras share a common physical timeline — camera B with offset 10
+        goes from [0..99] to [10..109], so _build_sample correctly aligns it
+        with camera A's frames. No-op if the file is missing (synchronized data).
+        """
+        offsets_path = self.scene_dir / "temporal_offsets.json"
+        if not offsets_path.exists():
+            return
+        with open(offsets_path) as f:
+            offsets: dict[str, int] = json.load(f)
+        for cam_idx, cam_dir in enumerate(self._cam_dirs):
+            offset = offsets.get(cam_dir.name, 0)
+            if offset == 0:
+                continue
+            for pdata in self._raw[cam_idx].values():
+                pdata["frame_indices"] = pdata["frame_indices"] + offset
 
     def _compute_frame_range(self) -> None:
         """Determine [start, end) across all cameras and people."""

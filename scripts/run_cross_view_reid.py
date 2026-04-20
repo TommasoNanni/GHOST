@@ -29,6 +29,7 @@ from preprocessing.parameters_extraction import CrossVideoReidentifier
 from preprocessing.camera_alignment import CameraAlignment
 from preprocessing.geometric_reidentifier import GeometricReidentifier
 from synchronize_videos.synchronizer import Synchronizer
+from utilities.body_data import load_person_smplx_pose
 
 # --- configuration -----------------------------------------------------------
 SOURCE_DIR  = Path("/cluster/project/cvg/students/tnanni/ghost/preprocessing_outputs/new_within")
@@ -52,10 +53,7 @@ def _load_body_data(
     """Load smplx pose sequences for all cameras.
 
     Returns {cam_id: {person_id: (rotations T×51×3, conf T×51)}}.
-
-    Uses frame_indices to build a dense sequence spanning first_frame..last_frame.
-    Frames missing from the npz (detection gaps) are filled with zero pose and
-    zero confidence so they do not contribute to the cross-correlation cost.
+    Detection gaps are zero-padded via load_person_smplx_pose.
     """
     cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]] = {}
     for cam_id, video_dir in video_dirs.items():
@@ -65,36 +63,11 @@ def _load_body_data(
         persons: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
         for npz_path in sorted(body_dir.glob("person_*.npz")):
             pid = int(npz_path.stem.split("_")[1])
-            with np.load(str(npz_path)) as d:
-                required = {"smplx_body_pose", "smplx_left_hand_pose",
-                            "smplx_right_hand_pose", "pred_joint_confidence"}
-                if not required.issubset(d.files):
-                    print(f"  WARNING: {npz_path.name} missing pose keys, skipping")
-                    continue
-                pose = np.concatenate([
-                    d["smplx_body_pose"],       # (T, 63)
-                    d["smplx_left_hand_pose"],  # (T, 45)
-                    d["smplx_right_hand_pose"], # (T, 45)
-                ], axis=1)                      # (T, 153)
-                raw_conf = d["pred_joint_confidence"][:, 1:52].astype(np.float32)  # (T, 51)
-                frame_indices = d["frame_indices"].astype(int) if "frame_indices" in d.files else None
-
-            if frame_indices is not None and len(frame_indices) < (frame_indices[-1] - frame_indices[0] + 1):
-                # Gaps exist: build a dense array and zero-out missing frames.
-                T_full = int(frame_indices[-1] - frame_indices[0] + 1)
-                dense_pose = np.zeros((T_full, 153), dtype=np.float32)
-                dense_conf = np.zeros((T_full, 51),  dtype=np.float32)
-                idx = frame_indices - frame_indices[0]
-                dense_pose[idx] = pose
-                dense_conf[idx] = raw_conf
-                n_missing = T_full - len(frame_indices)
-                print(f"  {cam_id}/person_{pid}: padded {n_missing} missing frame(s) with zero confidence")
-                pose     = dense_pose
-                raw_conf = dense_conf
-
-            rotations = torch.from_numpy(pose).reshape(-1, 51, 3)
-            conf      = torch.from_numpy(raw_conf)
-            persons[pid] = (rotations, conf)
+            result = load_person_smplx_pose(npz_path)
+            if result is None:
+                print(f"  WARNING: {npz_path.name} missing pose keys, skipping")
+                continue
+            persons[pid] = result
         if persons:
             cam_data[cam_id] = persons
     return cam_data
@@ -109,15 +82,15 @@ def _common_persons(cam_data: dict[str, dict[int, tuple]]) -> list[int]:
 def _apply_shifts(
     cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]],
     shifts: dict[str, int],
+    end_cuts: dict[str, int],
     pids: list[int],
     min_overlap: int = SYNC_MIN_OVERLAP,
 ) -> tuple[list[list[torch.Tensor]], list[list[torch.Tensor]]] | None:
-    """Slice sequences to simulate temporal offsets.
+    """Slice sequences to simulate temporal offsets and random end times.
 
-    Each camera starts at a different offset and keeps all its remaining
-    frames — no common end time, no common length, fully independent.
-    Returns None if any camera ends up with fewer than min_overlap frames
-    (the overlap between any pair is at most the shorter sequence length).
+    Each camera starts at a different offset and ends at a different frame,
+    simulating realistic asynchronous recordings with no common start or end.
+    Returns None if any camera ends up with fewer than min_overlap frames.
     """
     cam_ids = list(shifts.keys())
     max_s   = max(shifts.values())
@@ -127,19 +100,22 @@ def _apply_shifts(
     joints_list: list[list[torch.Tensor]] = []
     confs_list:  list[list[torch.Tensor]] = []
     for cam_id in cam_ids:
-        s = max_s - shifts[cam_id]
+        s   = max_s - shifts[cam_id]
+        ec  = end_cuts[cam_id]
         per_person_joints, per_person_confs = [], []
         for pid in pids:
             rotations, conf = cam_data[cam_id][pid]
-            remaining = rotations.shape[0] - s
+            T   = rotations.shape[0]
+            end = T - ec if ec > 0 else T
+            remaining = end - s
             if remaining < min_overlap:
                 print(
                     f"  WARNING: {cam_id} has only {remaining} frames after shift "
                     f"(need ≥{min_overlap}) — skipping sync"
                 )
                 return None
-            per_person_joints.append(rotations[s:].to(SYNC_DEVICE))
-            per_person_confs .append(conf     [s:].to(SYNC_DEVICE))
+            per_person_joints.append(rotations[s:end].to(SYNC_DEVICE))
+            per_person_confs .append(conf     [s:end].to(SYNC_DEVICE))
         joints_list.append(per_person_joints)
         confs_list .append(per_person_confs)
     return joints_list, confs_list
@@ -326,9 +302,12 @@ def main() -> None:
                         -SYNC_MAX_SHIFT, SYNC_MAX_SHIFT + 1, size=len(cam_ids) - 1
                     ).tolist()
                     true_shifts = {c: int(s) for c, s in zip(cam_ids, raw_shifts)}
-                    print(f"\n  Trial {trial + 1}/{SYNC_N_TRIALS}  true shifts: {true_shifts}")
+                    end_cuts    = {c: int(e) for c, e in zip(cam_ids, rng.integers(
+                        0, SYNC_MAX_SHIFT + 1, size=len(cam_ids)
+                    ).tolist())}
+                    print(f"\n  Trial {trial + 1}/{SYNC_N_TRIALS}  true shifts: {true_shifts}  end_cuts: {end_cuts}")
 
-                    result = _apply_shifts(cam_data, true_shifts, pids)
+                    result = _apply_shifts(cam_data, true_shifts, end_cuts, pids)
                     if result is None:
                         continue
                     joints_list, confs_list = result
@@ -361,15 +340,6 @@ def main() -> None:
                         "within_2": (errors <= 2).float().mean().item(),
                     })
 
-                    # Save the last trial's estimated offsets to disk.
-                    if trial == SYNC_N_TRIALS - 1:
-                        offsets_dict = {
-                            c: int(round(t))
-                            for c, t in zip(cam_ids, estimated.cpu().tolist())
-                        }
-                        with open(scene_out_dir / "temporal_offsets.json", "w") as _f:
-                            json.dump(offsets_dict, _f, indent=2)
-                        print(f"  Saved temporal_offsets.json")
 
                 if SYNC_N_TRIALS > 1:
                     all_mae = [r["mae"] for r in all_results]

@@ -7,7 +7,6 @@ sys.path.append(str(Path(__file__).parent / 'MHR' / 'tools' / 'mhr_smpl_conversi
 import argparse
 import json
 import logging
-import numpy as np
 import torch
 from tqdm import tqdm
 from collections import defaultdict
@@ -16,6 +15,7 @@ from data.video_dataset import Video, Scene, EgoExoSceneDataset
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction import ParametersExtractor, CrossVideoReidentifier
 from synchronize_videos.synchronizer import Synchronizer
+from utilities.body_data import load_person_keypoints
 
 
 def load_body_data(
@@ -88,20 +88,12 @@ def load_body_data(
             pid = int(npz_path.stem.split("_")[1])
             if fg_pids is not None and pid not in fg_pids:
                 continue
-            data = np.load(str(npz_path), allow_pickle=False)
-            if "pred_keypoints_3d" not in data:
+            result = load_person_keypoints(npz_path)
+            if result is None:
                 continue
-            kpts = data["pred_keypoints_3d"]  # (T, J, 3)
-            if len(kpts) == 0:
-                continue
-            joints = torch.from_numpy(kpts).float().to(device)  # (T, J, 3)
-            T, J = joints.shape[:2]
-            if "pred_joint_confidence" in data:
-                conf = torch.from_numpy(data["pred_joint_confidence"]).float().to(device)
-            else:
-                conf = torch.ones(T, J, device=device)
-            per_person_joints.append(joints)
-            per_person_confs.append(conf)
+            joints, conf = result
+            per_person_joints.append(joints.to(device))
+            per_person_confs.append(conf.to(device))
 
         if per_person_joints:
             body_joints_list.append(per_person_joints)
