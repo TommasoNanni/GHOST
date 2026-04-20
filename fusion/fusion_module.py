@@ -780,14 +780,16 @@ class CameraStreamLayer(nn.Module):
         x_flat = self.view_attn(x_flat, attn_mask=cam_attn_mask)  # residual included
         x = x_flat.reshape(B, T, K, D)
 
-        # Windowed temporal attention: each camera independently across time.
-        h = self.temporal_norm(x)
-        h = h.permute(0, 2, 1, 3).contiguous().reshape(B * K, T, D)
-        if pe is not None:
-            h = pe(h)
-        h = self.temporal_attn(h, confidence=temporal_conf)
-        h = h.reshape(B, K, T, D).permute(0, 2, 1, 3).contiguous()
-        x = x + dropout(h)
+        # Camera temporal attention disabled: cameras are static (fixed tripods),
+        # so the camera token is identical at every timestep and temporal attention
+        # learns nothing. Re-enable if moving cameras are supported in future.
+        # h = self.temporal_norm(x)
+        # h = h.permute(0, 2, 1, 3).contiguous().reshape(B * K, T, D)
+        # if pe is not None:
+        #     h = pe(h)
+        # h = self.temporal_attn(h, confidence=temporal_conf)
+        # h = h.reshape(B, K, T, D).permute(0, 2, 1, 3).contiguous()
+        # x = x + dropout(h)
 
         x = self.ff(x)
         return x
