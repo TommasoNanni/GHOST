@@ -484,6 +484,8 @@ class ParametersExtractor:
 
             frame_path = frame_dir / f"{frame_idx_str}.jpg"
             if not frame_path.exists():
+                frame_path = frame_dir / f"{frame_idx_str}.png"
+            if not frame_path.exists():
                 continue
             frame_bgr = cv2.imread(str(frame_path))
             if frame_bgr is None:
@@ -730,11 +732,13 @@ class ParametersExtractor:
                 # Copy vertices to numpy now, then free the GPU tensor immediately.
                 # result_vertices is (N, 10475, 3) on GPU — ~147 MB for 1166 frames.
                 # Holding it while running the joints forward below causes OOM.
-                smplx_verts_np: np.ndarray | None = (
-                    conv_result.result_vertices.cpu().numpy().astype(np.float32)
-                    if conv_result.result_vertices is not None
-                    else None
-                )
+                smplx_verts_np: np.ndarray | None = None
+                if conv_result.result_vertices is not None:
+                    _rv = conv_result.result_vertices
+                    if isinstance(_rv, torch.Tensor):
+                        smplx_verts_np = _rv.detach().cpu().numpy().astype(np.float32)
+                    else:
+                        smplx_verts_np = np.asarray(_rv, dtype=np.float32)
                 del conv_result
                 torch.cuda.empty_cache()
 
