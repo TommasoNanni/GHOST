@@ -26,17 +26,19 @@ from torch.utils.data import DataLoader
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.fusion_module import SSTNetwork
+from fusion.fusion_module import SSTNetwork, WindowedTemporalAttention
 from fusion.loss import (
-    PoseMSELoss,
-    ShapeMSELoss,
-    EpipolarLoss,
-    TemporalSmoothnessLoss,
-    VPoserLoss,
     BoneLengthconsistencyLoss,
     CameraMSELoss,
-    TriangulationLoss,
+    EpipolarLoss,
+    PoseMSELoss,
+    ShapeMSELoss,
+    ShapeRegularizationLoss,
+    TemporalSmoothnessLoss,
     TranslationMSELoss,
+    TranslationSmoothnessLoss,
+    TriangulationLoss,
+    VPoserLoss,
 )
 from fusion.metric import (
     MetricCollection,
@@ -58,6 +60,8 @@ RICH_SCENE_DIR  = Path(
     "/rich10_segmentation_test/BBQ_001_guitar"
 )
 
+DISABLED_LOSSES: list[str] = []
+
 
 def main():
     # Architecture
@@ -69,15 +73,17 @@ def main():
     max_cameras             = CONFIG.fusion.architecture.max_cameras
     dropout                 = CONFIG.fusion.architecture.dropout
     # Loss weights
-    pose_mse_weight         = CONFIG.fusion.loss.pose_mse_weight
-    shape_mse_weight        = CONFIG.fusion.loss.shape_mse_weight
-    epipolar_weight         = CONFIG.fusion.loss.epipolar_weight
-    temporal_weight         = CONFIG.fusion.loss.temporal_weight
-    bone_length_weight      = CONFIG.fusion.loss.bone_length_weight
-    camera_mse_weight          = CONFIG.fusion.loss.camera_mse_weight
-    triangulation_weight       = CONFIG.fusion.loss.triangulation_weight
-    translation_mse_weight     = CONFIG.fusion.loss.translation_mse_weight
-    vposer_weight           = CONFIG.fusion.loss.vposer_weight
+    pose_mse_weight              = CONFIG.fusion.loss.pose_mse_weight
+    shape_mse_weight             = CONFIG.fusion.loss.shape_mse_weight
+    epipolar_weight              = CONFIG.fusion.loss.epipolar_weight
+    temporal_weight              = CONFIG.fusion.loss.temporal_weight
+    bone_length_weight           = CONFIG.fusion.loss.bone_length_weight
+    camera_mse_weight            = CONFIG.fusion.loss.camera_mse_weight
+    triangulation_weight         = CONFIG.fusion.loss.triangulation_weight
+    translation_mse_weight       = CONFIG.fusion.loss.translation_mse_weight
+    shape_reg_weight             = CONFIG.fusion.loss.shape_reg_weight
+    translation_temporal_weight  = CONFIG.fusion.loss.translation_temporal_weight
+    vposer_weight                = CONFIG.fusion.loss.vposer_weight
     # Training params
     lr                      = CONFIG.fusion.training.lr
     max_epochs              = CONFIG.fusion.training.max_epochs
@@ -116,6 +122,10 @@ def main():
 
     logger.info("\n" + model.summary())
 
+    for module in model.modules():
+        if isinstance(module, WindowedTemporalAttention):
+            module.forward = torch.compile(module.forward, dynamic=True)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if scheduler_name == "cosine":
@@ -133,17 +143,22 @@ def main():
     except Exception as e:
         logger.warning(f"VPoserLoss unavailable ({e}); skipping.")
         vposer_loss = None
-    losses = {
-        "pose":       (PoseMSELoss(),                    pose_mse_weight              ),
-        "shape":      (ShapeMSELoss(),                   shape_mse_weight             ),
-        "epipolar":   (EpipolarLoss(img_size=img_size),  epipolar_weight              ),
-        "temporal":   (TemporalSmoothnessLoss(),         temporal_weight              ),
-        "bone":       (BoneLengthconsistencyLoss(),      bone_length_weight           ),
-        "camera_mse":      (CameraMSELoss(img_size=img_size),      camera_mse_weight      ),
-        "triangulation":   (TriangulationLoss(),                  triangulation_weight   ),
-        "translation_mse": (TranslationMSELoss(),                 translation_mse_weight ),
+    _all_losses = {
+        "pose":            (PoseMSELoss(),                       pose_mse_weight),
+        "shape":           (ShapeMSELoss(),                      shape_mse_weight),
+        "epipolar":        (EpipolarLoss(img_size=img_size),     epipolar_weight),
+        "temporal":        (TemporalSmoothnessLoss(),            temporal_weight),
+        "bone":            (BoneLengthconsistencyLoss(),         bone_length_weight),
+        "camera_mse":      (CameraMSELoss(img_size=img_size),    camera_mse_weight),
+        "triangulation":   (TriangulationLoss(),                 triangulation_weight),
+        "translation_mse":      (TranslationMSELoss(),                translation_mse_weight),
+        "shape_reg":            (ShapeRegularizationLoss(),           shape_reg_weight),
+        "translation_temporal": (TranslationSmoothnessLoss(),         translation_temporal_weight),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
+    losses = {k: v for k, v in _all_losses.items() if k not in DISABLED_LOSSES}
+    if DISABLED_LOSSES:
+        logger.info(f"Disabled losses: {DISABLED_LOSSES}")
 
     # ── Metrics ──────────────────────────────────────────────────────────────
     # Evaluated on the training batch at the end of every epoch.
@@ -157,71 +172,78 @@ def main():
         RRA(threshold=15.0), CCA(threshold=15.0), ScaledCCA(threshold=15.0),
     ])
 
+    METRIC_STRIDE = 8  # evaluate every Nth frame to keep SMPL-X memory bounded
+
     def metric_fn(preds, targets, mc):
         pose_aggr, shape_aggr, camera_pred, body_transl_world = preds[:4]
         B, T, P = pose_aggr.shape[:3]
         K = camera_pred.shape[2]
-        t_mid = T // 2   # representative frame
+
+        t_idx = torch.arange(0, T, METRIC_STRIDE, device=pose_aggr.device)
 
         with torch.no_grad():
-            # shape_aggr is (B, P, 10) — expand to (B, T, P, 10) for get_smplx_joints
-            shape_exp = shape_aggr.unsqueeze(1).expand(B, T, P, 10)
-            # 3D joints via SMPL-X: (B, T, P, Jout, 3)
-            pred_joints = get_smplx_joints(
-                pose_aggr.float(), shape_exp.float()
-            ).cpu().numpy()[..., :55, :]
-            gt_joints = get_smplx_joints(
-                targets["pose"].float(), targets["shape"].float()
-            ).cpu().numpy()[..., :55, :]
+            pose_sub  = pose_aggr[:, t_idx].float()
+            shape_sub = shape_aggr.unsqueeze(1).expand(B, len(t_idx), P, 10).float()
+            pred_joints_rel = get_smplx_joints(pose_sub, shape_sub).cpu().numpy()[..., :55, :]
 
-            # Per-joint rotation matrices from 6D pose: (B, T, P, J, 3, 3)
-            pred_rotmats = rotation_6d_to_matrix(
-                pose_aggr.float()
-            ).cpu().numpy()
-            gt_rotmats = rotation_6d_to_matrix(
-                targets["pose"].float()
-            ).cpu().numpy()
+            gt_pose_sub  = targets["pose"][:, t_idx].float()
+            gt_shape_sub = targets["shape"][:, t_idx].float()
+            gt_joints_rel = get_smplx_joints(gt_pose_sub, gt_shape_sub).cpu().numpy()[..., :55, :]
 
-            # Predicted camera w2c rotations (B, T, K, 3, 3) and translations (B, T, K, 3)
-            cam_rot_w2c = quaternion_to_matrix(
-                camera_pred[..., :4].float().reshape(-1, 4)
-            ).reshape(B, T, K, 3, 3).cpu().numpy()
-            cam_transl_w2c = camera_pred[..., 4:7].float().cpu().numpy()
-            f_pred = camera_pred[..., 7].float().cpu().numpy()   # (B, T, K)
+            pred_transl = body_transl_world[:, t_idx].float().cpu().numpy()   # (B, T_sub, P, 3)
+            pred_joints = pred_joints_rel + pred_transl[:, :, :, None, :]
 
-            # GT camera w2c rotations and translations
-            gt_cam_rot_w2c = quaternion_to_matrix(
-                targets["camera"][..., :4].float().reshape(-1, 4)
-            ).reshape(B, T, K, 3, 3).cpu().numpy()
-            gt_cam_transl_w2c = targets["camera"][..., 4:7].float().cpu().numpy()
-            f_gt   = targets["camera"][..., 7].float().cpu().numpy()
+            if "trans" in targets:
+                gt_transl = targets["trans"][:, t_idx].float().cpu().numpy()
+                gt_joints = gt_joints_rel + gt_transl[:, :, :, None, :]
+            else:
+                gt_joints = gt_joints_rel
 
-        # Camera centres in world frame: C = -R^T t
-        cam_centres      = -np.einsum("...ji,...j->...i", cam_rot_w2c,    cam_transl_w2c)     # (B, T, K, 3)
-        gt_cam_centres   = -np.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
+            pred_rotmats = rotation_6d_to_matrix(pose_aggr[:, t_idx].float()).cpu().numpy()
+            gt_rotmats   = rotation_6d_to_matrix(targets["pose"][:, t_idx].float()).cpu().numpy()
 
-        gt_valid_np = targets["gt_valid"].cpu().numpy() if "gt_valid" in targets else None  # (B, T, P)
+            T_sub = len(t_idx)
+            cam_rot_w2c    = quaternion_to_matrix(
+                camera_pred[:, t_idx, :, :4].float().reshape(-1, 4)
+            ).reshape(B, T_sub, K, 3, 3).cpu().numpy()
+            cam_transl_w2c = camera_pred[:, t_idx, :, 4:7].float().cpu().numpy()
 
+            gt_cam_rot_w2c    = quaternion_to_matrix(
+                targets["camera"][:, t_idx, :, :4].float().reshape(-1, 4)
+            ).reshape(B, T_sub, K, 3, 3).cpu().numpy()
+            gt_cam_transl_w2c = targets["camera"][:, t_idx, :, 4:7].float().cpu().numpy()
+
+        cam_centres    = -np.einsum("...ji,...j->...i", cam_rot_w2c,    cam_transl_w2c)
+        gt_cam_centres = -np.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
+
+        gt_valid_np  = targets["gt_valid"][:, t_idx].cpu().numpy() if "gt_valid" in targets else None
+        cam_valid_np = (
+            targets["camera"][:, t_idx, :, :4].float().norm(dim=-1) > 0.5
+        ).cpu().numpy()  # (B, T_sub, K)
+
+        t_mid_sub = T_sub // 2
         for b in range(B):
-            # Camera metrics: GT cameras are static in RICH — use middle frame
-            Cp = cam_centres[b, t_mid]           # (K, 3)  predicted camera centres
-            Cg = gt_cam_centres[b, t_mid]        # (K, 3)  GT camera centres
-            Rp = cam_rot_w2c[b, t_mid]           # (K, 3, 3) predicted w2c rotations
-            Rg = gt_cam_rot_w2c[b, t_mid]        # (K, 3, 3) GT w2c rotations
-            mc["TE"].update(Cp, Cg)
-            mc["s-TE"].update(Cp, Cg)
-            mc["CCA@15"].update(Cp, Cg)
-            mc["s-CCA@15"].update(Cp, Cg)
-            mc["AE"].update(Rp, Rg)
-            mc["RRA@15"].update(Rp, Rg)
+            valid = cam_valid_np[b, t_mid_sub]
+            Cp = cam_centres[b, t_mid_sub][valid]
+            Cg = gt_cam_centres[b, t_mid_sub][valid]
+            Rp = cam_rot_w2c[b, t_mid_sub][valid]
+            Rg = gt_cam_rot_w2c[b, t_mid_sub][valid]
+            pred_spread = float(np.linalg.norm(Cp - Cp.mean(0), axis=-1).max()) if valid.sum() >= 3 else 0.0
+            if valid.sum() >= 3 and pred_spread > 1e-3:
+                mc["TE"].update(Cp, Cg)
+                mc["s-TE"].update(Cp, Cg)
+                mc["CCA@15"].update(Cp, Cg)
+                mc["s-CCA@15"].update(Cp, Cg)
+            if valid.sum() >= 1:
+                mc["AE"].update(Rp, Rg)
+                mc["RRA@15"].update(Rp, Rg)
 
-            # Body metrics: average over all annotated frames
-            for t in range(T):
+            for t in range(T_sub):
                 if gt_valid_np is not None and not gt_valid_np[b, t].any():
                     continue
-                pj = pred_joints[b, t]           # (P, J, 3)
+                pj = pred_joints[b, t]
                 gj = gt_joints[b, t]
-                pr = pred_rotmats[b, t]          # (P, J, 3, 3)
+                pr = pred_rotmats[b, t]
                 gr = gt_rotmats[b, t]
                 mc["W-MPJPE"].update(pj, gj, Cp, Cg)
                 mc["GA-MPJPE"].update(pj, gj)
@@ -229,6 +251,12 @@ def main():
                 mc["W-MPJRE"].update(pr, gr, Cp, Cg)
                 mc["GA-MPJRE"].update(pr, gr)
                 mc["PA-MPJRE"].update(pr, gr)
+
+    curriculum_schedule = {
+        0:   ["pose", "shape", "camera_mse", "shape_reg", "translation_temporal"],
+        25:  ["translation_mse", "temporal", "bone", "vposer"],
+        100: ["epipolar", "triangulation"],
+    }
 
     if CONFIG.fusion.use_wandb:
         import wandb
@@ -249,13 +277,15 @@ def main():
         losses=losses,
         max_epochs=max_epochs,
         use_wandb=CONFIG.fusion.use_wandb,
-        dtype=torch.bfloat16,
+        dtype=None,
+        use_amp=True,
         grad_clip=grad_clip,
         scheduler=scheduler,
         early_stopping_patience=patience,
         metrics=metrics,
         metric_fn=metric_fn,
         prediction_save_path=CONFIG.data.fusion_output_dir,
+        curriculum_schedule=curriculum_schedule,
     )
 
     trainer.train()
