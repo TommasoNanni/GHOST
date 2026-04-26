@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --time=4:00:00
-#SBATCH --account=ls_polle
+#SBATCH --account=a144
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=15
 #SBATCH --mem-per-cpu=8G
@@ -12,10 +12,11 @@
 #SBATCH --mail-type=ALL          
 #SBATCH --mail-user=tnanni@ethz.ch
 
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd /cluster/project/cvg/students/tnanni/ghost
+cd users/tnanni/ghost
 
 echo "=== GPU STATUS ==="
 nvidia-smi

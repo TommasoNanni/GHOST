@@ -1,32 +1,48 @@
 #!/bin/bash
-#SBATCH --time=12:00:00
-#SBATCH --account=ls_polle
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=8G
-#SBATCH --gpus=1
-#SBATCH --gres=gpumem:32G
+#SBATCH --time=1:30:00
+#SBATCH --account=a144
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --gpus-per-node=4
 #SBATCH --job-name=train_rich
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=tnanni@ethz.ch
+#SBATCH --partition=debug
 
 set -euo pipefail
 
-cd /cluster/project/cvg/students/tnanni/ghost
+cd /users/tnanni/ghost
+ulimit -c 0  # disable core dumps — they fill up home quota
 
 echo "=== GPU STATUS ==="
 nvidia-smi
 echo "========================="
 
+MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -1)
+MASTER_PORT=29500
+
+export TORCH_DISTRIBUTED_DEBUG=DETAIL
+export TORCH_SHOW_CPP_STACKTRACES=1
+
 echo "Job ID:       $SLURM_JOB_ID"
-echo "Node:         $SLURMD_NODENAME"
-echo "GPUs:         $SLURM_GPUS"
+echo "Nodes:        $SLURM_NNODES  ($SLURM_JOB_NODELIST)"
+echo "Master:       $MASTER_ADDR:$MASTER_PORT"
 echo "Start:        $(date)"
 echo ""
 
-CUDA_LAUNCH_BLOCKING=1 pixi run python -m scripts.train_rich
+# torchrun with c10d rendezvous works for both single- and multi-node.
+# --nnodes=$SLURM_NNODES ensures it scales automatically with allocation.
+srun pixi run torchrun \
+    --nnodes="$SLURM_NNODES" \
+    --nproc_per_node=4 \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+    --rdzv_id="$SLURM_JOB_ID" \
+    -m scripts.train_rich --resume
 
 echo ""
 echo "Done: $(date)"
