@@ -12,24 +12,31 @@ Via SLURM:
 
 from __future__ import annotations
 
+import faulthandler
 import logging
 import os
 import sys
 from pathlib import Path
 
+# Dump Python traceback to stderr on fatal signals (SIGABRT from NCCL, SIGSEGV, etc.)
+faulthandler.enable()
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from pytorch3d.transforms import quaternion_to_matrix, rotation_6d_to_matrix
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from fusion.fusion_module import SSTNetwork, WindowedTemporalAttention
 from fusion.loss import (
     BoneLengthconsistencyLoss,
-    CameraMSELoss,
+    CameraMSELossVGGT,
     EpipolarLoss,
     PoseMSELoss,
     ShapeMSELoss,
@@ -51,19 +58,38 @@ from utilities.smplx_utilities import get_smplx_joints
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
 
+
+def _setup_ddp() -> tuple[int, int, int]:
+    """Initialise NCCL process group from env vars set by torchrun.
+
+    Returns (local_rank, global_rank, world_size).
+    torchrun sets LOCAL_RANK, RANK, and WORLD_SIZE automatically.
+    """
+    dist.init_process_group(backend="nccl")
+    local_rank  = int(os.environ["LOCAL_RANK"])
+    global_rank = dist.get_rank()
+    world_size  = dist.get_world_size()
+    torch.cuda.set_device(local_rank)
+    return local_rank, global_rank, world_size
+
+
+def _cleanup_ddp() -> None:
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()
+
 SCENES_ROOT = Path(CONFIG.data.output_directory)
 # Scenes to exclude (broken ReID or other issues).
 # Add scene directory names here to skip them.
 SKIP_SCENES: list[str] = [
-    "ParkingLot2_008_pushup2",
-    "ParkingLot1_002_burpee3",
 ]
 # Per-scene cameras to exclude (e.g. track-stealing artefacts).
 SKIP_CAMERAS: dict[str, list[str]] = {
     "Pavallion_003_018_tossball": ["cam_06"],
+    "ParkingLot2_008_pushup2": ["cam_03"],
+    "ParkingLot2_014_takingphotos2": ["cam_01"],
 }
 
-NUM_VAL_SCENES = 2
+NUM_VAL_SCENES = 10
 DISABLED_LOSSES: list[str] = []
 
 
@@ -76,6 +102,12 @@ def load_datapoints(scenes: list[Path]) -> list[RICHFusionDatapoint]:
                 rich_data_root=CONFIG.data.rich_data_root,
                 exclude_cameras=SKIP_CAMERAS.get(scene_dir.name, []),
             )
+            if dp.num_frames == 0:
+                logger.warning(f"  skipping {scene_dir.name}: 0 prediction frames")
+                continue
+            if not dp.has_gt:
+                logger.warning(f"  skipping {scene_dir.name}: no GT data")
+                continue
             datapoints.append(dp)
             logger.info(f"  loaded {scene_dir.name}")
         except Exception as e:
@@ -127,7 +159,33 @@ def _split_by_location(scenes: list[Path], num_val: int) -> tuple[list[Path], li
     return train_scenes, val_scenes
 
 
+def _parse_args():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Resume from the last checkpoint in CONFIG.fusion.checkpoint_dir.",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = _parse_args()
+
+    # ── DDP setup ─────────────────────────────────────────────────────────────
+    # torchrun sets LOCAL_RANK when launching in multi-GPU mode.
+    # Fall back to single-GPU when that env var is absent.
+    use_ddp    = "LOCAL_RANK" in os.environ
+    local_rank = 0
+    rank       = 0
+    world_size = 1
+
+    if use_ddp:
+        local_rank, rank, world_size = _setup_ddp()
+
+    is_main = rank == 0
+    device  = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+
     # ── Discover scenes ───────────────────────────────────────────────────────
     all_scenes = sorted(SCENES_ROOT.iterdir())
     scenes = [
@@ -139,12 +197,13 @@ def main():
 
     train_scenes, val_scenes = _split_by_location(scenes, NUM_VAL_SCENES)
 
-    logger.info(f"Train scenes ({len(train_scenes)}):")
-    for s in train_scenes:
-        logger.info(f"  {s.name}")
-    logger.info(f"Val scenes ({len(val_scenes)}):")
-    for s in val_scenes:
-        logger.info(f"  {s.name}")
+    if is_main:
+        logger.info(f"Train scenes ({len(train_scenes)}):")
+        for s in train_scenes:
+            logger.info(f"  {s.name}")
+        logger.info(f"Val scenes ({len(val_scenes)}):")
+        for s in val_scenes:
+            logger.info(f"  {s.name}")
 
     # ── Load datapoints ───────────────────────────────────────────────────────
     logger.info("Loading train datapoints...")
@@ -198,8 +257,19 @@ def main():
     patience       = getattr(CONFIG.fusion.training, "patience", None)
 
     # ── DataLoaders ───────────────────────────────────────────────────────────
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False) if val_ds else None
+    # In DDP mode each rank sees a non-overlapping subset of the training data.
+    # DistributedSampler replaces shuffle=True; set_epoch is called inside Trainer.
+    if use_ddp:
+        train_sampler = DistributedSampler(
+            train_ds, num_replicas=world_size, rank=rank, shuffle=True
+        )
+        train_loader = DataLoader(train_ds, batch_size=batch_size, sampler=train_sampler)
+    else:
+        train_sampler = None
+        train_loader  = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+
+    # Validation runs only on rank 0 (see Trainer.train()), so a plain loader is fine.
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False) if val_ds else None
 
     # ── Model ─────────────────────────────────────────────────────────────────
     model = SSTNetwork(
@@ -210,17 +280,21 @@ def main():
         dropout=dropout,
         temporal_window=temporal_window,
         max_cameras=max_cameras,
-    )
-    logger.info("\n" + model.summary())
+    ).to(device)
 
-    # flex_attention requires torch.compile to use its sparse backward pass.
-    # Without it, the backward falls back to a dense O(T²) implementation that
-    # OOMs on long sequences (T=1157 tried to allocate 12.95 GiB).
-    # We compile only the LocalWindowTemporalAttention layers (not the whole model)
-    # to avoid breaking the cross-attention modules which fail with full compile.
+    if is_main:
+        logger.info("\n" + model.summary())
+
+    # torch.compile must be applied before DDP wrapping.
+    # flex_attention requires torch.compile for its sparse backward pass —
+    # without it the backward uses a dense O(T²) alloc that OOMs on long sequences.
     for module in model.modules():
         if isinstance(module, WindowedTemporalAttention):
             module.forward = torch.compile(module.forward, dynamic=True)
+
+    if use_ddp:
+        # find_unused_parameters=False is faster; set True only if you add optional branches.
+        model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 
     # ── Optimizer & scheduler ─────────────────────────────────────────────────
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -250,7 +324,7 @@ def main():
         "epipolar":        (EpipolarLoss(img_size=img_size),     epipolar_weight),
         "temporal":        (TemporalSmoothnessLoss(),            temporal_weight),
         "bone":            (BoneLengthconsistencyLoss(),         bone_length_weight),
-        "camera_mse":      (CameraMSELoss(img_size=img_size),    camera_mse_weight),
+        "camera_mse":      (CameraMSELossVGGT(),                  camera_mse_weight),
         "triangulation":   (TriangulationLoss(),                 triangulation_weight),
         "translation_mse":      (TranslationMSELoss(),                translation_mse_weight),
         "shape_reg":            (ShapeRegularizationLoss(),           shape_reg_weight),
@@ -361,15 +435,35 @@ def main():
                 mc["GA-MPJRE"].update(pr, gr)
                 mc["PA-MPJRE"].update(pr, gr)
 
-    # ── WandB ─────────────────────────────────────────────────────────────────
-    if CONFIG.fusion.use_wandb:
+    # ── Resume checkpoint ─────────────────────────────────────────────────────
+    resume_checkpoint = None
+    if args.resume:
+        last_pt = Path(CONFIG.fusion.checkpoint_dir) / "last.pt"
+        if not last_pt.exists():
+            raise FileNotFoundError(
+                f"--resume specified but no checkpoint found at {last_pt}"
+            )
+        resume_checkpoint = last_pt
+        if is_main:
+            logger.info(f"Resuming from {last_pt}")
+
+    # ── WandB (rank 0 only) ───────────────────────────────────────────────────
+    if CONFIG.fusion.use_wandb and is_main:
         import wandb
+        _wandb_run_id = None
+        if resume_checkpoint is not None:
+            _ckpt = torch.load(resume_checkpoint, map_location="cpu", weights_only=False)
+            _wandb_run_id = _ckpt.get("wandb_run_id")
+            del _ckpt
         wandb.init(
             project="ghost-fusion",
             name="train_rich",
+            id=_wandb_run_id,
+            resume="allow",
             config={
                 "train_scenes": [s.name for s in train_scenes],
                 "val_scenes":   [s.name for s in val_scenes],
+                "world_size":   world_size,
                 **vars(CONFIG.fusion.architecture),
                 **vars(CONFIG.fusion.loss),
                 **vars(CONFIG.fusion.training),
@@ -382,8 +476,8 @@ def main():
     # Epoch 100: add geometric losses (epipolar, triangulation) — only once
     #            poses and cameras are already roughly aligned
     curriculum_schedule = {
-        0:   ["pose", "shape", "camera_mse", "shape_reg", "translation_temporal"],
-        25:  ["translation_mse", "temporal", "bone", "vposer"],
+        0:   ["pose", "shape", "camera_mse", "translation_mse", "shape_reg", "translation_temporal"],
+        25:  ["temporal", "bone", "vposer"],
         100: ["epipolar", "triangulation"],
     }
 
@@ -406,9 +500,16 @@ def main():
         metric_fn=metric_fn,
         prediction_save_path=CONFIG.data.fusion_output_dir,
         curriculum_schedule=curriculum_schedule,
+        is_main_process=is_main,
+        train_sampler=train_sampler,
+        device=device,
+        resume_checkpoint=resume_checkpoint,
     )
 
-    trainer.train()
+    try:
+        trainer.train()
+    finally:
+        _cleanup_ddp()
 
 
 if __name__ == "__main__":

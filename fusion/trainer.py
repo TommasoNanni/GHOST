@@ -9,13 +9,24 @@ from typing import Any, Callable
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 from fusion.metric import MetricCollection
 from utilities.smplx_utilities import get_smplx_joints, clear_smplx_cache
+
+
+def _is_distributed() -> bool:
+    return dist.is_available() and dist.is_initialized()
+
+
+def _ddp_barrier() -> None:
+    if _is_distributed():
+        dist.barrier()
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +105,9 @@ class Trainer:
         prediction_save_path: str | None = None,
         smplx_chunk_size: int = 32,
         curriculum_schedule: dict[int, list[str]] | None = None,
+        is_main_process: bool = True,
+        train_sampler: DistributedSampler | None = None,
+        resume_checkpoint: str | Path | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.dtype = dtype
@@ -115,6 +129,8 @@ class Trainer:
         self.use_wandb = use_wandb
         self.prediction_save_path = Path(prediction_save_path) if prediction_save_path else None
         self.smplx_chunk_size = smplx_chunk_size
+        self.is_main_process = is_main_process
+        self.train_sampler = train_sampler
 
         if self.metrics is not None and self.metric_fn is None:
             raise ValueError("metrics provided but metric_fn is None. "
@@ -131,28 +147,38 @@ class Trainer:
         self.early_stopping_patience = early_stopping_patience
         self._no_improve = 0
 
-        if self.checkpoint_dir:
+        # Uncertainty weighting (Kendall et al. 2018): one learnable log-variance
+
+        if self.checkpoint_dir and self.is_main_process:
             self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
             best_pt = self.checkpoint_dir / "best.pt"
-            if best_pt.exists():
+            if best_pt.exists() and resume_checkpoint is None:
                 raise FileExistsError(
-                    f"{best_pt} already exists. Use a clean checkpoint directory "
-                    f"or rename/remove the existing best.pt to avoid overwriting it."
+                    f"{best_pt} already exists. Use a clean checkpoint directory, "
+                    f"rename/remove the existing best.pt, or pass --resume to continue training."
                 )
+
+        if resume_checkpoint is not None:
+            self.load_checkpoint(resume_checkpoint)
 
 
     def train(self) -> None:
         """
         Full training loop.
         """
-        logger.info(f"Training on {self.device} | losses: {list(self.losses)}")
+        if self.is_main_process:
+            logger.info(f"Training on {self.device} | losses: {list(self.losses)}")
 
         _prev_active: set[str] = set()
         for epoch in range(self._epoch, self.max_epochs):
             self._epoch = epoch
 
-            # Log curriculum stage changes
-            if self.curriculum_schedule:
+            # Tell DistributedSampler which epoch we're on so shuffling differs per epoch.
+            if self.train_sampler is not None:
+                self.train_sampler.set_epoch(epoch)
+
+            # Log curriculum stage changes (rank 0 only)
+            if self.curriculum_schedule and self.is_main_process:
                 cur_active = set(self._active_losses())
                 new_losses = cur_active - _prev_active
                 if new_losses:
@@ -160,43 +186,72 @@ class Trainer:
                 _prev_active = cur_active
 
             train_stats, train_metrics = self._run_epoch(train=True)
-            val_stats, val_metrics = self._run_epoch(train=False) if self.val_loader else ({}, {})
 
-            if self.scheduler is not None:
-                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    metric = (val_stats or train_stats).get("total", {}).get("mean")
-                    if metric is not None:
-                        self.scheduler.step(metric)
-                else:
+            # Validation and all rank-0-only operations happen after a barrier so
+            # every worker has finished its training step before rank 0 starts val.
+            _ddp_barrier()
+
+            val_stats, val_metrics = ({}, {})
+            improved = False
+            should_stop = False
+
+            if self.is_main_process:
+                val_stats, val_metrics = self._run_epoch(train=False) if self.val_loader else ({}, {})
+
+                if self.scheduler is not None:
+                    if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        metric = (val_stats or train_stats).get("total", {}).get("mean")
+                        if metric is not None:
+                            self.scheduler.step(metric)
+                    else:
+                        self.scheduler.step()
+
+                self._log_epoch(epoch, train_stats, val_stats, train_metrics, val_metrics)
+
+                if self.use_wandb:
+                    import wandb
+                    self.log_losses_to_wandb(train_stats, phase="train", epoch=epoch)
+                    if val_stats:
+                        self.log_losses_to_wandb(val_stats, phase="val", epoch=epoch)
+                    if train_metrics:
+                        self.log_metrics_to_wandb(train_metrics, phase="train", epoch=epoch)
+                    if val_metrics:
+                        self.log_metrics_to_wandb(val_metrics, phase="val", epoch=epoch)
+                    wandb.log({"lr": self._lr()}, step=epoch)
+
+                improved = self._checkpoint(val_stats or train_stats)
+
+                if self.early_stopping_patience is not None:
+                    if improved:
+                        self._no_improve = 0
+                    else:
+                        self._no_improve += 1
+                        if self._no_improve >= self.early_stopping_patience:
+                            logger.info(f"Early stopping at epoch {epoch} "
+                                        f"(no improvement for {self._no_improve} epochs).")
+                            should_stop = True
+            else:
+                # Non-main ranks still step their copy of the scheduler so LR
+                # stays in sync (needed when optimizer state is used after DDP).
+                if self.scheduler is not None and not isinstance(
+                    self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+                ):
                     self.scheduler.step()
 
-            self._log_epoch(epoch, train_stats, val_stats, train_metrics, val_metrics)
+            # Broadcast the early-stop decision from rank 0 to all ranks so
+            # every process exits the loop at the same epoch.
+            if _is_distributed():
+                stop_tensor = torch.tensor(int(should_stop), device=self.device)
+                dist.broadcast(stop_tensor, src=0)
+                should_stop = bool(stop_tensor.item())
 
-            if self.use_wandb:
-                import wandb
-                self.log_losses_to_wandb(train_stats, phase="train", epoch=epoch)
-                if val_stats:
-                    self.log_losses_to_wandb(val_stats, phase="val", epoch=epoch)
-                if train_metrics:
-                    self.log_metrics_to_wandb(train_metrics, phase="train", epoch=epoch)
-                if val_metrics:
-                    self.log_metrics_to_wandb(val_metrics, phase="val", epoch=epoch)
-                wandb.log({"lr": self._lr()}, step=epoch)
+            # Second barrier: rank 0 finishes val/checkpoint before next epoch.
+            _ddp_barrier()
 
-            improved = self._checkpoint(val_stats or train_stats)
+            if should_stop:
+                break
 
-            # Early stopping
-            if self.early_stopping_patience is not None:
-                if improved:
-                    self._no_improve = 0
-                else:
-                    self._no_improve += 1
-                    if self._no_improve >= self.early_stopping_patience:
-                        logger.info(f"Early stopping at epoch {epoch} "
-                                    f"(no improvement for {self._no_improve} epochs).")
-                        break
-
-        if self.prediction_save_path is not None:
+        if self.prediction_save_path is not None and self.is_main_process:
             self.save_predictions(self.train_loader, self.prediction_save_path)
 
     @torch.no_grad()
@@ -217,7 +272,9 @@ class Trainer:
         Restore model / optimizer / scheduler state.
         """
         state = torch.load(path, map_location=self.device, weights_only=False)
-        self.model.load_state_dict(state["model"])
+        # Unwrap DDP before loading so state dict keys match.
+        raw_model = getattr(self.model, "module", self.model)
+        raw_model.load_state_dict(state["model"])
         self.optimizer.load_state_dict(state["optimizer"])
         self._epoch = state.get("epoch", 0) + 1
         self._step = state.get("step", 0)
@@ -268,6 +325,7 @@ class Trainer:
                 if "shape"  in targets: arrays["gt_body_shape"]        = _sq(targets["shape"])
                 if "camera" in targets: arrays["gt_camera"]            = _sq(targets["camera"])
                 if "trans"  in targets: arrays["gt_body_transl_world"] = _sq(targets["trans"])
+                if "gt_valid" in targets: arrays["gt_valid"]           = _sq(targets["gt_valid"])
 
             out_file = path / f"{scene_name}.npz"
             np.savez_compressed(str(out_file), **arrays)
@@ -424,9 +482,10 @@ class Trainer:
                         )
                 # ─────────────────────────────────────────────────────────────
 
-                total_loss: torch.Tensor = torch.stack(
-                    [w * step_losses[n] for n, (_, w) in active_losses.items()]
-                ).sum()
+                total_loss: torch.Tensor = torch.stack([
+                    w * step_losses[n]
+                    for n, (_, w) in active_losses.items()
+                ]).sum()
 
                 self.optimizer.zero_grad()
                 total_loss.backward()
@@ -447,12 +506,12 @@ class Trainer:
                         f"[BACKWARD NaN] {scene}  step={self._step}  "
                         f"modules={sorted(nan_modules)}"
                     )
-                # Always log grad norms for the first 3 steps for diagnostics
-                if self._step < 3:
-                    norm_str = "  ".join(
-                        f"{m}={v:.3e}" for m, v in sorted(module_grad_norms.items())
+                if self.use_wandb and self.is_main_process and module_grad_norms:
+                    import wandb
+                    wandb.log(
+                        {f"grad_norms/{m}": v for m, v in module_grad_norms.items()},
+                        step=self._epoch,
                     )
-                    logger.info(f"[GRAD NORMS] step={self._step}  {norm_str}")
                 # ─────────────────────────────────────────────────────────────
 
                 if self.grad_clip:
@@ -467,9 +526,10 @@ class Trainer:
                     preds = self._forward(inputs)
                     preds = self._append_smplx_joints(preds)
                     step_losses = {name: fn(preds, targets) for name, (fn, _) in active_losses.items()}
-                    total_loss = torch.stack(
-                        [w * step_losses[n] for n, (_, w) in active_losses.items()]
-                    ).sum()
+                    total_loss = torch.stack([
+                        w * step_losses[n]
+                        for n, (_, w) in active_losses.items()
+                    ]).sum()
 
             if self.metric_fn is not None and self.metrics is not None:
                 with torch.no_grad():
@@ -477,6 +537,7 @@ class Trainer:
 
             detached = {k: v.item() for k, v in step_losses.items()}
             detached["total"] = total_loss.item()
+            detached.update(self._compute_diagnostics(preds, inputs, targets))
             acc.update(detached)
 
             del preds, step_losses, total_loss
@@ -497,15 +558,104 @@ class Trainer:
 
         return acc.compute(), metric_results
 
+    @torch.no_grad()
+    def _compute_diagnostics(
+        self,
+        preds: Any,
+        inputs: Any,
+        targets: Any,
+    ) -> dict[str, float]:
+        """Compute diagnostic quantities (no gradient) for wandb logging.
+
+        Returns a flat dict of scalar floats to be merged into ``detached``.
+
+        Keys produced
+        -------------
+        diag/delta_kin_deg   : mean geodesic angle (°) between pred and input-mean
+                               for kinematic joints 1-54.  Measures how far the
+                               model moves from the naive per-camera mean.
+        diag/root_error_deg  : geodesic angle (°) between predicted world-frame
+                               root orient and GT root orient.
+        diag/camera_rot_deg  : mean camera rotation error in degrees
+                               (2·arccos|q·q_gt|).
+        diag/camera_trans_m  : mean camera translation error in metres (L2 norm).
+        """
+        import math
+        import torch.nn.functional as _F
+        from pytorch3d.transforms import rotation_6d_to_matrix
+
+        diag: dict[str, float] = {}
+
+        if (
+            isinstance(inputs, dict)
+            and "pose" in inputs
+            and "person_mask" in inputs
+            and len(preds) > 0
+            and isinstance(preds[0], torch.Tensor)
+        ):
+            pose_in   = inputs["pose"].float()          # (B, T, K, P, J, 6)
+            pmask     = inputs["person_mask"].float()   # (B, T, K, P)
+            pose_aggr = preds[0].float()                # (B, T, P, J, 6)
+            B, T, P, J = pose_aggr.shape[:4]
+
+            # delta_kin_deg: how far pred deviates from naive input mean (joints 1-54).
+            # Kinematic joints are body-relative — same in any camera frame — so
+            # comparing camera-frame input mean to world-frame pred is valid here.
+            vis      = pmask.unsqueeze(-1).unsqueeze(-1)              # (B,T,K,P,1,1)
+            vis_sum  = vis.sum(dim=2).clamp(min=1e-8)
+            pose_in_mean = (pose_in * vis).sum(dim=2) / vis_sum       # (B, T, P, J, 6)
+
+            R_pred  = rotation_6d_to_matrix(pose_aggr[:, :, :, 1:].reshape(-1, 6)).reshape(B, T, P, J - 1, 3, 3)
+            R_input = rotation_6d_to_matrix(pose_in_mean[:, :, :, 1:].reshape(-1, 6)).reshape(B, T, P, J - 1, 3, 3)
+            R_rel   = torch.matmul(R_pred, R_input.transpose(-2, -1))
+            cos_a   = ((R_rel.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2).clamp(-1 + 1e-7, 1 - 1e-7)
+            diag["diag/delta_kin_deg"] = float((torch.acos(cos_a) * (180.0 / math.pi)).mean().item())
+
+            # root_error_deg: geodesic angle between predicted world-frame root and GT.
+            if isinstance(targets, dict) and "pose" in targets:
+                root_pred = pose_aggr[:, :, :, 0, :]                           # (B, T, P, 6) world frame
+                root_gt   = targets["pose"][:, :, :, 0, :].float()             # (B, T, P, 6) world frame
+                R_rp = rotation_6d_to_matrix(root_pred.reshape(-1, 6)).reshape(B, T, P, 3, 3)
+                R_rg = rotation_6d_to_matrix(root_gt.reshape(-1, 6)).reshape(B, T, P, 3, 3)
+                R_rr = torch.matmul(R_rp, R_rg.transpose(-2, -1))
+                cos_r = ((R_rr.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2).clamp(-1 + 1e-7, 1 - 1e-7)
+                diag["diag/root_error_deg"] = float((torch.acos(cos_r) * (180.0 / math.pi)).mean().item())
+
+        # Camera error components ------------------------------------------
+        if (
+            len(preds) > 2
+            and isinstance(preds[2], torch.Tensor)
+            and isinstance(targets, dict)
+            and "camera" in targets
+        ):
+            camera_pred = preds[2].float()           # (B, T, K, 8)
+            cam_gt      = targets["camera"].float()  # (B, T, K, 8)
+            cam_valid   = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
+            if cam_valid.any():
+                cp = camera_pred[cam_valid]  # (N, 8)
+                cg = cam_gt[cam_valid]        # (N, 8)
+
+                q    = _F.normalize(cp[..., :4], dim=-1)
+                q_gt = _F.normalize(cg[..., :4], dim=-1)
+                dot  = (q * q_gt).sum(dim=-1).abs().clamp(max=1 - 1e-7)
+
+                rot_err_deg = torch.acos(dot) * (2.0 * 180.0 / math.pi)  # (N,)
+                trans_err_m = (cp[..., 4:7] - cg[..., 4:7]).norm(dim=-1)  # (N,)
+
+                diag["diag/camera_rot_deg"]   = float(rot_err_deg.mean().item())
+                diag["diag/camera_trans_m"]   = float(trans_err_m.mean().item())
+
+        return diag
+
     def _forward(self, inputs: Any) -> Any:
-        """
-        Forward pass in the model
-        """
+        # Use the unwrapped model during val (rank-0-only) to avoid DDP
+        # buffer-sync broadcasts that other ranks won't participate in.
+        m = self.model.module if (not self.model.training and isinstance(self.model, torch.nn.parallel.DistributedDataParallel)) else self.model
         if isinstance(inputs, dict):
-            return self.model(**inputs)
+            return m(**inputs)
         if isinstance(inputs, (list, tuple)):
-            return self.model(*inputs)
-        return self.model(inputs)
+            return m(*inputs)
+        return m(inputs)
 
     def _append_smplx_joints(self, preds: Any) -> Any:
         """Compute SMPL-X joints once and append as preds[8].
@@ -599,13 +749,22 @@ class Trainer:
         if not self.checkpoint_dir:
             return improved
 
+        # Unwrap DDP so checkpoint keys are plain model keys (no "module." prefix).
+        raw_model = getattr(self.model, "module", self.model)
         state = {
             "epoch": self._epoch,
             "step": self._step,
-            "model": self.model.state_dict(),
+            "model": raw_model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "best_val_loss": self._best_val_loss,
         }
+        if self.use_wandb:
+            try:
+                import wandb
+                if wandb.run:
+                    state["wandb_run_id"] = wandb.run.id
+            except Exception:
+                pass
         if self.scheduler:
             state["scheduler"] = self.scheduler.state_dict()
         if self._scaler:

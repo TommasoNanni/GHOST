@@ -30,6 +30,7 @@ from fusion.fusion_module import SSTNetwork, WindowedTemporalAttention
 from fusion.loss import (
     BoneLengthconsistencyLoss,
     CameraMSELoss,
+    CameraMSELossVGGT,
     EpipolarLoss,
     PoseMSELoss,
     ShapeMSELoss,
@@ -55,12 +56,22 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
 
 
-RICH_SCENE_DIR  = Path(
-    "/cluster/project/cvg/students/tnanni/ghost/test_outputs"
-    "/rich10_segmentation_test/BBQ_001_guitar"
+RICH_SCENE_DIR = Path(
+    "/iopsstor/scratch/cscs/tnanni/ghost_outputs"
+    "/rich11_segmentation_test/Pavallion_003_phonesiteat"
 )
 
-DISABLED_LOSSES: list[str] = []
+DISABLED_LOSSES: list[str] = [
+    "temporal", "bone", "shape_reg", "translation_temporal", "vposer",
+]
+
+# Set to True to bypass the camera head and use GT cameras for root back-projection.
+# This isolates whether root-orientation error comes from the camera head or the root head.
+FORCE_GT_CAMERAS: bool = False
+
+# Slice the sequence to the first MAX_T frames before training.
+# Set to None to use the full sequence.
+MAX_T: int = None
 
 
 def main():
@@ -96,12 +107,64 @@ def main():
     dp = RICHFusionDatapoint(scene_dir=RICH_SCENE_DIR, rich_data_root = CONFIG.data.rich_data_root)
     img_size = dp.img_size
     ds = RICHFusionDataset([dp])
+
+    if MAX_T is not None:
+        class _TemporalSliceDataset(torch.utils.data.Dataset):
+            def __init__(self, inner, t): self.inner = inner; self.t = t
+            def __len__(self): return len(self.inner)
+            def __getitem__(self, idx):
+                inp, tgt = self.inner[idx]
+                inp = {k: v[:self.t] if torch.is_tensor(v) and v.ndim >= 1 and v.shape[0] > self.t else v for k, v in inp.items()}
+                tgt = {k: v[:self.t] if torch.is_tensor(v) and v.ndim >= 1 and v.shape[0] > self.t else v for k, v in tgt.items()}
+                return inp, tgt
+        ds = _TemporalSliceDataset(ds, MAX_T)
+        logger.info(f"Slicing sequence to first {MAX_T} frames")
+
     inputs, targets = ds[0]
     # inputs:  dict ['pose', 'shape', 'camera', 'joint_mask', 'person_mask']
     # targets: dict ['pose', 'shape', 'camera', 'keypoints_3d']
     T = inputs["pose"].shape[0]
     print({k: tuple(v.shape) for k, v in inputs.items()})
-    # 'pose': (382, 8, 1, 55, 6), 'shape': (382, 8, 1, 10), 'camera': (382, 8, 8), 'joint_mask': (382, 8, 1, 55), 'person_mask': (382, 8, 1)
+
+    # ── Confidence distribution across cameras ────────────────────────────────
+    jm = inputs["joint_mask"]   # (T, K, P, J)
+    pm = inputs["person_mask"]  # (T, K, P) bool
+    _, K, P, J = jm.shape
+    logger.info("=== Confidence distribution per camera ===")
+    for k in range(K):
+        presence = pm[:, k, :].float().mean().item()          # fraction of frames where person detected
+        conf_k   = jm[:, k, :, :]                             # (T, P, J)
+        # only over frames where person is present
+        mask_k   = pm[:, k, :].unsqueeze(-1).expand_as(conf_k)
+        if mask_k.any():
+            vals = conf_k[mask_k]
+            logger.info(
+                f"  cam {k:2d}  presence={presence*100:.1f}%  "
+                f"joint_conf  mean={vals.mean():.3f}  "
+                f"median={vals.median():.3f}  "
+                f"min={vals.min():.3f}  "
+                f"p10={vals.float().quantile(0.10):.3f}  "
+                f"p25={vals.float().quantile(0.25):.3f}"
+            )
+        else:
+            logger.info(f"  cam {k:2d}  presence=0% — no detections")
+    logger.info("==========================================")
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if FORCE_GT_CAMERAS:
+        # Replace predicted cameras in inputs with GT cameras from targets so that
+        # the model back-projects root with perfect extrinsics. The delta in
+        # SSTOutputHeads is also zeroed (force_gt_cameras flag) so camera_out == GT.
+        class _GTCameraDataset(torch.utils.data.Dataset):
+            def __init__(self, inner): self.inner = inner
+            def __len__(self): return len(self.inner)
+            def __getitem__(self, idx):
+                inp, tgt = self.inner[idx]
+                inp = dict(inp)
+                inp["camera"] = tgt["camera"]
+                return inp, tgt
+        ds = _GTCameraDataset(ds)
+
     loader = DataLoader(ds, batch_size=batch_size, shuffle=False)
 
     logger.info(
@@ -119,6 +182,10 @@ def main():
         temporal_window=temporal_window,
         max_cameras=max_cameras,
     )
+
+    model.output_heads.force_gt_cameras = FORCE_GT_CAMERAS
+    if FORCE_GT_CAMERAS:
+        logger.info("force_gt_cameras=True: camera head delta zeroed, GT cameras used for back-projection")
 
     logger.info("\n" + model.summary())
 
@@ -144,12 +211,12 @@ def main():
         logger.warning(f"VPoserLoss unavailable ({e}); skipping.")
         vposer_loss = None
     _all_losses = {
-        "pose":            (PoseMSELoss(),                       pose_mse_weight),
+        "pose":            (PoseMSELoss(body_only=False),                       pose_mse_weight),
         "shape":           (ShapeMSELoss(),                      shape_mse_weight),
         "epipolar":        (EpipolarLoss(img_size=img_size),     epipolar_weight),
         "temporal":        (TemporalSmoothnessLoss(),            temporal_weight),
         "bone":            (BoneLengthconsistencyLoss(),         bone_length_weight),
-        "camera_mse":      (CameraMSELoss(img_size=img_size),    camera_mse_weight),
+        "camera_mse":      (CameraMSELossVGGT(),                  camera_mse_weight),
         "triangulation":   (TriangulationLoss(),                 triangulation_weight),
         "translation_mse":      (TranslationMSELoss(),                translation_mse_weight),
         "shape_reg":            (ShapeRegularizationLoss(),           shape_reg_weight),
@@ -253,9 +320,9 @@ def main():
                 mc["PA-MPJRE"].update(pr, gr)
 
     curriculum_schedule = {
-        0:   ["pose", "shape", "camera_mse", "shape_reg", "translation_temporal"],
-        25:  ["translation_mse", "temporal", "bone", "vposer"],
-        100: ["epipolar", "triangulation"],
+        0:   ["pose", "shape", "camera_mse", "translation_mse"],
+        100: ["temporal", "bone", "shape_reg", "translation_temporal", "vposer"],
+        200: ["epipolar", "triangulation"],
     }
 
     if CONFIG.fusion.use_wandb:
@@ -295,6 +362,7 @@ def main():
         batch = next(iter(loader))
         inputs, targets = trainer._unpack_batch(batch)
         preds = trainer._forward(inputs)
+        preds = trainer._append_smplx_joints(preds)
         final_loss = sum(w * fn(preds, targets).item() for fn, w in losses.values())
 
     logger.info(f"\nFinal combined loss: {final_loss:.6f}")

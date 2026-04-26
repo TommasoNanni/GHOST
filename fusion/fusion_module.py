@@ -883,6 +883,10 @@ class SSTOutputHeads(nn.Module):
 
     def __init__(self, embedding_dim: int):
         super().__init__()
+        # When True, the camera head delta is zeroed out so GT cameras pass through
+        # unchanged. Useful for diagnosing whether root-orientation errors come from
+        # the camera head or from the root head itself.
+        self.force_gt_cameras: bool = False
         self.pose_pool = CameraWeightedPooling(embedding_dim)
         self.pose_norm = nn.LayerNorm(embedding_dim)
         # Decodes kinematic joints 1-54 (camera-independent, after K-pooling).
@@ -904,6 +908,8 @@ class SSTOutputHeads(nn.Module):
             nn.Linear(embedding_dim, 10),
         )
         self.camera_norm = nn.LayerNorm(embedding_dim)
+        self.root_norm = nn.LayerNorm(embedding_dim)
+        self.trans_norm = nn.LayerNorm(embedding_dim)
         self.camera_rot_trans_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
@@ -913,24 +919,15 @@ class SSTOutputHeads(nn.Module):
         self.trans_head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim), nn.ReLU(), nn.Linear(embedding_dim, 3),
         )
-        # Near-zero init for all residual heads so delta ≈ 0 at start.
-        # All layers (including last) use std=1e-2 so gradients are not killed.
-        #
-        # History of tuning:
-        #  - kaiming (std≈0.088): delta≈0.14 → ~16° camera rotation at init → NaN epipolar.
-        #  - intermediate=1e-2, last=1e-3: delta≈0.0013 but gradient to kin_layers ≈ 2.6e-7
-        #    (killed by 1/K pooling + 1e-3 last layer) → kin_layers never updated → NaN at step 1.
-        #  - all=1e-2: delta = 1e-2² × D ≈ 0.0128 → ~1.5° rotation at init (acceptable).
-        #    Gradient to kin_layers ≈ 2.6e-6 — representable in float32, allows learning.
+        # Near-zero init only the last linear layer of each residual head.
+        # First layers keep Kaiming default so the Jacobian through the head is
+        # O(1e-2) rather than O((1e-2)^2), giving ~10× more gradient to the transformer.
+        # The last layer at std=1e-2 still ensures delta ≈ 0 at initialisation.
         with torch.no_grad():
-            for head in [self.pose_head_aggr,
-                         self.root_head,
-                         self.trans_head,
-                         self.camera_rot_trans_head]:
-                for layer in head:
-                    if isinstance(layer, nn.Linear):
-                        nn.init.normal_(layer.weight, std=1e-2)
-                        nn.init.zeros_(layer.bias)
+            for head in [self.pose_head_aggr, self.camera_rot_trans_head]:
+                linears = [m for m in head if isinstance(m, nn.Linear)]
+                nn.init.normal_(linears[-1].weight, std=1e-2)
+                nn.init.zeros_(linears[-1].bias)
 
     def forward(
         self,
@@ -963,7 +960,11 @@ class SSTOutputHeads(nn.Module):
         camera_flat = camera.reshape(BTK, D)
         rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
         # Camera 0 is the world origin — anchor it to identity rotation + zero translation.
-        rot_trans_delta[:, :, 0, :] = 0.0
+        # Out-of-place to preserve gradient flow through camera_stream.
+        cam0_zero = rot_trans_delta.new_zeros(B, T, 1, 7)
+        rot_trans_delta = torch.cat([cam0_zero, rot_trans_delta[:, :, 1:, :]], dim=2)
+        if self.force_gt_cameras:
+            rot_trans_delta = torch.zeros_like(rot_trans_delta)
         # Focal length (position 7) is the GT focal from calibration — pass through unchanged.
         # Normalize the quaternion after adding the delta: input_quat + delta is not unit,
         # and a non-unit quaternion in quaternion_to_matrix produces a non-orthogonal matrix
@@ -1007,7 +1008,13 @@ class SSTOutputHeads(nn.Module):
 
         # STEP 3: Root orient (joint 0): per-camera → back-project → mean
         # Decode per-camera delta in camera frame (no pooling).
-        root_feat = spatial_stream[:, :, :, :, 0, :]             # (B, T, K, P, D)
+        print(f"[HEAD ID] spatial_stream id={id(spatial_stream)} data_ptr={spatial_stream.data_ptr()}")
+        if spatial_stream.requires_grad:
+            spatial_stream.register_hook(lambda g: print(f"[HEAD GRAD] spatial_stream(inside_heads) max={g.abs().max().item():.3e}"))
+        _root_x = spatial_stream[:, :, :, :, 0, :]
+        root_feat = _root_x + (self.root_norm(_root_x) - _root_x).detach()  # (B, T, K, P, D)
+        if root_feat.requires_grad:
+            root_feat.register_hook(lambda g: print(f"[HEAD GRAD] root_feat max={g.abs().max().item():.3e}"))
         root_cam_delta = self.root_head(
             root_feat.reshape(BTK * P, D)
         ).reshape(B, T, K, P, 6)
@@ -1033,14 +1040,44 @@ class SSTOutputHeads(nn.Module):
             [R_body_world[:, 0, :], R_body_world[:, 1, :]], dim=-1
         ).reshape(B, T, K, P, 6)
 
-        # Confidence-weighted mean across cameras.
-        root_aggr = (
-            (body_orient_world_per_cam * person_visible.unsqueeze(-1)).sum(dim=2) / w_sum
-        )  # (B, T, P, 6)
+        # SO(3) mean via SVD: find the rotation minimising the sum of squared
+        # geodesic distances to all K per-camera world-frame estimates.
+        # Averaging 6D vectors in R^6 is wrong: the mean of two rotations that
+        # are far apart (e.g. due to camera extrinsic error) produces a
+        # geometrically arbitrary result after Gram-Schmidt normalisation.
+        # SVD gives the exact Fréchet mean on SO(3) and is differentiable.
+        from pytorch3d.transforms import matrix_to_rotation_6d
+        R_world  = R_body_world.reshape(B, T, K, P, 3, 3)
+        vis_mat  = person_visible.unsqueeze(-1).unsqueeze(-1)  # (B, T, K, P, 1, 1)
+        M        = (R_world * vis_mat).sum(dim=2)              # (B, T, P, 3, 3)
+        # Guard: all-absent (b,t,p) → M=0, SVD undefined. Add identity so SVD
+        # yields I for those positions (they are masked out in later losses anyway).
+        all_absent = (person_visible.sum(dim=2) == 0)          # (B, T, P)
+        if all_absent.any():
+            M = M + (all_absent.to(M.dtype).unsqueeze(-1).unsqueeze(-1)
+                     * torch.eye(3, device=M.device, dtype=M.dtype))
+        U, _, Vt = torch.linalg.svd(M)
+        # Ensure det = +1 (rotation, not reflection).
+        d         = torch.linalg.det(U) * torch.linalg.det(Vt)   # (B, T, P)
+        # Out-of-place: assigning d into a leaf ones-tensor would detach d from the graph.
+        ones2     = torch.ones(B, T, P, 2, device=M.device, dtype=M.dtype)
+        sign_diag = torch.cat([ones2, d.unsqueeze(-1)], dim=-1)
+        R_mean    = U @ torch.diag_embed(sign_diag) @ Vt          # (B, T, P, 3, 3)
+        root_aggr = matrix_to_rotation_6d(R_mean)                 # (B, T, P, 6)
+        if root_aggr.requires_grad:
+            root_aggr.register_hook(lambda g: print(f"[HEAD GRAD] root_aggr max={g.abs().max().item():.3e}"))
+        # Diversity check: if all root predictions are identical (collapsed), std≈0.
+        # Expected: nonzero std across T frames; near-zero std = mode collapse or bad init.
+        with torch.no_grad():
+            ra = root_aggr.detach()  # (B, T, P, 6)
+            print(f"[ROOT DIV] std={ra.std().item():.4e}  max={ra.max().item():.4e}  min={ra.min().item():.4e}")
         _nan_check("root_aggr", root_aggr)
 
         # STEP 4: Translation: per-camera → back-project → mean
-        trans_feat = spatial_stream[:, :, :, :, 1, :]            # (B, T, K, P, D)
+        _trans_x = spatial_stream[:, :, :, :, 1, :]
+        trans_feat = _trans_x + (self.trans_norm(_trans_x) - _trans_x).detach()  # (B, T, K, P, D)
+        if trans_feat.requires_grad:
+            trans_feat.register_hook(lambda g: print(f"[HEAD GRAD] trans_feat max={g.abs().max().item():.3e}"))
         body_transl_cam_delta = self.trans_head(
             trans_feat.reshape(BTK * P, D)
         ).reshape(B, T, K, P, 3)
@@ -1053,6 +1090,8 @@ class SSTOutputHeads(nn.Module):
         body_transl_world_per_cam = torch.bmm(
             body_transl_cam_flat - cam_transl_w2c_flat, cam_rot_w2c
         ).reshape(B, T, K, P, 3)
+        if body_transl_world_per_cam.requires_grad:
+            body_transl_world_per_cam.register_hook(lambda g: print(f"[HEAD GRAD] body_transl_world_per_cam max={g.abs().max().item():.3e}"))
         _nan_check("body_transl_cam", body_transl_cam)
         _nan_check("body_transl_world_per_cam", body_transl_world_per_cam)
 
@@ -1073,11 +1112,11 @@ class SSTOutputHeads(nn.Module):
             shape.reshape(B * T * K * P, D)
         ).reshape(B, T * K, P, 10)
         shape_all[visible_flat.unsqueeze(-1).expand_as(shape_all) == 0] = float('nan')
-        shape_aggr = torch.nanmedian(shape_all, dim=1).values                   # (B, P, 10)
+        shape_aggr = torch.nanmean(shape_all, dim=1)                             # (B, P, 10)
         input_flat = shape_input.reshape(B, T * K, P, 10).clone()
         input_flat[visible_flat.unsqueeze(-1).expand_as(input_flat) == 0] = float('nan')
-        input_median = torch.nanmedian(input_flat, dim=1).values.nan_to_num(0.0)
-        shape_aggr = torch.where(shape_aggr.isnan(), input_median, shape_aggr)
+        input_mean = torch.nanmean(input_flat, dim=1).nan_to_num(0.0)
+        shape_aggr = torch.where(shape_aggr.isnan(), input_mean, shape_aggr)
 
         # body_orient_world_per_cam and body_transl_world_per_cam are the per-camera world-frame estimates
         # before aggregation — exposed for the triangulation loss.
@@ -1252,10 +1291,27 @@ class SSTNetwork(nn.Module):
         _nc("emb/trans_emb", trans_emb)
 
         # Spatial stream: [root_orient(0), translation(1)] — attend cameras.
+        # Camera pose encoding injected once here to give each spatial token its geometric
+        # camera identity before the first attention layer. Previously this was re-added
+        # at every layer iteration (cumulative), which caused the same fixed PE to
+        # accumulate L times and overwhelm the learned body features.
+        cam_pe = self.camera_pose_encoding(camera).unsqueeze(3).unsqueeze(4)  # (B,T,K,1,1,D)
         spatial_stream = torch.cat([
             pose_emb[:, :, :, :, :1, :],   # root orient  (B,T,K,P,1,D)
             trans_emb.unsqueeze(4),          # translation  (B,T,K,P,1,D)
-        ], dim=4)                            # → (B,T,K,P,2,D)
+        ], dim=4) + cam_pe                   # → (B,T,K,P,2,D)
+
+        _spatial_grad_step = [0]
+        def _hook_spatial(tag):
+            def _h(g):
+                print(f"[SPATIAL GRAD] step={_spatial_grad_step[0]}  {tag}  "
+                      f"norm={g.float().norm().item():.4e}  "
+                      f"max={g.float().abs().max().item():.4e}")
+            return _h
+        def _reg(t, tag):
+            if t.requires_grad:
+                t.register_hook(_hook_spatial(tag))
+            return t
 
         # Kinematic stream: 54 body joints — no camera cross-attn.
         kin_stream = pose_emb[:, :, :, :, 1:, :]  # (B,T,K,P,54,D)
@@ -1307,21 +1363,12 @@ class SSTNetwork(nn.Module):
         shape_stream = shape_emb
         camera_stream = camera_emb
 
-        # Camera pose geometric PE: (B, T, K, D) — computed once from the raw
-        # camera extrinsics (fixed geometry, not updated by the network).
-        # Broadcast shape for spatial stream: (B, T, K, 1, 1, D).
-        camera_pose_emb = self.camera_pose_encoding(camera).unsqueeze(3).unsqueeze(4)
-
         for layer_idx in range(self.num_layers):
             pe = self.temporal_pe if layer_idx == 0 else None
 
             # Re-inject IDs before every self-attn so each token retains its identity.
             kin_stream    = kin_stream    + joint_ids
             camera_stream = camera_stream + self.camera_id_embedding.weight[:K]
-            # Re-inject camera pose PE into the spatial stream before each layer.
-            # This tells the cross-view attention which camera frame each
-            # (root_orient, translation) token is expressed in.
-            spatial_stream = spatial_stream + camera_pose_emb
             kin_stream = self.kin_layers[layer_idx](
                 kin_stream, B, T, K, P, 54, D, H,
                 joint_mask=kin_joint_mask,
@@ -1333,6 +1380,7 @@ class SSTNetwork(nn.Module):
             _nc(f"layer{layer_idx}/kin_stream", kin_stream)
 
             # Spatial stream: root + translation attend each other, cameras, time.
+            _reg(spatial_stream, f"L{layer_idx}/0_after_cam_pe")
             spatial_stream = self.spatial_layers[layer_idx](
                 spatial_stream, B, T, K, P, 2, D, H,
                 joint_mask=sp_joint_mask,
@@ -1341,6 +1389,7 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
             )
+            _reg(spatial_stream, f"L{layer_idx}/1_after_spatial_layer")
             _nc(f"layer{layer_idx}/spatial_stream", spatial_stream)
 
             camera_stream = self.camera_layers[layer_idx](
@@ -1357,11 +1406,14 @@ class SSTNetwork(nn.Module):
                 B, T, K, P, 2, D, self.dropout,
                 cam_vis=camera_visible,
             )
+            _reg(spatial_stream, f"L{layer_idx}/2_after_cam_attn")
             _nc(f"layer{layer_idx}/spatial_stream_post_cam_attn", spatial_stream)
             _nc(f"layer{layer_idx}/camera_stream_post_cam_attn", camera_stream)
 
             # One-directional: kinematic joints inform spatial tokens (not reverse).
             spatial_stream = self.kin_to_spatial_attns[layer_idx](spatial_stream, kin_stream, kin_conf=kin_mask)
+            _reg(spatial_stream, f"L{layer_idx}/3_after_kin2sp")
+            print(f"[LOOP ID] L{layer_idx}/3 spatial_stream id={id(spatial_stream)} data_ptr={spatial_stream.data_ptr()}")
             _nc(f"layer{layer_idx}/spatial_stream_post_kin2sp", spatial_stream)
 
             shape_stream = self.shape_layers[layer_idx](

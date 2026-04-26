@@ -140,6 +140,14 @@ class FusionDatapoint(Dataset, ABC):
         )
 
     @property
+    def num_frames(self) -> int:
+        return self._frame_end - self._frame_start
+
+    @property
+    def has_gt(self) -> bool:
+        return bool(self._gt) and any(len(g) > 0 for g in self._gt)
+
+    @property
     def img_size(self) -> tuple[int, int]:
         """(H, W) of the source images, read lazily from the first mask frame."""
         if self._img_size is None:
@@ -808,6 +816,11 @@ class RICHFusionDatapoint(FusionDatapoint):
             R0 = ext0[:3, :3].astype(np.float64)
             t0 = ext0[:3, 3].astype(np.float64)
             for i, calib in enumerate(self._cameras):
+                if i == 0:
+                    # Camera 0 is the world origin by definition — set exactly to identity.
+                    self._gt_camera_vecs[0][:4] = np.array([1., 0., 0., 0.], dtype=np.float32)
+                    self._gt_camera_vecs[0][4:7] = np.zeros(3, dtype=np.float32)
+                    continue
                 ext_i = calib.get("extrinsics")
                 if ext_i is None:
                     continue
@@ -1389,6 +1402,10 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
             R0 = ext0[:3, :3].astype(np.float64)
             t0 = ext0[:3, 3].astype(np.float64)
             for i, calib in enumerate(self._cameras):
+                if i == 0:
+                    self._gt_camera_vecs[0][:4] = np.array([1., 0., 0., 0.], dtype=np.float32)
+                    self._gt_camera_vecs[0][4:7] = np.zeros(3, dtype=np.float32)
+                    continue
                 ext_i = calib["extrinsics"]
                 R_rel = ext_i[:3, :3].astype(np.float64) @ R0.T
                 t_rel = ext_i[:3, 3].astype(np.float64) - R_rel @ t0
