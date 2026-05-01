@@ -308,7 +308,7 @@ class Trainer:
             inputs, targets = self._unpack_batch(batch)
             scene_name = targets.get("scene_name", ["unknown"])[0] \
                          if isinstance(targets, dict) else "unknown"
-            with torch.amp.autocast('cuda', enabled=self.use_amp):
+            with torch.amp.autocast('cuda', enabled=self.use_amp, dtype=torch.bfloat16):
                 preds = self._forward(inputs)
             pose_aggr, shape_aggr, camera_pred, body_transl_world = preds[:4]
 
@@ -430,7 +430,7 @@ class Trainer:
                 # so that DivBackward0 / other NaN ops are traced to their source.
                 _detect = self._step == 0
                 with torch.autograd.detect_anomaly(check_nan=_detect), \
-                     torch.amp.autocast('cuda', enabled=self.use_amp):
+                     torch.amp.autocast('cuda', enabled=self.use_amp, dtype=torch.bfloat16):
                     preds = self._forward(inputs)
                     preds = self._append_smplx_joints(preds)
 
@@ -504,7 +504,7 @@ class Trainer:
                 if nan_modules:
                     logger.warning(
                         f"[BACKWARD NaN] {scene}  step={self._step}  "
-                        f"modules={sorted(nan_modules)}"
+                        f"modules={sorted(nan_modules)}  — skipping optimizer step"
                     )
                 if self.use_wandb and self.is_main_process and module_grad_norms:
                     import wandb
@@ -514,15 +514,16 @@ class Trainer:
                     )
                 # ─────────────────────────────────────────────────────────────
 
-                if self.grad_clip:
-                    nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-                self.optimizer.step()
+                if not nan_modules:
+                    if self.grad_clip:
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                    self.optimizer.step()
 
                 clear_smplx_cache()
                 self._step += 1
             else:
                 # Validation step
-                with torch.no_grad(), torch.amp.autocast('cuda', enabled=self.use_amp):
+                with torch.no_grad(), torch.amp.autocast('cuda', enabled=self.use_amp, dtype=torch.bfloat16):
                     preds = self._forward(inputs)
                     preds = self._append_smplx_joints(preds)
                     step_losses = {name: fn(preds, targets) for name, (fn, _) in active_losses.items()}
