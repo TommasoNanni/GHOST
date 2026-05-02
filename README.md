@@ -23,21 +23,44 @@ unzip assets.zip
 
 git clone https://github.com/nghorbani/human_body_prior.git
 ```
-Then make sure you have [pixi](https://github.com/prefix-dev/pixi) installed, since the code uses pixi for installation.
+Then make sure you have [pixi](https://github.com/prefix-dev/pixi) installed, since the code uses pixi for environment management.
+
+#### x86-64 (standard workstation / GPU node)
+
 ```bash
 pixi install
 pixi run setup-cuda
-pixi run download-model # download sam3
-pici run install-hbp
+pixi run download-model  # download SAM3 weights
+pixi run install-hbp
 ```
-In case you are on a devicee without GPU available (or on a login node on a cluster)
+
+On a login node without a GPU driver (e.g. a SLURM cluster), prefix every command with `CONDA_OVERRIDE_CUDA=12.6`:
+
 ```bash
 CONDA_OVERRIDE_CUDA=12.6 pixi install
 CONDA_OVERRIDE_CUDA=12.6 pixi run setup-cuda
 CONDA_OVERRIDE_CUDA=12.6 pixi run download-model
 CONDA_OVERRIDE_CUDA=12.6 pixi run install-hbp
 ```
-We built this project using python 3.12 and torch 2.7.1 with cuda 12.6 support.
+
+#### aarch64 (e.g. CSCS Alps cluster)
+
+`pymomentum` and `decord` have no aarch64 binary wheels and must be built from source. Two intermediate C++ libraries (Apache Arrow and the Rerun C++ SDK) must be compiled first because the default pymomentum build chain tries to build them inside a temporary directory in a way that fails on aarch64 with CMake 4.x.
+
+Run the following sequence **after** `pixi install` and `setup-cuda`:
+
+```bash
+CONDA_OVERRIDE_CUDA=12.6 pixi run build-arrow        # ~5 min  — Arrow 18 static lib (no mimalloc)
+CONDA_OVERRIDE_CUDA=12.6 pixi run build-rerun-sdk    # ~2 min  — Rerun C++ SDK using that Arrow
+CONDA_OVERRIDE_CUDA=12.6 pixi run install-pymomentum # ~20 min — compiles ~550 C++ files
+CONDA_OVERRIDE_CUDA=12.6 pixi run install-decord     # ~5 min  — video decoder from source
+```
+
+**Note:** `build-arrow` and `build-rerun-sdk` write intermediate files to `/tmp`, which is wiped on reboot. If `import pymomentum` breaks after a reboot, re-run all four steps above — they are fully idempotent.
+
+Also note that `import torch` must appear before `import pymomentum` in any script (the conda environment contains a CPU-only `libc10.so` that would otherwise be loaded first). This is already the case everywhere in the ghost pipeline.
+
+This project uses Python 3.12 and PyTorch 2.7.1 with CUDA 12.8 support.
 
 Moreover, make sure to have SMPLX and SMPL body models installed in `ghost/body_models/`. Download the `SMPLX_NEUTRAL.pkl` and `SMPL_NEUTRAL.pkl` body models from [SMPL-X](https://smpl-x.is.tue.mpg.de/).
 
