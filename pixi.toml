@@ -77,6 +77,34 @@ pymomentum = ">=0.1.90"
 [target.linux-64.pypi-dependencies]
 decord = ">=0.6.0, <0.7"
 
+[target.linux-aarch64.dependencies]
+# Build deps for decord (no aarch64 wheels on PyPI — built from source)
+cmake = ">=3.21"
+ninja = "*"
+pkg-config = "*"
+ffmpeg = ">=4, <5"
+# Build deps for pymomentum (conda-forge package is linux-64 only — built from source)
+eigen = "3.4.*"
+boost-cpp = "*"
+fmt = ">=8"
+spdlog = ">=1.9"
+nlohmann_json = ">=3.11"
+re2 = "*"
+dispenso = "*"
+ceres-solver = "*"
+glog = "*"
+pybind11 = "*"
+cli11 = "*"
+ezc3d = "*"
+ms-gsl = "*"
+fx-gltf = "*"
+indicators = ">=2.3"
+sophus = "*"
+openfbx = "*"
+urdfdom = "*"
+cuda-nvtx = "*"
+
+
 [tasks]
 # Replaces the conda CPU-only torch with a CUDA 12.6 build from PyTorch's index.
 # Run this once after `pixi install`: pixi run setup-cuda
@@ -89,5 +117,13 @@ install-hbp = "python -m pip install -e ./human_body_prior --no-deps"
 [target.linux-64.tasks]
 setup-cuda = "python -m pip install --force-reinstall 'torch==2.7.1+cu128' 'torchvision==0.22.1+cu128' --index-url https://download.pytorch.org/whl/cu128 && python -m pip install --no-build-isolation 'git+https://github.com/facebookresearch/pytorch3d.git'"
 
+[target.linux-aarch64.pypi-dependencies]
+scikit-build-core = "*"
+drjit = "*"
+
 [target.linux-aarch64.tasks]
 setup-cuda = "python -m pip install --force-reinstall 'torch==2.7.1+cu128' 'torchvision==0.22.1' --index-url https://download.pytorch.org/whl/cu128 && python -m pip install --no-build-isolation 'git+https://github.com/facebookresearch/pytorch3d.git'"
+build-arrow = "mkdir -p /tmp/arrow_src /tmp/arrow_build /tmp/arrow_install && curl -sL https://github.com/apache/arrow/releases/download/apache-arrow-18.0.0/apache-arrow-18.0.0.tar.gz -o /tmp/arrow_src/arrow.tar.gz && tar xf /tmp/arrow_src/arrow.tar.gz -C /tmp/arrow_src --strip-components=1 && cmake -S /tmp/arrow_src/cpp -B /tmp/arrow_build --preset ninja-release-minimal -DARROW_BOOST_USE_SHARED=OFF -DARROW_BUILD_SHARED=OFF -DARROW_BUILD_STATIC=ON -DARROW_COMPUTE=OFF -DARROW_IPC=ON -DARROW_JEMALLOC=OFF -DARROW_MIMALLOC=OFF -DBOOST_SOURCE=BUNDLED -DCMAKE_INSTALL_PREFIX=/tmp/arrow_install -DCMAKE_INSTALL_LIBDIR=lib -Dxsimd_SOURCE=BUNDLED -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build /tmp/arrow_build -j$(nproc) && cmake --install /tmp/arrow_build"
+build-rerun-sdk = "curl -sL https://github.com/rerun-io/rerun/releases/download/0.28.2/rerun_cpp_sdk-0.28.2-multiplatform.zip -o /tmp/rerun_cpp_sdk.zip && mkdir -p /tmp/rerun_sdk_src /tmp/rerun_sdk_build /tmp/rerun_sdk_install && unzip -o /tmp/rerun_cpp_sdk.zip -d /tmp/rerun_sdk_src && cmake -S /tmp/rerun_sdk_src/rerun_cpp_sdk -B /tmp/rerun_sdk_build -DRERUN_DOWNLOAD_AND_BUILD_ARROW=OFF -DRERUN_ARROW_LINK_SHARED=OFF -DArrow_DIR=/tmp/arrow_install/lib/cmake/Arrow -DCMAKE_INSTALL_PREFIX=/tmp/rerun_sdk_install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build /tmp/rerun_sdk_build -j$(nproc) && cmake --install /tmp/rerun_sdk_build"
+install-pymomentum = "ln -sf $CONDA_PREFIX/share/eigen3 $CONDA_PREFIX/share/Eigen3 && ln -sf $CONDA_PREFIX/targets/sbsa-linux/lib/libnvToolsExt.so.1 $CONDA_PREFIX/targets/sbsa-linux/lib/libnvToolsExt.so && echo '#pragma once' > $CONDA_PREFIX/targets/sbsa-linux/include/nvToolsExt.h && CMAKE_ARGS=\"$CMAKE_ARGS -DMOMENTUM_BUILD_RENDERER=OFF -DMOMENTUM_BUILD_TESTING=OFF -DMOMENTUM_USE_SYSTEM_RERUN_CPP_SDK=ON -Drerun_sdk_DIR=/tmp/rerun_sdk_install/lib/cmake/rerun_sdk -DArrow_DIR=/tmp/arrow_install/lib/cmake/Arrow -DCMAKE_CUDA_COMPILER=$CONDA_PREFIX/bin/nvcc -DCUDA_TOOLKIT_ROOT_DIR=$CONDA_PREFIX/targets/sbsa-linux -DCUDAToolkit_ROOT=$CONDA_PREFIX/targets/sbsa-linux\" CXXFLAGS=\"$CXXFLAGS -fsigned-char\" python -m pip install --no-build-isolation --no-cache-dir 'pymomentum @ git+https://github.com/facebookresearch/momentum.git' && PYMOMENTUM_DIR=$CONDA_PREFIX/lib/python3.12/site-packages/pymomentum && for f in $PYMOMENTUM_DIR/*.so; do /tmp/patchelf_bin/bin/patchelf --set-rpath \"\\$ORIGIN/../torch/lib:$CONDA_PREFIX/lib\" \"$f\" 2>/dev/null; done"
+install-decord = "tmpdir=$(mktemp -d) && git clone --recursive https://github.com/dmlc/decord.git $tmpdir && mkdir -p $tmpdir/build && cmake -S $tmpdir -B $tmpdir/build -DUSE_CUDA=0 -DCMAKE_BUILD_TYPE=Release && make -C $tmpdir/build -j$(nproc) && python -m pip install $tmpdir/python"
