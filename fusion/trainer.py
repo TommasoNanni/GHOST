@@ -471,6 +471,10 @@ class Trainer:
                         )
                     # ─────────────────────────────────────────────────────────
 
+                    # Forward SAM3D observed 2D keypoints to losses (used by EpipolarLoss).
+                    if "kp2d" in inputs:
+                        targets["kp2d"] = inputs["kp2d"]
+
                     step_losses = {name: fn(preds, targets) for name, (fn, _) in active_losses.items()}
 
                 # ── forward NaN/inf check ─────────────────────────────────────
@@ -653,7 +657,9 @@ class Trainer:
         # buffer-sync broadcasts that other ranks won't participate in.
         m = self.model.module if (not self.model.training and isinstance(self.model, torch.nn.parallel.DistributedDataParallel)) else self.model
         if isinstance(inputs, dict):
-            return m(**inputs)
+            # kp2d is a loss-only input (observed 2D keypoints); SSTNetwork doesn't accept it.
+            model_inputs = {k: v for k, v in inputs.items() if k != "kp2d"}
+            return m(**model_inputs)
         if isinstance(inputs, (list, tuple)):
             return m(*inputs)
         return m(inputs)

@@ -81,6 +81,7 @@ SCENES_ROOT = Path(CONFIG.data.output_directory)
 # Scenes to exclude (broken ReID or other issues).
 # Add scene directory names here to skip them.
 SKIP_SCENES: list[str] = [
+    "Pavallion_013_plankjack" # FIXME likely bad, to check
 ]
 # Per-scene cameras to exclude (e.g. track-stealing artefacts).
 SKIP_CAMERAS: dict[str, list[str]] = {
@@ -214,8 +215,8 @@ def main():
     if not train_dps:
         raise RuntimeError("No valid training scenes could be loaded.")
 
-    train_ds = RICHFusionDataset(train_dps)  # type: ignore[arg-type]
-    val_ds   = RICHFusionDataset(val_dps) if val_dps else None  # type: ignore[arg-type]
+    train_ds = RICHFusionDataset(train_dps, augment=True)   # type: ignore[arg-type]
+    val_ds   = RICHFusionDataset(val_dps)  if val_dps else None  # type: ignore[arg-type]
 
     # ── Architecture ──────────────────────────────────────────────────────────
     embedding_dim    = CONFIG.fusion.architecture.embedding_dimension

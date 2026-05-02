@@ -100,67 +100,48 @@ class EpipolarLoss(Loss):
             return pose_aggr.new_zeros([])
         B, T, P = pose_aggr.shape[:3]
 
-        # joints_world precomputed once per step in Trainer._append_smplx_joints
-        joints_world = preds[8]                                                 # (B, T, P, Jsmplx, 3)
-        Jsmplx = joints_world.shape[3]
-        flat_world = joints_world.reshape(B * T, P * Jsmplx, 3)                # (B*T, P*J, 3)
-
-        if DEBUG_MEMORY:
-            mem = torch.cuda.memory_allocated(pose_aggr.device) / 1024**3
-            print(f"[EpipolarLoss] B={B} T={T} P={P} K={K} — using precomputed joints. "
-                  f"GPU mem: {mem:.2f} GB")
+        # kp2d: SAM3D observed 2D keypoints in pixel space (B, T, K, P, 70, 2).
+        # Forwarded from inputs by the trainer.  Without real observations the
+        # epipolar constraint is trivially zero (any 3D point re-projected through
+        # the same cameras that defined F will satisfy x^T F x = 0 algebraically).
+        kp2d_obs = targets.get("kp2d")
+        if kp2d_obs is None:
+            return pose_aggr.new_zeros([])
 
         num_pairs = 0
         total_loss = pose_aggr.new_zeros([])
         img_diag2 = float(self.img_size[0] ** 2 + self.img_size[1] ** 2)
 
-
         for i in range(K):
             for j in range(i + 1, K):
-                R_i, t_i, K_i = extract_cameras(camera[:, :, i], self.img_size)  # (B, T, 3, 3/3/3x3)
+                R_i, t_i, K_i = extract_cameras(camera[:, :, i], self.img_size)
                 R_j, t_j, K_j = extract_cameras(camera[:, :, j], self.img_size)
                 F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
 
-                vi_cam = (torch.bmm(flat_world, R_i.reshape(B * T, 3, 3).transpose(-2, -1))
-                          + t_i.reshape(B * T, 1, 3)).reshape(B, T, P, Jsmplx, 3)
-                vj_cam = (torch.bmm(flat_world, R_j.reshape(B * T, 3, 3).transpose(-2, -1))
-                          + t_j.reshape(B * T, 1, 3)).reshape(B, T, P, Jsmplx, 3)
+                # Observed 2D keypoints from SAM3D (pixel space) — independent of
+                # the model's own camera/pose estimates, so the constraint is real.
+                obs_i = kp2d_obs[:, :, i]   # (B, T, P, 70, 2)
+                obs_j = kp2d_obs[:, :, j]   # (B, T, P, 70, 2)
 
-                behind_i = vi_cam[..., 2] <= 0
-                behind_j = vj_cam[..., 2] <= 0
+                # Valid: detected in both cameras (undetected frames have kp2d=0).
+                valid = (obs_i.abs().sum(-1) > 0) & (obs_j.abs().sum(-1) > 0)  # (B, T, P, 70)
+                if not valid.any():
+                    continue
 
-                # Clamp z to a minimum depth before projection so that behind-camera
-                # joints produce finite (not inf/NaN) 2D coordinates.  The clamp
-                # gradient is 0 for clamped joints, so they receive no gradient —
-                # same effect as masking, but without the 0 × inf = NaN problem that
-                # torch.where causes when the unmasked values are already infinite.
-                # Use cat (out-of-place) to avoid inplace modification of graph tensors.
-                vi_cam_safe = torch.cat([vi_cam[..., :2], vi_cam[..., 2:3].clamp(min=1e-2)], dim=-1)
-                vj_cam_safe = torch.cat([vj_cam[..., :2], vj_cam[..., 2:3].clamp(min=1e-2)], dim=-1)
+                ones = obs_i.new_ones(*obs_i.shape[:-1], 1)
+                x_i = torch.cat([obs_i, ones], dim=-1)   # (B, T, P, 70, 3) homogeneous
+                x_j = torch.cat([obs_j, ones], dim=-1)
 
-                x_i = project_to_2d(vi_cam_safe, K_i)
-                x_j = project_to_2d(vj_cam_safe, K_j)
-
-                errors  = self.compute_epipolar_errors(x_i, x_j, F)
-                visible  = ~behind_i & ~behind_j
-
-                n_behind = int((behind_i | behind_j).sum().item())
-                if n_behind > 0:
-                    logger.warning(
-                        f"[EpipolarLoss] cam pair ({i},{j}): {n_behind} joints behind camera "
-                        f"(cam{i}: {int(behind_i.sum())}, cam{j}: {int(behind_j.sum())}) — "
-                        f"excluded from loss. This should not happen with well-initialised cameras."
-                    )
-
-                # Use torch.where instead of multiplying by the mask: avoids 0 × inf = NaN
-                # when joints project behind a camera (z ≤ 0 → huge projection → inf error).
-                safe_errors = torch.where(visible, errors, errors.new_zeros([]))
+                errors = self.compute_epipolar_errors(x_i, x_j, F)   # (B, T, P, 70)
+                safe_errors = torch.where(valid, errors, errors.new_zeros([]))
                 total_loss = total_loss + (
                     safe_errors.sum() / img_diag2
-                    / (visible.sum() + 1e-8)
+                    / (valid.sum() + 1e-8)
                 )
                 num_pairs += 1
 
+        if num_pairs == 0:
+            return pose_aggr.new_zeros([])
         result = total_loss / num_pairs
         if not result.isfinite():
             logger.warning(f"[EpipolarLoss] loss is non-finite: {result.item()}")

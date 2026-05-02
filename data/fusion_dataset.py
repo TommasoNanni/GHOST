@@ -254,6 +254,15 @@ class FusionDatapoint(Dataset, ABC):
         cam[7] = _f if _f > 20.0 else float(np.log(np.expm1(_f) + 1e-6))
         return cam
 
+    def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
+        """Fill gt_camera with static per-camera extrinsics across all T frames.
+
+        Called once after the per-frame data loop. Default is a no-op; subclasses
+        with fixed calibration (e.g. RICH) override this to stamp their calibration
+        vectors for every frame so that cameras with no detected person in a given
+        frame still carry a valid quaternion (norm > 0) in targets["camera"].
+        """
+
     def build_gt_targets(
         self,
         cam_idx: int,
@@ -353,7 +362,8 @@ class FusionDatapoint(Dataset, ABC):
         # Binary presence mask: 1 when person p was detected in camera k at frame t.
         # Stored as bool to save memory; shape (T, K, P).
         person_mask = np.zeros((T, K, P), dtype=bool)
-        kp3d = np.zeros((T, K, P, 70, 3), dtype=np.float32)
+        kp3d  = np.zeros((T, K, P, 70, 3), dtype=np.float32)
+        kp2d  = np.zeros((T, K, P, 70, 2), dtype=np.float32)
 
         # Target arrays (may be overwritten by build_gt_targets).
         gt_body_pose = np.zeros_like(pose)                              # ground-truth body pose (T, K, P, J, 6)
@@ -455,6 +465,11 @@ class FusionDatapoint(Dataset, ABC):
                     if kp is not None:
                         kp3d[t, k, p_slot] = kp[li]
 
+                    # --- 2D keypoints (pixel space, used by EpipolarLoss) ---
+                    kp2 = pdata.get("pred_keypoints_2d")
+                    if kp2 is not None:
+                        kp2d[t, k, p_slot] = kp2[li]
+
                     # --- GT targets (subclass fills if available) ---
                     self.build_gt_targets(
                         cam_idx=k,
@@ -468,6 +483,12 @@ class FusionDatapoint(Dataset, ABC):
                         kp3d_out=gt_kp3d[t, k, p_slot],
                         transl_out=gt_body_transl_world[t, k, p_slot],
                     )
+
+        # Give subclasses a chance to fill static (per-camera, not per-frame) GT camera
+        # vectors for all T frames.  Must happen before the self-supervised fallback below
+        # so that cameras present in calibration but absent from person detections still
+        # carry a valid quaternion (norm > 0).
+        self._fill_static_gt_cameras(gt_camera)
 
         # Default self-supervised targets: mirror inputs where GT wasn't set.
         _has_gt = any(len(g) > 0 for g in self._gt) if self._gt else False
@@ -484,6 +505,7 @@ class FusionDatapoint(Dataset, ABC):
             "camera": torch.from_numpy(camera),
             "joint_mask": torch.from_numpy(joint_mask),
             "person_mask": torch.from_numpy(person_mask),            # (T, K, P) bool
+            "kp2d": torch.from_numpy(kp2d),                         # (T, K, P, 70, 2) SAM3D 2D keypoints, pixel space
         }
         # gt_valid: True for frames that have real GT annotations.
         # Frames with all-zero gt_body_transl_world have no RICH annotation and must be
@@ -1148,6 +1170,11 @@ class RICHFusionDatapoint(FusionDatapoint):
                 f"— excluded from batch"
             )
 
+    def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
+        for k, vec in enumerate(self._gt_camera_vecs):
+            if k < gt_camera.shape[1]:
+                gt_camera[:, k] = vec
+
     def build_gt_targets(
         self,
         cam_idx: int,
@@ -1482,6 +1509,11 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
         cam[7] = focal_gt
         return cam
 
+    def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
+        for k, vec in enumerate(self._gt_camera_vecs):
+            if k < gt_camera.shape[1]:
+                gt_camera[:, k] = vec
+
     def build_gt_targets(
         self,
         cam_idx: int,
@@ -1508,20 +1540,147 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
 # Dataset (collection of datapoints)
 # ======================================================================
 
+def _swap_reference_camera(
+    inputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    ref: int,
+) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    """Data augmentation: change the world reference frame to camera ``ref``.
+
+    The model assumes camera 0 is always the world origin (identity extrinsic).
+    Without augmentation it always sees the same 50 fixed camera layouts and
+    memorises them rather than learning generalizable relative geometry.
+
+    This function produces an equivalent sample where camera ``ref`` takes the
+    role of camera 0:
+      - Camera ``ref`` becomes identity in the new world frame (by definition).
+      - All other cameras are re-expressed relative to camera ``ref`` instead
+        of camera 0.  Concretely, for camera k with old extrinsic (R_k, t_k):
+            new_R_k = R_k @ R_ref^T
+            new_t_k = t_k - new_R_k @ t_ref
+      - The indices 0 and ``ref`` are then swapped in the K dimension of every
+        K-shaped tensor so that the new reference sits at position 0, matching
+        the model's convention.
+      - World-frame GT quantities (body translation, 3D keypoints, root
+        orientation) are rotated and translated into the new frame:
+            P_new = R_ref @ P_old + t_ref
+
+    The transform is defined using GT camera extrinsics (not predicted ones) so
+    the augmented targets are always geometrically correct regardless of the
+    current model state.
+
+    Over a training epoch with K cameras per scene this produces K distinct
+    views of each scene, forcing the model to learn geometry that is invariant
+    to which camera happens to be designated as the reference.
+    """
+    from pytorch3d.transforms import (
+        quaternion_to_matrix, matrix_to_quaternion,
+        rotation_6d_to_matrix, matrix_to_rotation_6d,
+    )
+
+    cam_gt = targets["camera"]   # (T, K, 8)  [qw,qx,qy,qz, tx,ty,tz, focal_raw]
+    T, K, _ = cam_gt.shape
+
+    # Skip augmentation if GT camera for ``ref`` is missing (zero quaternion).
+    if cam_gt[:, ref, :4].norm(dim=-1).mean().item() < 0.5:
+        return inputs, targets
+
+    q_ref = cam_gt[:, ref, :4]           # (T, 4)  [qw,qx,qy,qz]
+    t_ref = cam_gt[:, ref, 4:7]          # (T, 3)
+    R_ref   = quaternion_to_matrix(q_ref)          # (T, 3, 3)
+    R_ref_T = R_ref.transpose(-2, -1)              # (T, 3, 3)
+
+    def _retransform_cameras(cam: torch.Tensor) -> torch.Tensor:
+        """Re-express a (T, K, 8) camera tensor relative to the new reference."""
+        cam = cam.clone()
+        for k in range(K):
+            R_k    = quaternion_to_matrix(cam[:, k, :4])            # (T, 3, 3)
+            t_k    = cam[:, k, 4:7]                                  # (T, 3)
+            new_R  = torch.bmm(R_k, R_ref_T)                         # (T, 3, 3)
+            new_t  = t_k - torch.bmm(new_R, t_ref.unsqueeze(-1)).squeeze(-1)  # (T, 3)
+            cam[:, k, :4] = matrix_to_quaternion(new_R)
+            cam[:, k, 4:7] = new_t
+        return cam
+
+    def _swap_k(t: torch.Tensor) -> torch.Tensor:
+        t = t.clone()
+        t[:, [0, ref]] = t[:, [ref, 0]]
+        return t
+
+    # ── Transform + swap camera tensors ────────────────────────────────
+    new_cam_in = _swap_k(_retransform_cameras(inputs["camera"]))
+    new_cam_gt = _swap_k(_retransform_cameras(cam_gt))
+
+    # ── Swap K dim for all other K-shaped inputs ────────────────────────
+    new_inputs = {
+        k: (_swap_k(v) if isinstance(v, torch.Tensor) and v.dim() >= 2 and v.shape[1] == K else v)
+        for k, v in inputs.items()
+    }
+    new_inputs["camera"] = new_cam_in
+
+    new_targets = dict(targets)
+    new_targets["camera"] = new_cam_gt
+    if "kp2d" in new_targets and isinstance(new_targets["kp2d"], torch.Tensor) and new_targets["kp2d"].shape[1] == K:
+        new_targets["kp2d"] = _swap_k(new_targets["kp2d"])
+
+    # ── Transform world-frame GT quantities: P_new = R_ref @ P_old + t_ref ──
+    if "trans" in new_targets:
+        trans = new_targets["trans"]                                  # (T, P, 3)
+        new_targets["trans"] = (
+            torch.einsum("tij,tpj->tpi", R_ref, trans) + t_ref[:, None, :]
+        )
+
+    if "keypoints_3d" in new_targets:
+        kp3d = new_targets["keypoints_3d"]                           # (T, P, 70, 3)
+        new_targets["keypoints_3d"] = (
+            torch.einsum("tij,tpqj->tpqi", R_ref, kp3d) + t_ref[:, None, None, :]
+        )
+
+    if "pose" in new_targets:
+        pose = new_targets["pose"]                                    # (T, P, J, 6)
+        Tp, Pp = pose.shape[:2]
+        R_root = rotation_6d_to_matrix(pose[:, :, 0, :].reshape(-1, 6)).reshape(Tp, Pp, 3, 3)
+        new_R_root = torch.einsum("tij,tpjk->tpik", R_ref, R_root)
+        new_pose = pose.clone()
+        new_pose[:, :, 0, :] = matrix_to_rotation_6d(new_R_root.reshape(-1, 3, 3)).reshape(Tp, Pp, 6)
+        new_targets["pose"] = new_pose
+
+    return new_inputs, new_targets
+
+
 class RICHFusionDataset(Dataset):
     """A simple dataset holding a list of :class:`RICHFusionDatapoint` objects.
 
     Each item is one scene; ``__getitem__`` builds the tensors lazily so only
     the currently-accessed scene is materialised in memory.
+
+    When ``augment=True`` the dataset expands each scene into K variants, one
+    per reference-camera choice, multiplying the effective dataset size by the
+    average number of cameras per scene.
     """
 
-    def __init__(self, datapoints: list[FusionDatapoint]) -> None:
+    def __init__(self, datapoints: list[FusionDatapoint], augment: bool = False) -> None:
         self._datapoints = datapoints
+        self._augment = augment
+        if augment:
+            self._aug_index: list[tuple[int, int]] = [
+                (dp_idx, ref)
+                for dp_idx, dp in enumerate(datapoints)
+                for ref in range(dp.num_cameras)
+            ]
 
     def __len__(self) -> int:
+        if self._augment:
+            return len(self._aug_index)
         return len(self._datapoints)
 
     def __getitem__(self, idx: int) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        if self._augment:
+            dp_idx, ref = self._aug_index[idx]
+            inputs, targets = self._datapoints[dp_idx]._build_sample()
+            if ref > 0:
+                inputs, targets = _swap_reference_camera(inputs, targets, ref)
+            return inputs, targets
         return self._datapoints[idx]._build_sample()
 
 class MixedFusionDataset(Dataset):
