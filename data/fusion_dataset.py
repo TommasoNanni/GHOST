@@ -41,6 +41,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from utilities.smplx_utilities import get_smplx_joints
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +239,7 @@ class FusionDatapoint(Dataset, ABC):
         focal_length: float,
         global_rot: np.ndarray,
         cam_calib: dict[str, Any] | None = None,
+        frame_index: int = 0,
     ) -> np.ndarray:
         """Convert raw camera params to ``[8]`` = ``[quat(4), trans(3), focal_raw(1)]``.
 
@@ -253,6 +255,31 @@ class FusionDatapoint(Dataset, ABC):
         _f = float(focal_length)
         cam[7] = _f if _f > 20.0 else float(np.log(np.expm1(_f) + 1e-6))
         return cam
+
+    @staticmethod
+    def _get_est_ext(cam_calib: dict | None, frame_index: int) -> np.ndarray | None:
+        """Return estimated extrinsics as (3, 4) for the given frame, or None.
+
+        Camera 0 (reference) returns identity. Other cameras look up the
+        per-frame Kabsch-estimated R, t stored by the alignment-loading step.
+        Returns None when no alignment is available for this camera/frame.
+        """
+        if cam_calib is None:
+            return None
+        if cam_calib.get("est_ext_is_reference"):
+            ext = np.zeros((3, 4), dtype=np.float64)
+            ext[:3, :3] = np.eye(3)
+            return ext
+        lut = cam_calib.get("est_ext_lut")
+        if lut is None:
+            return None
+        idx = lut.get(frame_index)
+        if idx is None:
+            return None
+        ext = np.zeros((3, 4), dtype=np.float64)
+        ext[:3, :3] = cam_calib["est_ext_R"][idx]
+        ext[:3, 3] = cam_calib["est_ext_t"][idx]
+        return ext
 
     def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
         """Fill gt_camera with static per-camera extrinsics across all T frames.
@@ -457,6 +484,7 @@ class FusionDatapoint(Dataset, ABC):
                                 float(fl[li]) if fl is not None else 1000.0,
                                 gr[li],
                                 cam_calib=cam_calib,
+                                frame_index=gf_int,
                             )
                             cam_camera_filled[t] = True
 
@@ -523,6 +551,20 @@ class FusionDatapoint(Dataset, ABC):
             "gt_valid": torch.from_numpy(gt_valid),                 # [T, P] bool
             "scene_name": self.scene_dir.name,                      # str — for logging
         }
+
+        # Precompute GT joint positions once at data-loading time so that
+        # JointPositionLoss does not need to run FK on the GT every training step.
+        # Shape of gt_joints: (T, P, 55, 3) — body joints only, local frame (no root translation).
+        try:
+            with torch.no_grad():
+                gt_joints = get_smplx_joints(
+                    targets["pose"].unsqueeze(0).float(),    # (1, T, P, J, 6)
+                    targets["shape"].unsqueeze(0).float(),   # (1, T, P, 10)
+                ).squeeze(0)                                  # (T, P, Jout, 3)
+            targets["gt_joints"] = gt_joints[..., :55, :]   # (T, P, 55, 3)
+        except Exception as e:
+            logger.debug("Skipping gt_joints precomputation: %s", e)
+
         return inputs, targets
 
     def __repr__(self) -> str:
@@ -871,20 +913,21 @@ class RICHFusionDatapoint(FusionDatapoint):
             for i, cam_dir in enumerate(self._cam_dirs):
                 cam_i_name = cam_dir.name
                 if i == 0:
-                    R_est, t_est = np.eye(3, dtype=np.float64), np.zeros(3, dtype=np.float64)
+                    self._cameras[i]["est_ext_is_reference"] = True
                 elif (cam0_name, cam_i_name) in alignment:
-                    R_est, t_est = alignment[(cam0_name, cam_i_name)]
+                    frame_indices, R_arr, t_arr = alignment[(cam0_name, cam_i_name)]
+                    self._cameras[i]["est_ext_R"] = R_arr
+                    self._cameras[i]["est_ext_t"] = t_arr
+                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 elif (cam_i_name, cam0_name) in alignment:
-                    # Invert: x_0 = R @ x_i + t  →  x_i = R^T @ x_0 - R^T @ t
-                    R, t = alignment[(cam_i_name, cam0_name)]
-                    R_est, t_est = R.T, -R.T @ t
+                    frame_indices, R_arr, t_arr = alignment[(cam_i_name, cam0_name)]
+                    R_inv = np.transpose(R_arr, (0, 2, 1))
+                    t_inv = -np.einsum("tij,tj->ti", R_inv, t_arr)
+                    self._cameras[i]["est_ext_R"] = R_inv
+                    self._cameras[i]["est_ext_t"] = t_inv
+                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 else:
                     logger.warning(f"No alignment found for {cam_i_name} relative to {cam0_name}")
-                    continue
-                ext_est = np.zeros((3, 4), dtype=np.float32)
-                ext_est[:3, :3] = R_est
-                ext_est[:3, 3] = t_est
-                self._cameras[i]["estimated_extrinsics"] = ext_est
         else:
             logger.warning(f"camera_alignment.npz not found in {self.scene_dir} — input camera tokens will fall back to pred_cam_t")
 
@@ -1023,31 +1066,31 @@ class RICHFusionDatapoint(FusionDatapoint):
         focal_length: float,
         global_rot: np.ndarray,
         cam_calib: dict | None = None,
+        frame_index: int = 0,
     ) -> np.ndarray:
-        """Use the Kabsch-estimated cam-0→cam-i extrinsic for inputs["camera"].
+        """Use the per-frame Kabsch-estimated cam-0→cam-i extrinsic for inputs["camera"].
 
         Position 7 carries the GT focal length from calibration instead of the
         predicted focal — it is used as fixed context, not predicted by the network.
 
-        Falls back to identity rotation + body_transl_cam (body root in cam frame, metric after Stage 2)
-        if no Kabsch extrinsics are available for this camera.
+        Falls back to identity rotation + body_transl_cam if no Kabsch extrinsics
+        are available for this camera/frame.
         """
         intr = cam_calib.get("intrinsics") if cam_calib else None
         focal_gt = float(intr[0, 0]) if intr is not None else float(focal_length)
 
-        est = cam_calib.get("estimated_extrinsics") if cam_calib else None
+        est = self._get_est_ext(cam_calib, frame_index)
         if est is not None:
             from scipy.spatial.transform import Rotation as SciR
-            q_xyzw = SciR.from_matrix(est[:3, :3].astype(np.float64)).as_quat()
+            q_xyzw = SciR.from_matrix(est[:3, :3]).as_quat()
             cam = np.zeros(8, dtype=np.float32)
-            cam[:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)  # → pytorch3d [qw,qx,qy,qz]
+            cam[:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)
             cam[4:7] = est[:3, 3]
             cam[7] = focal_gt
             return cam
 
-        # Fallback: identity rotation + body_transl_cam (metric after Stage 2 correction).
         cam = np.zeros(8, dtype=np.float32)
-        cam[0] = 1.0  # identity quaternion [w,x,y,z]
+        cam[0] = 1.0
         cam[4:7] = body_transl_cam
         cam[7] = focal_gt
         return cam
@@ -1449,19 +1492,21 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
             for i, cam_dir in enumerate(self._cam_dirs):
                 cam_i_name = cam_dir.name
                 if i == 0:
-                    R_est, t_est = np.eye(3, dtype=np.float64), np.zeros(3, dtype=np.float64)
+                    self._cameras[i]["est_ext_is_reference"] = True
                 elif (cam0_name, cam_i_name) in alignment:
-                    R_est, t_est = alignment[(cam0_name, cam_i_name)]
+                    frame_indices, R_arr, t_arr = alignment[(cam0_name, cam_i_name)]
+                    self._cameras[i]["est_ext_R"] = R_arr
+                    self._cameras[i]["est_ext_t"] = t_arr
+                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 elif (cam_i_name, cam0_name) in alignment:
-                    R, t = alignment[(cam_i_name, cam0_name)]
-                    R_est, t_est = R.T, -R.T @ t
+                    frame_indices, R_arr, t_arr = alignment[(cam_i_name, cam0_name)]
+                    R_inv = np.transpose(R_arr, (0, 2, 1))
+                    t_inv = -np.einsum("tij,tj->ti", R_inv, t_arr)
+                    self._cameras[i]["est_ext_R"] = R_inv
+                    self._cameras[i]["est_ext_t"] = t_inv
+                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 else:
                     logger.warning(f"No Kabsch alignment for {cam_i_name} ↔ {cam0_name}")
-                    continue
-                ext_est = np.zeros((3, 4), dtype=np.float32)
-                ext_est[:3, :3] = R_est
-                ext_est[:3, 3] = t_est
-                self._cameras[i]["estimated_extrinsics"] = ext_est
         else:
             logger.warning(
                 f"camera_alignment.npz not found in {self.scene_dir} — "
@@ -1482,10 +1527,11 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
         focal_length: float,
         global_rot: np.ndarray,
         cam_calib: dict | None = None,
+        frame_index: int = 0,
     ) -> np.ndarray:
         """Build the ``[8]`` camera token: ``[qw, qx, qy, qz, tx, ty, tz, fx]``.
 
-        Uses Kabsch-estimated extrinsics when available; falls back to
+        Uses per-frame Kabsch-estimated extrinsics when available; falls back to
         identity rotation + pred_cam_t.
         """
         focal_gt = (
@@ -1493,10 +1539,10 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
             if cam_calib is not None and "K" in cam_calib
             else float(focal_length)
         )
-        est = cam_calib.get("estimated_extrinsics") if cam_calib else None
+        est = self._get_est_ext(cam_calib, frame_index)
         if est is not None:
             from scipy.spatial.transform import Rotation as SciR
-            q_xyzw = SciR.from_matrix(est[:3, :3].astype(np.float64)).as_quat()
+            q_xyzw = SciR.from_matrix(est[:3, :3]).as_quat()
             cam = np.zeros(8, dtype=np.float32)
             cam[:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)
             cam[4:7] = est[:3, 3]
@@ -1504,7 +1550,7 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
             return cam
 
         cam = np.zeros(8, dtype=np.float32)
-        cam[0] = 1.0  # identity quaternion
+        cam[0] = 1.0
         cam[4:7] = body_transl_cam
         cam[7] = focal_gt
         return cam
@@ -1534,6 +1580,600 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
         """
         if cam_idx < len(self._gt_camera_vecs) and camera_out is not None:
             camera_out[:] = self._gt_camera_vecs[cam_idx]
+
+
+# ======================================================================
+# EgoHumans subclass
+# ======================================================================
+
+class EgoHumansFusionDatapoint(FusionDatapoint):
+    """Fusion datapoint for the EgoHumans dataset.
+
+    Reads ghost pipeline predictions as input and GT SMPL params + calibrated
+    exo cameras from the EgoHumans data release.
+
+    Expected layout after extracting a sequence archive::
+
+        egohumans_seq_dir/
+            ego/
+                aria01/
+                    images/rgb/<frame:05d>.jpg
+                    calib/<frame:05d>.txt    (per-frame fisheye intrinsics+extrinsics)
+                aria02/, aria03/
+            exo/
+                cam01/images/<frame:05d>.jpg
+                ...cam08/
+            colmap/workplace/
+                cameras.txt   (OPENCV_FISHEYE intrinsics, 11 cameras)
+                images.txt    (per-image extrinsics + name → camera_id mapping)
+            processed_data/
+                smpl/<frame:05d>.npy          {ariaXX: {global_orient(3), transl(3), body_pose(69), betas(10), ...}}
+                refine_poses3d/<frame:05d>.npy  {ariaXX: (17, 4) COCO-17 3D + conf}
+                poses3d/<frame:05d>.npy          fallback when refine_poses3d absent
+
+    Ghost pipeline output (scene_dir)::
+
+        scene_dir/
+            cam01/body_data/person_*.npz
+            ...cam08/
+
+    Constructor kwargs
+    ------------------
+    egohumans_seq_dir : str | Path
+        Path to the extracted EgoHumans sequence directory (see layout above).
+        Cameras and GT are loaded from here.  If absent, runs in self-supervised
+        mode (no GT, no calibrated cameras).
+    """
+
+    # Mapping: aria person name → integer GT person ID used throughout
+    _ARIA_NAME_TO_ID = {"aria01": 0, "aria02": 1, "aria03": 2}
+
+    def load_body_data(self, **kwargs: Any) -> None:
+        """Load ghost pipeline NPZ predictions (same layout as RICH/EgoExo)."""
+        self._cam_dirs = sorted(
+            d
+            for d in self.scene_dir.iterdir()
+            if d.is_dir() and (d / "body_data").is_dir()
+        )
+        for cam_dir in self._cam_dirs:
+            body_dir = cam_dir / "body_data"
+            persons: dict[int, dict[str, np.ndarray]] = {}
+            for npz_path in sorted(body_dir.glob("person_*.npz")):
+                pid = int(npz_path.stem.split("_")[1])
+                data = dict(np.load(str(npz_path), allow_pickle=False))
+                persons[pid] = {k: data[k] for k in self._NPZ_FIELDS if k in data}
+            self._raw.append(persons)
+            logger.debug(f"  {cam_dir.name}: loaded {len(persons)} person(s)")
+
+    def load_cameras(self, **kwargs: Any) -> None:
+        """Parse COLMAP cameras.txt + images.txt for GT exo camera calibration.
+
+        Steps:
+        1. Parse OPENCV_FISHEYE intrinsics from cameras.txt.
+        2. Parse per-image extrinsics from images.txt; for exo cameras
+           (cam01-cam08) average across frames to get a static extrinsic.
+        3. Map each ghost pipeline cam_dir name to a COLMAP camera entry.
+        4. Drop ghost cam_dirs with no matching COLMAP calibration.
+        5. Build ``_gt_camera_vecs`` relative to cam-0 (same convention as RICH).
+        """
+        from scipy.spatial.transform import Rotation as SciR
+
+        seq_dir = Path(kwargs.get("egohumans_seq_dir", ""))
+        colmap_dir = seq_dir / "colmap" / "workplace"
+
+        # Read COLMAP intrinsics: camera_id → {fx, fy, cx, cy, distortion}
+        colmap_intrinsics: dict[int, np.ndarray] = {}  # camera_id → (3, 3) K
+        cameras_txt = colmap_dir / "cameras.txt"
+        if cameras_txt.exists():
+            with open(cameras_txt) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split()
+                    cam_id = int(parts[0])
+                    # model, width, height, fx, fy, cx, cy, k1..k4
+                    fx, fy, cx, cy = float(parts[4]), float(parts[5]), float(parts[6]), float(parts[7])
+                    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+                    colmap_intrinsics[cam_id] = K
+        else:
+            logger.warning(f"COLMAP cameras.txt not found at {cameras_txt}")
+
+        # Read COLMAP images.txt: name_prefix → list of (R, t) extrinsics
+        # Each line pair: IMAGE_ID QW QX QY QZ TX TY TZ CAMERA_ID NAME
+        #                 POINTS2D[] (ignored)
+        # COLMAP convention: x_cam = R @ x_world + t  (world-to-cam).
+        # We accumulate per-camera-prefix lists; exo cameras get averaged.
+        from collections import defaultdict
+        extrinsics_by_name: dict[str, list[tuple[np.ndarray, np.ndarray, int]]] = defaultdict(list)
+        images_txt = colmap_dir / "images.txt"
+        if images_txt.exists():
+            with open(images_txt) as f:
+                lines = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+            i = 0
+            while i < len(lines):
+                parts = lines[i].split()
+                if len(parts) < 9:
+                    i += 1
+                    continue
+                qw, qx, qy, qz = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+                tx, ty, tz      = float(parts[5]), float(parts[6]), float(parts[7])
+                cam_id  = int(parts[8])
+                name    = parts[9]                     # e.g. "aria01/00126.jpg" or "cam01/images/00001.jpg"
+                prefix  = name.split("/")[0]           # "aria01", "cam01", …
+                R = SciR.from_quat([qx, qy, qz, qw]).as_matrix().astype(np.float64)
+                t = np.array([tx, ty, tz], dtype=np.float64)
+                extrinsics_by_name[prefix].append((R, t, cam_id))
+                i += 2  # skip POINTS2D line
+        else:
+            logger.warning(f"COLMAP images.txt not found at {images_txt}")
+
+        # Build one representative (R, t) per camera prefix.
+        # Ego cameras (aria) are dynamic; we still compute a mean to have some
+        # fallback, but note their GT camera tokens are filled as NaN/identity
+        # in build_gt_targets (ego cameras are not used as static views).
+        def _median_extrinsic(entries: list[tuple[np.ndarray, np.ndarray, int]]) -> tuple[np.ndarray, np.ndarray, int]:
+            Rs   = np.stack([e[0] for e in entries])   # (N, 3, 3)
+            ts   = np.stack([e[1] for e in entries])   # (N, 3)
+            cam_id = entries[0][2]
+            t_mean = ts.mean(axis=0)
+            # Use the rotation closest to the mean rotation as representative
+            R_mean_approx = Rs.mean(axis=0)
+            U, _, Vt = np.linalg.svd(R_mean_approx)
+            R_rep = U @ Vt
+            if np.linalg.det(R_rep) < 0:
+                U[:, -1] *= -1
+                R_rep = U @ Vt
+            return R_rep, t_mean, cam_id
+
+        colmap_extrinsics: dict[str, tuple[np.ndarray, np.ndarray, int]] = {}
+        for prefix, entries in extrinsics_by_name.items():
+            colmap_extrinsics[prefix] = _median_extrinsic(entries)
+
+        # Match ghost cam_dirs to COLMAP entries, drop unmatched ones.
+        self._cameras = []
+        self._gt_camera_vecs: list[np.ndarray] = []
+        valid_indices: list[int] = []
+
+        for i, cam_dir in enumerate(self._cam_dirs):
+            name = cam_dir.name   # e.g. "cam01", "cam03", "aria01"
+            if name in colmap_extrinsics:
+                R, t, cam_id = colmap_extrinsics[name]
+                K = colmap_intrinsics.get(cam_id, np.eye(3, dtype=np.float32))
+                ext = np.zeros((3, 4), dtype=np.float32)
+                ext[:3, :3] = R
+                ext[:3, 3]  = t
+                calib = {"extrinsics": ext, "intrinsics": K}
+                self._cameras.append(calib)
+                valid_indices.append(i)
+                # GT camera vector [qw,qx,qy,qz, tx,ty,tz, fx]
+                q_xyzw = SciR.from_matrix(R).as_quat()
+                vec = np.zeros(8, dtype=np.float32)
+                vec[:4]  = q_xyzw[[3, 0, 1, 2]].astype(np.float32)  # scipy→pytorch3d quat order
+                vec[4:7] = t.astype(np.float32)
+                vec[7]   = float(K[0, 0])
+                self._gt_camera_vecs.append(vec)
+            else:
+                logger.warning(
+                    f"No COLMAP calibration for cam_dir '{name}' — camera dropped"
+                )
+
+        if len(valid_indices) < len(self._cam_dirs):
+            self._cam_dirs = [self._cam_dirs[i] for i in valid_indices]
+            self._raw      = [self._raw[i]      for i in valid_indices]
+
+        if not self._cameras:
+            # Self-supervised fallback: no calibration available
+            self._cameras  = [{} for _ in self._cam_dirs]
+            self._gt_camera_vecs = []
+            return
+
+        # Re-express GT cameras relative to cam-0 (same convention as RICH).
+        ext0 = self._cameras[0].get("extrinsics")
+        if ext0 is not None:
+            R0 = ext0[:3, :3].astype(np.float64)
+            t0 = ext0[:3, 3].astype(np.float64)
+            self._gt_camera_vecs[0][:4] = np.array([1., 0., 0., 0.], dtype=np.float32)
+            self._gt_camera_vecs[0][4:7] = np.zeros(3, dtype=np.float32)
+            for i in range(1, len(self._cameras)):
+                ext_i = self._cameras[i].get("extrinsics")
+                if ext_i is None:
+                    continue
+                R_i = ext_i[:3, :3].astype(np.float64)
+                t_i = ext_i[:3, 3].astype(np.float64)
+                R_rel = R_i @ R0.T
+                t_rel = t_i - R_rel @ t0
+                q_xyzw = SciR.from_matrix(R_rel).as_quat()
+                self._gt_camera_vecs[i][:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)
+                self._gt_camera_vecs[i][4:7] = t_rel.astype(np.float32)
+
+        # Attach Kabsch-estimated extrinsics if available (same as RICH/DNA).
+        align_path = self.scene_dir / "camera_alignment.npz"
+        if align_path.exists():
+            from preprocessing.camera_alignment import CameraAlignment
+            alignment = CameraAlignment.load(align_path)
+            cam0_name = self._cam_dirs[0].name if self._cam_dirs else None
+            for i, cam_dir in enumerate(self._cam_dirs):
+                cam_name = cam_dir.name
+                if i == 0:
+                    self._cameras[i]["est_ext_is_reference"] = True
+                elif (cam0_name, cam_name) in alignment:
+                    frame_indices, R_arr, t_arr = alignment[(cam0_name, cam_name)]
+                    self._cameras[i]["est_ext_R"] = R_arr
+                    self._cameras[i]["est_ext_t"] = t_arr
+                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
+                elif (cam_name, cam0_name) in alignment:
+                    frame_indices, R_arr, t_arr = alignment[(cam_name, cam0_name)]
+                    R_inv = np.transpose(R_arr, (0, 2, 1))
+                    t_inv = -np.einsum("tij,tj->ti", R_inv, t_arr)
+                    self._cameras[i]["est_ext_R"] = R_inv
+                    self._cameras[i]["est_ext_t"] = t_inv
+                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
+                else:
+                    logger.warning(f"No alignment for {cam_name} relative to {cam0_name}")
+
+    def load_ground_truth(self, **kwargs: Any) -> None:
+        """Load per-frame GT SMPL params and 3D poses from processed_data/.
+
+        GT SMPL (processed_data/smpl/) is keyed by aria person name.  We
+        convert SMPL body_pose (69-dim, 23 joints) to the SMPL-X convention
+        (63-dim, 21 joints) by dropping the last two hand-proxy joints.
+
+        GT 3D poses come from processed_data/refine_poses3d/ (or poses3d/ as
+        fallback), giving 17 COCO-format keypoints per person per frame.
+
+        GT is in COLMAP world frame; _transform_to_world_frame() will later
+        re-express it in cam-0 frame exactly as done in RICHFusionDatapoint.
+        """
+        seq_dir = Path(kwargs.get("egohumans_seq_dir", ""))
+        if not seq_dir.is_dir():
+            logger.warning(
+                f"egohumans_seq_dir not provided or missing — running without GT"
+            )
+            self._gt = [{} for _ in self._cam_dirs]
+            return
+
+        smpl_dir     = seq_dir / "processed_data" / "smpl"
+        refine3d_dir = seq_dir / "processed_data" / "refine_poses3d"
+        poses3d_dir  = seq_dir / "processed_data" / "poses3d"
+        gt3d_dir     = refine3d_dir if refine3d_dir.is_dir() else poses3d_dir
+
+        # gt_accum[person_id][field] = list of per-frame arrays
+        gt_accum: dict[int, dict[str, list]] = {}
+
+        def _ensure_pid(pid: int) -> None:
+            if pid not in gt_accum:
+                gt_accum[pid] = {
+                    "frame_indices":  [],
+                    "global_orient":  [],
+                    "transl":         [],
+                    "body_pose":      [],
+                    "betas":          [],
+                    "keypoints_3d":   [],
+                }
+
+        smpl_frames = sorted(smpl_dir.glob("*.npy")) if smpl_dir.is_dir() else []
+        for npy_path in smpl_frames:
+            try:
+                frame_idx = int(npy_path.stem)
+            except ValueError:
+                continue
+
+            smpl_data = np.load(str(npy_path), allow_pickle=True).item()
+            # Load matching 3D pose file if available
+            kp3d_data: dict[str, np.ndarray] = {}
+            kp3d_path = gt3d_dir / npy_path.name if gt3d_dir.is_dir() else None
+            if kp3d_path is not None and kp3d_path.exists():
+                raw = np.load(str(kp3d_path), allow_pickle=True)
+                kp3d_data = raw.item() if raw.shape == () else {}
+
+            for person_name, params in smpl_data.items():
+                if not isinstance(params, dict):
+                    continue
+                pid = self._ARIA_NAME_TO_ID.get(person_name)
+                if pid is None:
+                    continue
+                _ensure_pid(pid)
+
+                go  = np.asarray(params["global_orient"], dtype=np.float32).reshape(3)
+                tr  = np.asarray(params["transl"],        dtype=np.float32).reshape(3)
+                # SMPL body_pose: (69,) = 23 joints × 3; truncate to 21 joints
+                # to match SMPL-X body_pose layout used by the rest of the pipeline.
+                bp  = np.asarray(params["body_pose"], dtype=np.float32).flatten()[:63]
+                bt  = np.asarray(params["betas"],     dtype=np.float32).flatten()[:10]
+
+                gt_accum[pid]["frame_indices"].append(frame_idx)
+                gt_accum[pid]["global_orient"].append(go)
+                gt_accum[pid]["transl"].append(tr)
+                gt_accum[pid]["body_pose"].append(bp)
+                gt_accum[pid]["betas"].append(bt)
+
+                # 3D keypoints: (17, 4) → take xyz, ignore confidence
+                kp3d = kp3d_data.get(person_name)
+                if kp3d is not None:
+                    kp3d = np.asarray(kp3d, dtype=np.float32)[:, :3]  # (17, 3)
+                else:
+                    kp3d = np.zeros((17, 3), dtype=np.float32)
+                gt_accum[pid]["keypoints_3d"].append(kp3d)
+
+        # Stack into arrays
+        gt_final: dict[int, dict[str, np.ndarray]] = {}
+        for pid, fields in gt_accum.items():
+            if not fields["frame_indices"]:
+                continue
+            gt_final[pid] = {k: np.stack(v) for k, v in fields.items()}
+
+        self._gt_frame_lut: dict[int, dict[int, int]] = {
+            pid: {int(fi): i for i, fi in enumerate(gt_final[pid]["frame_indices"])}
+            for pid in gt_final
+        }
+        # World-space GT replicated as single entry (same pattern as RICH).
+        self._gt = [gt_final]
+
+    def _transform_to_world_frame(self) -> None:
+        """Re-express GT body params from COLMAP world frame into cam-0 frame.
+
+        COLMAP world-to-cam-0 transform: x_cam0 = R0 @ x_world + t0.
+        Applied to global_orient (rotation composition) and transl (affine).
+        Identical to RICHFusionDatapoint._transform_to_world_frame.
+        """
+        from scipy.spatial.transform import Rotation as SciR
+
+        if not self._cameras or not self._gt:
+            return
+        ext0 = self._cameras[0].get("extrinsics")  # (3, 4) world → cam-0
+        if ext0 is None:
+            return
+        R0 = ext0[:3, :3].astype(np.float64)
+        t0 = ext0[:3, 3].astype(np.float64)
+
+        gt_dict = self._gt[0]
+        for gt in gt_dict.values():
+            go = gt.get("global_orient")
+            if go is not None:
+                R_body = SciR.from_rotvec(go.astype(np.float64).reshape(-1, 3)).as_matrix()
+                gt["global_orient"] = (
+                    SciR.from_matrix(R0[None] @ R_body)
+                    .as_rotvec()
+                    .astype(np.float32)
+                    .reshape(go.shape)
+                )
+            tr = gt.get("transl")
+            if tr is not None:
+                gt["transl"] = (tr.astype(np.float64) @ R0.T + t0).astype(np.float32)
+            kp3d = gt.get("keypoints_3d")
+            if kp3d is not None:
+                # (N, 17, 3) → transform each point
+                gt["keypoints_3d"] = (
+                    kp3d.astype(np.float64).reshape(-1, 3) @ R0.T + t0
+                ).astype(np.float32).reshape(kp3d.shape)
+
+    def _match_persons_to_gt(self) -> None:
+        """Match ghost integer PIDs to EgoHumans GT aria person IDs by 3D proximity.
+
+        Same algorithm as RICHFusionDatapoint: for each GT person compute the
+        mean distance to each ghost person's world-frame translation, pick the
+        closest, remap ``_gt`` and ``_gt_frame_lut`` to ghost PIDs.
+        """
+        if not self._gt or not self._raw:
+            return
+
+        gt_dict = self._gt[0]
+        if not gt_dict:
+            return
+
+        if not self._cameras:
+            return
+        ext0 = self._cameras[0].get("extrinsics")
+        if ext0 is None:
+            return
+        R0 = ext0[:3, :3].astype(np.float64)
+        t0 = ext0[:3, 3].astype(np.float64)
+
+        all_ghost_pids: set[int] = set()
+        for cam_persons in self._raw:
+            all_ghost_pids.update(cam_persons.keys())
+        ghost_pids = sorted(all_ghost_pids)
+        if not ghost_pids:
+            return
+
+        # Transform ghost translations to cam-0 frame
+        accum: dict[int, dict[int, list[np.ndarray]]] = {gpid: {} for gpid in ghost_pids}
+        for cam_idx, cam_persons in enumerate(self._raw):
+            ext_i = self._cameras[cam_idx].get("extrinsics") if cam_idx < len(self._cameras) else None
+            if ext_i is None:
+                continue
+            R_i = ext_i[:3, :3].astype(np.float64)
+            t_i = ext_i[:3, 3].astype(np.float64)
+            R_i2w = R0 @ R_i.T
+            d_i   = t0 - R_i2w @ t_i
+            for gpid, pdata in cam_persons.items():
+                tr = pdata.get("smplx_transl")
+                fi = pdata.get("frame_indices")
+                if tr is None or fi is None:
+                    continue
+                tr_cam0 = (tr.astype(np.float64) @ R_i2w.T + d_i).astype(np.float32)
+                for i, f in enumerate(fi):
+                    accum[gpid].setdefault(int(f), []).append(tr_cam0[i])
+
+        ghost_transl: dict[int, dict[int, np.ndarray]] = {
+            gpid: {f: np.mean(vs, axis=0) for f, vs in accum[gpid].items()}
+            for gpid in ghost_pids
+        }
+
+        ego_pids = list(gt_dict.keys())
+        ego_to_ghost: dict[int, int] = {}
+        used_ghost: set[int] = set()
+        for epid in ego_pids:
+            gt_lut    = self._gt_frame_lut.get(epid, {})
+            gt_transl = gt_dict[epid].get("transl")
+            if gt_transl is None:
+                continue
+            best_gpid: int | None = None
+            best_dist = float("inf")
+            for gpid in ghost_pids:
+                if gpid in used_ghost:
+                    continue
+                common = set(gt_lut.keys()) & set(ghost_transl[gpid].keys())
+                if not common:
+                    continue
+                dists = [
+                    np.linalg.norm(gt_transl[gt_lut[f]] - ghost_transl[gpid][f])
+                    for f in common
+                ]
+                mean_dist = float(np.mean(dists))
+                if mean_dist < best_dist:
+                    best_dist = mean_dist
+                    best_gpid = gpid
+            if best_gpid is not None:
+                ego_to_ghost[epid] = best_gpid
+                used_ghost.add(best_gpid)
+                logger.info(
+                    f"EgoHumans GT person {epid} → ghost person {best_gpid} "
+                    f"(mean dist={best_dist:.3f} m)"
+                )
+            else:
+                logger.warning(f"No ghost match for GT person {epid} — skipped")
+
+        new_gt: dict[int, dict[str, np.ndarray]] = {
+            ego_to_ghost[epid]: gt_dict[epid] for epid in ego_to_ghost
+        }
+        new_lut: dict[int, dict[int, int]] = {
+            ego_to_ghost[epid]: self._gt_frame_lut[epid] for epid in ego_to_ghost
+        }
+        self._gt = [new_gt]
+        self._gt_frame_lut = new_lut
+        self._gt_matched_ghost_pids = set(new_gt.keys())
+
+        unmatched = set(ghost_pids) - set(ego_to_ghost.values())
+        if unmatched:
+            logger.info(f"Ghost persons {sorted(unmatched)} have no GT — excluded")
+
+    def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
+        for k, vec in enumerate(self._gt_camera_vecs):
+            if k < gt_camera.shape[1]:
+                gt_camera[:, k] = vec
+
+    def build_gt_targets(
+        self,
+        cam_idx: int,
+        person_slot: int,
+        pid: int,
+        local_idx: int,
+        t: int,
+        pose_out: np.ndarray,
+        shape_out: np.ndarray,
+        camera_out: np.ndarray,
+        kp3d_out: np.ndarray,
+        transl_out: np.ndarray,
+    ) -> None:
+        """Fill GT targets from EgoHumans SMPL annotations.
+
+        GT camera: static COLMAP extrinsic (same for every frame, every person).
+        GT pose/shape: from the matched aria SMPL params, cam-0 frame only.
+        """
+        if cam_idx < len(self._gt_camera_vecs) and camera_out is not None:
+            camera_out[:] = self._gt_camera_vecs[cam_idx]
+
+        if cam_idx != 0:
+            return
+
+        if cam_idx >= len(self._gt) or pid not in self._gt[cam_idx]:
+            return
+
+        raw_fi = (
+            self._raw[cam_idx].get(pid, {}).get("frame_indices")
+            if cam_idx < len(self._raw)
+            else None
+        )
+        if raw_fi is None or local_idx >= len(raw_fi):
+            return
+
+        global_frame = int(raw_fi[local_idx])
+        gt_lut  = self._gt_frame_lut.get(pid, {})
+        gt_idx  = gt_lut.get(global_frame)
+        if gt_idx is None:
+            return
+
+        gt = self._gt[cam_idx][pid]
+        go  = gt.get("global_orient")
+        bp  = gt.get("body_pose")
+        bt  = gt.get("betas")
+        tr  = gt.get("transl")
+        kp3 = gt.get("keypoints_3d")
+
+        if go is not None and bp is not None:
+            pose_out[:] = self.convert_pose(bp[gt_idx], None, go[gt_idx])
+        if bt is not None:
+            shape_out[:] = bt[gt_idx]
+        if tr is not None and t < transl_out.shape[0]:
+            transl_out[t] = tr[gt_idx]
+        if kp3 is not None and kp3d_out is not None:
+            n = min(kp3d_out.shape[-2], kp3[gt_idx].shape[0])
+            kp3d_out[..., :n, :] = kp3[gt_idx][:n]
+
+    def convert_pose(
+        self,
+        body_pose_params: np.ndarray,
+        hand_pose_params: np.ndarray | None,
+        global_rot: np.ndarray,
+    ) -> np.ndarray:
+        """Convert SMPL-X / SMPL axis-angle → [J, 6] 6D rotation.
+
+        Identical to RICHFusionDatapoint.convert_pose.
+        """
+        J = self.num_joints
+        out = np.zeros((J, 6), dtype=np.float32)
+        if body_pose_params is None or global_rot is None:
+            return out
+        try:
+            from scipy.spatial.transform import Rotation as SciR
+        except Exception:
+            return out
+
+        go = np.asarray(global_rot, dtype=np.float32).reshape(1, 3)
+        bp = np.asarray(body_pose_params, dtype=np.float32).reshape(-1, 3)
+        parts = [go, bp]
+        if hand_pose_params is not None:
+            parts.append(np.asarray(hand_pose_params, dtype=np.float32).reshape(-1, 3))
+        aa = np.concatenate(parts, axis=0)
+        if aa.shape[0] < J:
+            aa = np.concatenate(
+                [aa, np.zeros((J - aa.shape[0], 3), dtype=np.float32)], axis=0
+            )
+        try:
+            mats = SciR.from_rotvec(aa).as_matrix()
+        except Exception:
+            return out
+        sixd = np.concatenate([mats[:, 0, :], mats[:, 1, :]], axis=1)
+        out[:J] = sixd[:J]
+        return out
+
+    def convert_camera(
+        self,
+        body_transl_cam: np.ndarray,
+        focal_length: float,
+        global_rot: np.ndarray,
+        cam_calib: dict | None = None,
+        frame_index: int = 0,
+    ) -> np.ndarray:
+        """Build [8] camera token using per-frame Kabsch-estimated extrinsics when available."""
+        intr = cam_calib.get("intrinsics") if cam_calib else None
+        focal_gt = float(intr[0, 0]) if intr is not None else float(focal_length)
+        est = self._get_est_ext(cam_calib, frame_index)
+        if est is not None:
+            from scipy.spatial.transform import Rotation as SciR
+            q_xyzw = SciR.from_matrix(est[:3, :3]).as_quat()
+            cam = np.zeros(8, dtype=np.float32)
+            cam[:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)
+            cam[4:7] = est[:3, 3]
+            cam[7] = focal_gt
+            return cam
+        cam = np.zeros(8, dtype=np.float32)
+        cam[0] = 1.0
+        cam[4:7] = body_transl_cam
+        cam[7] = focal_gt
+        return cam
 
 
 # ======================================================================

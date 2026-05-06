@@ -156,16 +156,8 @@ class GeometricReidentifier:
                 f"— assuming all cameras are synchronised"
             )
 
-        # Load pairwise (R, t): X_b = R @ X_a + t
-        alignment: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
-        with np.load(str(alignment_path)) as f:
-            prefixes: set[str] = {k[:-3] for k in f.files if k.endswith("__R")}
-            for prefix in sorted(prefixes):
-                parts = prefix.split("__to__")
-                if len(parts) != 2:
-                    continue
-                vid_a, vid_b = parts
-                alignment[(vid_a, vid_b)] = (f[f"{prefix}__R"].copy(), f[f"{prefix}__t"].copy())
+        from preprocessing.camera_alignment import CameraAlignment
+        alignment = CameraAlignment.load(alignment_path)
 
         # ── Load background persons ───────────────────────────────────────────
         # background_data[vid_id][pid] = {"pred_cam_t": (T,3), "frame_indices": (T,)}
@@ -218,7 +210,7 @@ class GeometricReidentifier:
             parent[ry] = rx
 
         # ── Proximity check for each aligned camera pair ──────────────────────
-        for (vid_a, vid_b), (R, t) in alignment.items():
+        for (vid_a, vid_b), (align_frames, R_arr, t_arr) in alignment.items():
             bg_a = background_data.get(vid_a, {})
             bg_b = background_data.get(vid_b, {})
             if not bg_a or not bg_b:
@@ -228,13 +220,11 @@ class GeometricReidentifier:
                 )
                 continue
 
-            # Frame fi_a in cam_a is at the same physical time as
-            # frame (fi_a + delta) in cam_b.
             delta = offsets.get(vid_a, 0) - offsets.get(vid_b, 0)
-            t_mag = float(np.linalg.norm(t))
+            align_lut = {int(fi): idx for idx, fi in enumerate(align_frames)}
             logging.info(
                 f"Geometric ReID [{scene_id}]: checking pair {vid_a}↔{vid_b} "
-                f"— |t|={t_mag:.3f} m, delta={delta} frames, "
+                f"— {len(align_frames)} alignment frames, delta={delta} frames, "
                 f"bg_a={sorted(bg_a)}, bg_b={sorted(bg_b)}"
             )
 
@@ -243,10 +233,12 @@ class GeometricReidentifier:
                 for pid_b, data_b in bg_b.items():
                     frames_b = {int(fi): idx for idx, fi in enumerate(data_b["frame_indices"])}
 
+                    # Keep only frames that have a body detection in both cameras
+                    # AND a Kabsch estimate for that frame.
                     common = [
-                        (frames_a[fi], frames_b[fi + delta])
+                        (fi, frames_a[fi], frames_b[fi + delta])
                         for fi in frames_a
-                        if (fi + delta) in frames_b
+                        if (fi + delta) in frames_b and fi in align_lut
                     ]
                     if len(common) < self.min_overlap_frames:
                         logging.info(
@@ -255,13 +247,17 @@ class GeometricReidentifier:
                         )
                         continue
 
-                    rows_a = [r for r, _ in common]
-                    rows_b = [r for _, r in common]
+                    fi_list  = [c[0] for c in common]
+                    rows_a   = [c[1] for c in common]
+                    rows_b   = [c[2] for c in common]
                     pos_a = data_a["pred_cam_t"][rows_a]  # (N, 3)
                     pos_b = data_b["pred_cam_t"][rows_b]  # (N, 3)
 
-                    # Transform cam_a positions into cam_b space: X_b = R @ X_a + t
-                    pos_a_in_b  = pos_a @ R.T + t[None, :]  # (N, 3)
+                    # Per-frame transform: X_b = R @ X_a + t
+                    align_idxs = [align_lut[fi] for fi in fi_list]
+                    R_frames = R_arr[align_idxs]           # (N, 3, 3)
+                    t_frames = t_arr[align_idxs]           # (N, 3)
+                    pos_a_in_b = np.einsum("nij,nj->ni", R_frames, pos_a) + t_frames  # (N, 3)
                     dists = np.linalg.norm(pos_a_in_b - pos_b, axis=-1)
                     median_dist = float(np.median(dists))
                     mean_dist   = float(np.mean(dists))

@@ -104,26 +104,35 @@ def main() -> None:
     # ──────────────────────────────────────────────
     # 2. Load predicted poses from camera_alignment.npz
     # ──────────────────────────────────────────────
-    align = np.load(pred_dir / "camera_alignment.npz")
+    from preprocessing.camera_alignment import CameraAlignment
+    alignment = CameraAlignment.load(pred_dir / "camera_alignment.npz")
 
     print("\n  cam   |  Rot err (°)  |  Trans err (m)  |  pred |t| (m)  |  GT |t| (m)")
     print("  ------|---------------|-----------------|----------------|---------------")
 
     for i in range(1, num_cams):
         cam_name = f"cam_{i:02d}"
-        key_R = f"cam_00__to__{cam_name}__R"
-        key_t = f"cam_00__to__{cam_name}__t"
-        if key_R not in align:
-            print(f"  cam_{i:02d} | NOT FOUND in alignment")
+        key = ("cam_00", cam_name)
+        key_inv = (cam_name, "cam_00")
+        if key in alignment:
+            _, R_arr, t_arr = alignment[key]
+        elif key_inv in alignment:
+            _, R_arr, t_arr = alignment[key_inv]
+            R_arr = np.transpose(R_arr, (0, 2, 1))
+            t_arr = -np.einsum("tij,tj->ti", R_arr, t_arr)
+        else:
+            print(f"  {cam_name} | NOT FOUND in alignment")
             continue
 
-        R_pred = align[key_R]   # (3,3)
-        t_pred = align[key_t]   # (3,)
+        # Average across frames for comparison with a single GT transform.
+        from scipy.spatial.transform import Rotation as SciR
+        R_pred = SciR.mean(SciR.from_matrix(R_arr)).as_matrix()
+        t_pred = t_arr.mean(axis=0)
         R_gt, t_gt = gt_rel[i]
 
         re = rot_error_deg(R_gt, R_pred)
         te = float(np.linalg.norm(t_pred - t_gt))
-        print(f"  cam_{i:02d} |  {re:10.2f}   |  {te:12.3f}   |  {np.linalg.norm(t_pred):11.3f}   |  {np.linalg.norm(t_gt):.3f}")
+        print(f"  {cam_name} |  {re:10.2f}   |  {te:12.3f}   |  {np.linalg.norm(t_pred):11.3f}   |  {np.linalg.norm(t_gt):.3f}")
 
     # ──────────────────────────────────────────────
     # 3. Analyze SAM3D body estimates vs GT body
