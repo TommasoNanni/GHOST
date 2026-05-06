@@ -23,7 +23,7 @@ from pytorch3d.transforms import rotation_6d_to_matrix, quaternion_to_matrix
 from utilities.camera_utilities import extract_cameras
 from utilities.geometry import project_to_2d, skew_symmetric
 from configuration import CONFIG
-from utilities.smplx_utilities import PARENTS_TABLE
+from utilities.smplx_utilities import PARENTS_TABLE, get_smplx_joints
 
 logger = logging.getLogger(__name__)
 
@@ -724,3 +724,79 @@ class CameraMSELoss(Loss):
         trans_loss = (cam_transl_w2c - gt_cam_transl_w2c).pow(2).sum(-1).mean() / (scene_scale ** 2)
 
         return rot_loss + trans_loss
+
+
+class JointPositionLoss(Loss):
+    """FK-based joint position loss.
+
+    Runs SMPL-X FK on the predicted (pose_aggr, shape_aggr) and supervises
+    against GT joint positions precomputed at data-loading time
+    (targets["gt_joints"]).  Both sides are made root-relative before the MSE
+    so the loss is translation-invariant and directly penalises wrong bone
+    lengths caused by poor shape prediction.
+
+    By default only body joints 0-21 are used (``body_only=True``), which
+    avoids noise from hand/face joints that many datasets do not annotate well.
+
+    Parameters
+    ----------
+    chunk_size : int
+        Number of time steps processed per SMPL-X call.  Tune to stay within
+        GPU memory; 64 is safe for sequences up to T=300 with P=2.
+    """
+
+    def __init__(
+        self,
+        name: str = "Joint Position Loss",
+        weight: float = 1.0,
+        body_only: bool = False,
+        chunk_size: int = 64,
+    ) -> None:
+        super().__init__(name, weight)
+        self.body_only = body_only
+        self.chunk_size = chunk_size
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        if "gt_joints" not in targets:
+            return preds[0].new_zeros([])
+
+        pose_aggr  = preds[0]              # (B, T, P, J, 6)
+        shape_aggr = preds[1]              # (B, P, 10)
+        gt_joints  = targets["gt_joints"]  # (B, T, P, 55, 3)  precomputed, local frame
+
+        B, T, P, J, _ = pose_aggr.shape
+
+        gt_valid = targets.get("gt_valid")  # (B, T, P) bool or None
+        if gt_valid is not None and not gt_valid.any():
+            return pose_aggr.new_zeros([])
+
+        # Expand static shape to every time step
+        shape_exp = shape_aggr.unsqueeze(1).expand(B, T, P, 10)
+
+        # Run FK on predictions in time chunks to keep memory bounded
+        chunks = []
+        for t0 in range(0, T, self.chunk_size):
+            t1 = min(t0 + self.chunk_size, T)
+            chunk_joints = get_smplx_joints(
+                pose_aggr[:, t0:t1],     # (B, t, P, J, 6)
+                shape_exp[:, t0:t1],     # (B, t, P, 10)
+            )                             # (B, t, P, Jout, 3)
+            chunks.append(chunk_joints[..., :55, :])
+        pred_joints = torch.cat(chunks, dim=1)  # (B, T, P, 55, 3)
+
+        # Root-relative: subtract joint 0 so the loss is invariant to global translation
+        pred_rel = pred_joints - pred_joints[..., :1, :]
+        gt_rel   = gt_joints   - gt_joints[..., :1, :]
+
+        if self.body_only:
+            pred_rel = pred_rel[..., :22, :]
+            gt_rel   = gt_rel[..., :22, :]
+
+        if gt_valid is not None:
+            # expand mask to (B, T, P, J_sup, 3)
+            mask = gt_valid.unsqueeze(-1).unsqueeze(-1).expand_as(pred_rel)
+            if not mask.any():
+                return pose_aggr.new_zeros([])
+            return F.mse_loss(pred_rel[mask], gt_rel[mask])
+
+        return F.mse_loss(pred_rel, gt_rel)
