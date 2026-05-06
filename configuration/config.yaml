@@ -58,6 +58,7 @@ fusion:
     shape_reg_weight: 1.0
     translation_temporal_weight: 0.1
     vposer_weight: 0.001
+    joint_position_weight: 1.0
   training:
     max_epochs: 500
     lr: 0.0001

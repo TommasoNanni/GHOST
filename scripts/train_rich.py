@@ -38,6 +38,7 @@ from fusion.loss import (
     BoneLengthconsistencyLoss,
     CameraMSELossVGGT,
     EpipolarLoss,
+    JointPositionLoss,
     PoseMSELoss,
     ShapeMSELoss,
     ShapeRegularizationLoss,
@@ -248,6 +249,7 @@ def main():
     shape_reg_weight            = CONFIG.fusion.loss.shape_reg_weight
     translation_temporal_weight = CONFIG.fusion.loss.translation_temporal_weight
     vposer_weight               = CONFIG.fusion.loss.vposer_weight
+    joint_position_weight       = CONFIG.fusion.loss.joint_position_weight
 
     # ── Training params ───────────────────────────────────────────────────────
     lr             = CONFIG.fusion.training.lr
@@ -331,6 +333,7 @@ def main():
         "shape_reg":            (ShapeRegularizationLoss(),           shape_reg_weight),
         "translation_temporal": (TranslationSmoothnessLoss(),         translation_temporal_weight),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
+        "joint_position": (JointPositionLoss(),                  joint_position_weight),
     }
     losses = {k: v for k, v in _all_losses.items() if k not in DISABLED_LOSSES}
     if DISABLED_LOSSES:
@@ -477,7 +480,7 @@ def main():
     # Epoch 100: add geometric losses (epipolar, triangulation) — only once
     #            poses and cameras are already roughly aligned
     curriculum_schedule = {
-        0:   ["pose", "shape", "camera_mse", "translation_mse", "shape_reg", "translation_temporal"],
+        0:   ["pose", "shape", "camera_mse", "translation_mse", "shape_reg", "translation_temporal", "joint_position"],
         25:  ["temporal", "bone", "vposer"],
         100: ["epipolar", "triangulation"],
     }
