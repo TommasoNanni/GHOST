@@ -146,11 +146,65 @@ def geodesic_deg(R_pred: torch.Tensor, R_gt: torch.Tensor) -> torch.Tensor:
     return torch.acos(((trace - 1.0) / 2.0).clamp(-1 + 1e-6, 1 - 1e-6)) * (180.0 / torch.pi)
 
 
+def se3_align(pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
+    """Rigid-align pred trajectory to GT via SVD (no scaling).
+
+    Finds R ∈ SO(3), t ∈ R³ minimising ||R @ pred + t - gt||² and returns
+    the aligned predictions.
+
+    Args:
+        pred: (N, 3)
+        gt:   (N, 3)
+    Returns:
+        (N, 3) aligned predictions
+    """
+    pred_c = pred.mean(0)
+    gt_c   = gt.mean(0)
+    H = (pred - pred_c).T @ (gt - gt_c)          # (3, 3)
+    U, _, Vh = torch.linalg.svd(H)
+    fix = torch.ones(3, device=pred.device)
+    fix[-1] = torch.det(Vh.T @ U.T).sign()
+    R = Vh.T @ torch.diag(fix) @ U.T
+    t = gt_c - R @ pred_c
+    return (R @ pred.T).T + t
+
+
+def compute_rte(
+    pred_trans: torch.Tensor,  # (T, P, 3)
+    gt_trans:   torch.Tensor,  # (T, P, 3)
+    gt_valid:   torch.Tensor,  # (T, P) bool
+) -> list[float]:
+    """SE(3)-aligned root translation error as fraction of GT path length.
+
+    For each person: align predicted root trajectory to GT with a rigid
+    transform, compute mean-L2 residual, divide by GT path length.
+
+    Returns a list with one RTE value per valid person (percentage * 100 for
+    display, stored as a plain ratio internally).
+    """
+    T, P, _ = pred_trans.shape
+    rtes: list[float] = []
+    for p in range(P):
+        valid = gt_valid[:, p]
+        if valid.sum() < 2:
+            continue
+        pred = pred_trans[valid, p]
+        gt   = gt_trans[valid, p]
+        aligned  = se3_align(pred, gt)
+        mean_err = (aligned - gt).norm(dim=-1).mean()
+        path_len = (gt[1:] - gt[:-1]).norm(dim=-1).sum()
+        if path_len > 1e-6:
+            rtes.append((mean_err / path_len).item())
+    return rtes
+
+
 def _process_scene(
     scene_dir: Path,
     mc: MetricCollection,
     joint_err_vals: list,   # list of (T*P, J) tensors, accumulated across scenes
     transl_err_cm: list,    # list of 1-D tensors of valid translation errors in cm
+    rte_vals: list,         # list of per-person RTE ratios, accumulated across scenes
+    use_gt_cameras: bool = True,
 ) -> bool:
     """Process one scene. Returns True on success, False if scene should be skipped."""
     try:
@@ -176,16 +230,27 @@ def _process_scene(
         gt_valid = targets["gt_valid"]       # (T, P) bool
         gt_cam   = targets["camera"].float() # (T, K, 8)
 
-        cam_quats  = cam_vec[..., :4]
-        cam_transl = cam_vec[..., 4:7]
         T, K, P, J, _ = pose_cam.shape
 
         if P == 0:
             print(f"  SKIP {scene_dir.name}: no persons (P=0)")
             return False
 
-        agg_pose  = aggregate_pose(pose_cam, cam_quats, person_mask, joint_mask)
-        agg_trans = aggregate_translation(body_t_cam, cam_quats, cam_transl, person_mask)
+        if use_gt_cameras:
+            agg_quats  = gt_cam[..., :4]
+            agg_transl = gt_cam[..., 4:7]
+        else:
+            agg_quats  = cam_vec[..., :4]
+            agg_transl = cam_vec[..., 4:7]
+
+        agg_pose  = aggregate_pose(pose_cam, agg_quats, person_mask, joint_mask)
+        agg_trans = aggregate_translation(body_t_cam, agg_quats, agg_transl, person_mask)
+
+        # Average predicted shape across views (K) for each (t, p), ignoring cameras
+        # that did not detect the person.  Do NOT average across time.
+        pred_shape_raw = inputs["shape"].float()                        # (T, K, P, 10)
+        view_mask = person_mask.float().unsqueeze(-1)                   # (T, K, P, 1)
+        agg_shape = (pred_shape_raw * view_mask).sum(1) / view_mask.sum(1).clamp(min=1)  # (T, P, 10)
 
         # ── Per-joint geodesic error ──────────────────────────────────────────
         shape_4d = agg_pose.shape[:-1]
@@ -201,12 +266,15 @@ def _process_scene(
         if gt_valid.any():
             transl_err_cm.append(transl_err[gt_valid] * 100)
 
+        # ── Root Translation Error (RTE) ───────────────────────────────────────
+        rte_vals.extend(compute_rte(agg_trans, gt_trans, gt_valid))
+
         # ── MetricCollection update ───────────────────────────────────────────
         t_idx = torch.arange(0, T, METRIC_STRIDE)
         with torch.no_grad():
             pose_sub  = agg_pose[t_idx].unsqueeze(0)
-            shape_sub = gt_shape[t_idx].unsqueeze(0)
-            pred_joints_rel = get_smplx_joints(pose_sub, shape_sub).cpu().numpy()[..., :55, :]
+            pred_shape_sub = agg_shape[t_idx].unsqueeze(0)
+            pred_joints_rel = get_smplx_joints(pose_sub, pred_shape_sub).cpu().numpy()[..., :55, :]
 
             gt_pose_sub  = gt_pose[t_idx].unsqueeze(0)
             gt_shape_sub = gt_shape[t_idx].unsqueeze(0)
@@ -256,8 +324,17 @@ def _process_scene(
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--use-gt-cameras", action="store_true", default=False,
+        help="Use GT calibration cameras for pose/translation aggregation instead of Kabsch-estimated ones.",
+    )
+    args = parser.parse_args()
+
     scene_dirs = sorted(d for d in RICH_OUTPUT_ROOT.iterdir() if d.is_dir())
     print(f"Found {len(scene_dirs)} scene directories under {RICH_OUTPUT_ROOT.name}")
+    print(f"Camera mode: {'GT calibration' if args.use_gt_cameras else 'Kabsch-estimated'}")
 
     mc = MetricCollection([
         WMPJPE(), GAMPJPE(), PAMPJPE(),
@@ -269,11 +346,12 @@ def main():
 
     joint_err_pairs: list = []   # list of (err, valid_mask) tensors per scene
     transl_err_cm:   list = []   # list of 1-D tensors per scene
+    rte_vals:        list = []   # list of per-person RTE ratios
 
     n_ok = 0
     for scene_dir in scene_dirs:
         print(f"\n[{n_ok+1}/{len(scene_dirs)}] {scene_dir.name}")
-        ok = _process_scene(scene_dir, mc, joint_err_pairs, transl_err_cm)
+        ok = _process_scene(scene_dir, mc, joint_err_pairs, transl_err_cm, rte_vals, use_gt_cameras=args.use_gt_cameras)
         if ok:
             n_ok += 1
 
@@ -333,6 +411,18 @@ def main():
         print(f"  Max    : {all_cm.max():.1f} cm")
     else:
         print("  No valid GT frames found.")
+
+    # ── Root Translation Error (RTE) ───────────────────────────────────────────
+    print("\n" + "=" * 50)
+    print("ROOT TRANSLATION ERROR (RTE, SE(3)-aligned, % of GT path length)")
+    print("=" * 50)
+    if rte_vals:
+        arr = np.array(rte_vals) * 100  # convert to percentage
+        print(f"  Mean   : {arr.mean():.1f} %")
+        print(f"  Median : {np.median(arr):.1f} %")
+        print(f"  Max    : {arr.max():.1f} %")
+    else:
+        print("  No valid person trajectories found.")
 
     # ── MetricCollection results ──────────────────────────────────────────────
     print("\n--- MetricCollection results (all scenes) ---")
