@@ -26,6 +26,7 @@ automatically migrated into ``frames/``.
 
 from __future__ import annotations
 
+import json
 import random
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -752,6 +753,248 @@ class RichDataset(Dataset):
             ):
                 return True
         return False
+
+
+# ======================================================================
+# EgoHumans
+# ======================================================================
+
+class EgoHumansScene(Scene):
+    """A :class:`Scene` extended with per-camera calibration for EgoHumans.
+
+    Produced by :class:`EgoHumansDataset`.  Carries the pinhole calibration
+    written by ``scripts/prepare_egohumans.py`` (stored in
+    ``<seq_dir>/calibration.json``).
+
+    Extra attributes
+    ----------------
+    calibration : dict[str, dict]
+        Maps camera name (e.g. ``'cam01'``) to a calibration dict with keys:
+
+        ``'K'``       – (3, 3) float32 pinhole intrinsic matrix (zero distortion).
+        ``'R'``       – (3, 3) float32 world-to-cam rotation.
+        ``'t'``       – (3,) float32 world-to-cam translation.
+        ``'extrinsics'`` – (3, 4) float32 ``[R | t]`` world-to-camera matrix.
+        ``'intrinsics'`` – alias for ``K`` (used by FusionDatapoint).
+        ``'width'``, ``'height'`` – image dimensions after undistortion.
+    seq_dir : Path
+        Path to the extracted sequence directory.
+    """
+
+    def __init__(
+        self,
+        scene_id: str,
+        videos: list[Video],
+        seq_dir: Path,
+        calibration: dict[str, dict] | None = None,
+    ):
+        super().__init__(scene_id=scene_id, videos=videos)
+        self.seq_dir = seq_dir
+        self.calibration: dict[str, dict] = calibration or {}
+
+    def get_camera_calibration(self, camera_id: str) -> dict | None:
+        """Return calibration dict for *camera_id*, or ``None`` if missing."""
+        return self.calibration.get(camera_id)
+
+    def __repr__(self) -> str:
+        return (
+            f"EgoHumansScene({self.scene_id!r}, "
+            f"cameras={len(self.videos)}, calibrated={len(self.calibration)})"
+        )
+
+
+class EgoHumansDataset(Dataset):
+    """PyTorch dataset where each item is one EgoHumans sequence.
+
+    Expects the dataset to have been preprocessed by
+    ``scripts/prepare_egohumans.py``, which extracts tar archives, undistorts
+    exo-camera frames, and writes ``calibration.json`` per sequence.
+
+    Expected layout::
+
+        data_root/
+            01_tagging/
+                001_tagging/
+                    calibration.json        ← written by prepare_egohumans.py
+                    exo/
+                        cam01/
+                            images_undistorted/
+                                00001.jpg
+                                00002.jpg
+                                ...
+                        cam02/
+                            images_undistorted/
+                                ...
+                        ...cam08/
+                    ego/                    ← ignored (aria cameras)
+                    processed_data/         ← GT annotations
+                    colmap/                 ← raw COLMAP output
+                002_tagging/
+                    ...
+            02_lego/
+                001_legoassemble/
+                    ...
+
+    Each exo camera becomes a :class:`Video` in image-sequence mode backed by
+    its ``images_undistorted/`` directory.  Sequences without a
+    ``calibration.json`` are skipped (not yet preprocessed).
+
+    Parameters
+    ----------
+    data_root : str | Path
+        Root directory containing activity sub-folders (``01_tagging``,
+        ``02_lego``, …).
+    resolution : tuple[int, int] | None
+        Optional (H, W) resize applied during frame decoding.
+    slice : int | None
+        Limit the total number of sequences loaded (for debugging).
+    activities : list[str] | None
+        If provided, only load sequences from these activity folders.
+        Example: ``['01_tagging', '02_lego']``.
+    """
+
+    def __init__(
+        self,
+        data_root: str | Path,
+        resolution: tuple[int, int] | None = None,
+        slice: int | None = None,
+        activities: list[str] | None = None,
+    ):
+        self.data_root = Path(data_root)
+        self.resolution = resolution
+
+        # Discover all extracted sequence directories (identified by calibration.json).
+        activity_dirs = sorted(
+            p for p in self.data_root.iterdir()
+            if p.is_dir() and (activities is None or p.name in activities)
+        )
+
+        seq_dirs: list[Path] = []
+        for act_dir in activity_dirs:
+            for seq_dir in sorted(p for p in act_dir.iterdir() if p.is_dir()):
+                if (seq_dir / "calibration.json").exists():
+                    seq_dirs.append(seq_dir)
+                else:
+                    print(f"  Skipping {seq_dir.relative_to(self.data_root)}: "
+                          f"no calibration.json (run prepare_egohumans.py first)")
+
+        if slice is not None:
+            seq_dirs = seq_dirs[:slice]
+
+        if not seq_dirs:
+            raise FileNotFoundError(
+                f"No preprocessed EgoHumans sequences found under {self.data_root}. "
+                f"Run scripts/prepare_egohumans.py first."
+            )
+
+        # Build Video objects in parallel (I/O-bound: reads one image for metadata).
+        all_cam_dirs: list[tuple[Path, str]] = []  # (images_undistorted_dir, cam_name)
+        seq_cam_map: dict[Path, list[tuple[Path, str]]] = {}
+        for seq_dir in seq_dirs:
+            cams = self._list_camera_dirs(seq_dir)
+            seq_cam_map[seq_dir] = cams
+            all_cam_dirs.extend(cams)
+
+        total_cams = len(all_cam_dirs)
+        print(f"Loading metadata for {total_cams} cameras across "
+              f"{len(seq_dirs)} sequences...")
+
+        video_map: dict[Path, Video] = {}
+        with ThreadPoolExecutor(max_workers=min(4, total_cams or 1)) as pool:
+            futures = {
+                pool.submit(self._make_video, undist_dir): undist_dir
+                for undist_dir, _ in all_cam_dirs
+            }
+            for future in tqdm.tqdm(
+                as_completed(futures), total=len(futures), desc="Loading cameras"
+            ):
+                undist_dir = futures[future]
+                video_map[undist_dir] = future.result()
+
+        # Assemble scenes.
+        self.scenes: list[EgoHumansScene] = []
+        for seq_dir in seq_dirs:
+            calibration = self._load_calibration(seq_dir)
+            cam_entries = seq_cam_map[seq_dir]
+            videos: list[Video] = []
+            for undist_dir, cam_name in cam_entries:
+                video = video_map[undist_dir]
+                video.video_id = cam_name   # override "images_undistorted" → "cam01" etc.
+                videos.append(video)
+
+            act_name = seq_dir.parent.name
+            scene_id = f"{act_name}/{seq_dir.name}"
+            self.scenes.append(
+                EgoHumansScene(
+                    scene_id=scene_id,
+                    videos=videos,
+                    seq_dir=seq_dir,
+                    calibration=calibration,
+                )
+            )
+
+        print(f"Dataset created: {len(self.scenes)} scenes, "
+              f"{sum(len(s) for s in self.scenes)} cameras total")
+
+        # Ensure the frames_dir is confirmed (no-op for image-sequence Videos
+        # since frames_dir is already set; mirrors RichDataset's pattern).
+        total_cams = sum(len(s) for s in self.scenes)
+        print(f"Verifying frames layout for {total_cams} cameras ...")
+        for scene in tqdm.tqdm(self.scenes, desc="Scenes"):
+            for video in scene.videos:
+                actual_dir, _ = video.extract_frames(video.frames_home)
+                video.frames_dir = actual_dir
+        print("Frame layout ready.")
+
+    def __len__(self) -> int:
+        return len(self.scenes)
+
+    def __getitem__(self, idx: int) -> EgoHumansScene:
+        return self.scenes[idx]
+
+    def get_scene_ids(self) -> list[str]:
+        return [s.scene_id for s in self.scenes]
+
+    def _list_camera_dirs(self, seq_dir: Path) -> list[tuple[Path, str]]:
+        """Return sorted (images_undistorted_dir, cam_name) pairs for exo cameras."""
+        exo_dir = seq_dir / "exo"
+        if not exo_dir.is_dir():
+            return []
+        result = []
+        for cam_dir in sorted(exo_dir.iterdir()):
+            if not cam_dir.is_dir():
+                continue
+            undist_dir = cam_dir / "images_undistorted"
+            if undist_dir.is_dir() and any(
+                p.suffix.lower() in _IMAGE_EXTS for p in undist_dir.iterdir()
+            ):
+                result.append((undist_dir, cam_dir.name))
+        return result
+
+    def _make_video(self, undist_dir: Path) -> Video:
+        return Video(frames_dir=undist_dir, resolution=self.resolution)
+
+    def _load_calibration(self, seq_dir: Path) -> dict[str, dict]:
+        """Load calibration.json and convert lists back to numpy arrays."""
+        calib_path = seq_dir / "calibration.json"
+        with open(calib_path) as f:
+            raw = json.load(f)
+        calibration: dict[str, dict] = {}
+        for cam_name, entry in raw.items():
+            K = np.array(entry["K"], dtype=np.float32)
+            R = np.array(entry["R"], dtype=np.float32)
+            t = np.array(entry["t"], dtype=np.float32)
+            ext = np.concatenate([R, t[:, None]], axis=1)   # (3, 4)
+            calibration[cam_name] = {
+                "K":           K,
+                "R":           R,
+                "t":           t,
+                "extrinsics":  ext,    # world-to-cam, same convention as RICH
+                "intrinsics":  K,      # alias used by FusionDatapoint.convert_camera
+                "width":       entry["width"],
+                "height":      entry["height"],
+            }
+        return calibration
 
 
 # ======================================================================
