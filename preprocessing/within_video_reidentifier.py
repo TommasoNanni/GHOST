@@ -17,7 +17,7 @@ import numpy as np
 class InVideoReidentifier:
     """Tracks and resolves within-video person identity across SAM2 track interruptions.
 
-    Maintains an appearance gallery (EMA), handles gap severing, covisibility
+    Maintains an appearance + betas gallery, handles gap severing, covisibility
     blocking, and retry windows.  One instance per video.
 
     Parameters
@@ -50,8 +50,6 @@ class InVideoReidentifier:
         gpu_label: str = "",
         video_id: str = "",
         gallery_max_size: int = 30,
-        drift_threshold: float = 0.35,
-        min_gallery_frames: int = 10,
     ):
         self.reid_threshold = reid_threshold
         self.reid_match_window = reid_match_window
@@ -59,8 +57,6 @@ class InVideoReidentifier:
         self.gpu_label = gpu_label
         self.video_id = video_id
         self.gallery_max_size = gallery_max_size
-        self.drift_threshold = drift_threshold
-        self.min_gallery_frames = min_gallery_frames
 
         # Appearance gallery: pid → list of (feat, confidence) pairs, top-K by confidence.
         self._person_gallery_buffer: dict[int, list[tuple[np.ndarray, float]]] = {}
@@ -72,10 +68,6 @@ class InVideoReidentifier:
         self._pending_reid: dict[int, int] = {}
         self._track_last_seen: dict[int, int] = {}
         self._severed_ids: set[int] = set()
-        # Tracks severed specifically due to appearance drift (ID steal detection).
-        # These bypass covisibility checks in ReID since their recorded covisibility
-        # belonged to the track's old identity, not the stolen one.
-        self._drift_severed_ids: set[int] = set()
         self._covisible_ids: set[frozenset] = set()
 
     def build_covisibility(self, json_files: list) -> None:
@@ -194,30 +186,6 @@ class InVideoReidentifier:
                 self._pending_reid[person_id] = self.reid_match_window
 
         if feat is not None:
-            # Drift detection: for a continuously active, non-remapped track,
-            # check if the current appearance has diverged from its own gallery.
-            # A sharp drop signals an ID steal (SAM3 ghost memory assigned this
-            # track slot to a different returning person with no gap).
-            if (
-                person_id not in self._pending_reid
-                and person_id not in self._severed_ids
-                and person_id not in self._id_remap
-                and person_id in self._person_gallery_buffer
-                and len(self._person_gallery_buffer[person_id]) >= self.min_gallery_frames
-            ):
-                gallery_desc = self._gallery_descriptor(person_id)
-                if gallery_desc is not None:
-                    self_sim = float(np.dot(feat, gallery_desc))
-                    if self_sim < self.drift_threshold:
-                        self._drift_severed_ids.add(person_id)
-                        self._severed_ids.add(person_id)
-                        self._pending_reid[person_id] = self.reid_match_window
-                        logging.info(
-                            f"{self.gpu_label}Drift-sever: SAM3 id {person_id} "
-                            f"self-sim={self_sim:.3f} < {self.drift_threshold} "
-                            f"in {self.video_id} @ frame {frame_idx} — likely ID steal"
-                        )
-
             should_try_reid = False
             if person_id not in self._person_gallery_buffer and person_id not in self._id_remap:
                 should_try_reid = True
@@ -241,11 +209,10 @@ class InVideoReidentifier:
                     if s > -1.0:
                         sims[pid] = s
 
-                # Severed tracks (gap OR drift) bypass covisibility: after an
-                # absence the ID may have been reassigned to a different physical
-                # person, making pre-gap covisibility stale. The sim threshold
-                # (0.55) is the primary guard against false merges. Frame-level
-                # exclusion (frame_canonical_ids) already blocks same-frame dupes.
+                # Gap-severed tracks bypass covisibility: after an absence the
+                # ID may have been reassigned, making pre-gap covisibility stale.
+                # The sim threshold is the primary guard against false merges.
+                # Frame-level exclusion (frame_canonical_ids) blocks same-frame dupes.
                 is_severed = person_id in self._severed_ids
                 best_id = max(
                     (
@@ -264,14 +231,7 @@ class InVideoReidentifier:
                     self._id_remap[person_id] = best_id
                     canonical_id = best_id
                     self._pending_reid.pop(person_id, None)
-                    # Clean stale covisibility before discarding from severed sets,
-                    # so the condition still holds.
-                    if is_severed or person_id in self._drift_severed_ids:
-                        self._covisible_ids = {
-                            p for p in self._covisible_ids if person_id not in p
-                        }
                     self._severed_ids.discard(person_id)
-                    self._drift_severed_ids.discard(person_id)
                     # Merge gallery buffers into the canonical person's buffer.
                     if person_id != best_id and person_id in self._person_gallery_buffer:
                         self._person_gallery_buffer.setdefault(best_id, []).extend(
@@ -320,12 +280,10 @@ class InVideoReidentifier:
                             self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
                             del self._pending_reid[person_id]
                             self._severed_ids.discard(person_id)
-                            self._drift_severed_ids.discard(person_id)
                     else:
                         self._update_gallery(person_id, feat, conf)
                         self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
                         self._severed_ids.discard(person_id)
-                        self._drift_severed_ids.discard(person_id)
 
             elif should_try_reid and not self._person_gallery_buffer:
                 self._update_gallery(person_id, feat, conf)
