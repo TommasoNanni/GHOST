@@ -230,6 +230,14 @@ class ParametersExtractor:
         gc.collect()
         torch.cuda.empty_cache()
 
+        # Pre-warm the torch.hub cache for facebookresearch/dinov3 in the main
+        # process. Without this, all worker processes race to clone the GitHub
+        # repo and write hubconf.py simultaneously, which corrupts the cache and
+        # raises "Cannot find callable dinov2_vitb14 in hubconf".
+        logging.info("Pre-warming torch.hub cache for facebookresearch/dinov3 ...")
+        torch.hub.list("facebookresearch/dinov3")
+        logging.info("torch.hub cache ready.")
+
         # Dynamic task queue — workers pull tasks until they receive a None sentinel
         mp.set_start_method("spawn", force=True)
         task_queue: mp.Queue = mp.Queue()
@@ -679,8 +687,20 @@ class ParametersExtractor:
                 if _conf_arr is not None:
                     reid_confidence = float(_conf_arr.mean())
 
+                # Extract raw MHR shape params for betas-based reid signal.
+                betas_i: np.ndarray | None = None
+                _sp = body.get("shape_params")
+                if _sp is not None:
+                    if isinstance(_sp, torch.Tensor):
+                        _sp = _sp.detach().cpu().numpy()
+                    _sp = np.asarray(_sp, dtype=np.float32).ravel()
+                    _norm = np.linalg.norm(_sp)
+                    if _norm > 0:
+                        betas_i = _sp / _norm
+
                 canonical_id: int = reidentifier.process_detection(
-                    person_id, feat_i, frame_idx, valid_persons, confidence=reid_confidence
+                    person_id, feat_i, frame_idx, valid_persons,
+                    confidence=reid_confidence, betas=betas_i,
                 )
 
                 tracks.setdefault(canonical_id, {})[frame_idx] = params

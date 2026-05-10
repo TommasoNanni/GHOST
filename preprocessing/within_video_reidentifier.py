@@ -37,6 +37,10 @@ class InVideoReidentifier:
     """
 
     _COVISIBILITY_THRESHOLD: int = 3
+    # Weight of appearance vs betas in the combined similarity score.
+    # When betas are unavailable the score falls back to appearance only.
+    _APPEARANCE_WEIGHT: float = 0.7
+    _BETAS_WEIGHT: float = 0.3
 
     def __init__(
         self,
@@ -46,6 +50,8 @@ class InVideoReidentifier:
         gpu_label: str = "",
         video_id: str = "",
         gallery_max_size: int = 30,
+        drift_threshold: float = 0.35,
+        min_gallery_frames: int = 10,
     ):
         self.reid_threshold = reid_threshold
         self.reid_match_window = reid_match_window
@@ -53,14 +59,23 @@ class InVideoReidentifier:
         self.gpu_label = gpu_label
         self.video_id = video_id
         self.gallery_max_size = gallery_max_size
+        self.drift_threshold = drift_threshold
+        self.min_gallery_frames = min_gallery_frames
 
-        # Gallery: pid → list of (feat, confidence) pairs, kept as top-K by confidence.
+        # Appearance gallery: pid → list of (feat, confidence) pairs, top-K by confidence.
         self._person_gallery_buffer: dict[int, list[tuple[np.ndarray, float]]] = {}
         self._person_feat_buffer: dict[int, list[tuple[int, np.ndarray]]] = {}
+        # Betas gallery: pid → running sum and count for online mean.
+        self._betas_sum: dict[int, np.ndarray] = {}
+        self._betas_count: dict[int, int] = {}
         self._id_remap: dict[int, int] = {}
         self._pending_reid: dict[int, int] = {}
         self._track_last_seen: dict[int, int] = {}
         self._severed_ids: set[int] = set()
+        # Tracks severed specifically due to appearance drift (ID steal detection).
+        # These bypass covisibility checks in ReID since their recorded covisibility
+        # belonged to the track's old identity, not the stolen one.
+        self._drift_severed_ids: set[int] = set()
         self._covisible_ids: set[frozenset] = set()
 
     def build_covisibility(self, json_files: list) -> None:
@@ -83,13 +98,22 @@ class InVideoReidentifier:
         buf = self._person_gallery_buffer.get(pid)
         if not buf:
             return None
-        feats = np.stack([f for f, _ in buf])       # (N, D)
-        confs = np.array([c for _, c in buf], dtype=np.float32)  # (N,)
+        feats = np.stack([f for f, _ in buf])
+        confs = np.array([c for _, c in buf], dtype=np.float32)
         total = confs.sum()
         weights = confs / total if total > 0 else np.ones(len(confs), dtype=np.float32) / len(confs)
         desc = (feats * weights[:, None]).sum(axis=0)
         norm = np.linalg.norm(desc)
         return desc / norm if norm > 0 else desc
+
+    def _betas_descriptor(self, pid: int) -> np.ndarray | None:
+        """Return the L2-normalised mean betas for a gallery entry."""
+        count = self._betas_count.get(pid, 0)
+        if count == 0:
+            return None
+        mean = self._betas_sum[pid] / count
+        norm = np.linalg.norm(mean)
+        return mean / norm if norm > 0 else mean
 
     def _update_gallery(self, pid: int, feat: np.ndarray, confidence: float) -> None:
         """Append (feat, confidence) to the gallery buffer, keeping top-K by confidence."""
@@ -99,6 +123,35 @@ class InVideoReidentifier:
             min_idx = min(range(len(buf)), key=lambda i: buf[i][1])
             buf.pop(min_idx)
 
+    def _update_betas(self, pid: int, betas: np.ndarray) -> None:
+        """Accumulate betas into the running mean for a person."""
+        if pid not in self._betas_sum:
+            self._betas_sum[pid] = betas.copy()
+            self._betas_count[pid] = 1
+        else:
+            self._betas_sum[pid] += betas
+            self._betas_count[pid] += 1
+
+    def _combined_sim(
+        self,
+        feat: np.ndarray,
+        betas: np.ndarray | None,
+        pid: int,
+    ) -> float:
+        """Appearance + betas cosine similarity, blended by weight constants."""
+        app_desc = self._gallery_descriptor(pid)
+        if app_desc is None:
+            return -1.0
+        app_sim = float(np.dot(feat, app_desc))
+
+        if betas is not None:
+            beta_desc = self._betas_descriptor(pid)
+            if beta_desc is not None:
+                beta_sim = float(np.dot(betas, beta_desc))
+                return self._APPEARANCE_WEIGHT * app_sim + self._BETAS_WEIGHT * beta_sim
+
+        return app_sim
+
     def process_detection(
         self,
         person_id: int,
@@ -106,6 +159,7 @@ class InVideoReidentifier:
         frame_idx: int,
         valid_persons: list,
         confidence: float | None = None,
+        betas: np.ndarray | None = None,
     ) -> int:
         """Process one detection and return its canonical person ID.
 
@@ -120,8 +174,9 @@ class InVideoReidentifier:
         valid_persons : list
             All (person_id, ...) tuples in this frame — for co-visibility exclusion.
         confidence : float or None
-            Mean per-joint confidence from SAM3D for this detection.  Used to
-            weight gallery entries so that clear, unoccluded frames dominate.
+            Mean per-joint confidence from SAM3D for this detection.
+        betas : np.ndarray or None
+            L2-normalised MHR shape parameters, or None if unavailable.
         """
         canonical_id: int = self._id_remap.get(person_id, person_id)
         conf = confidence if confidence is not None else 0.0
@@ -139,6 +194,30 @@ class InVideoReidentifier:
                 self._pending_reid[person_id] = self.reid_match_window
 
         if feat is not None:
+            # Drift detection: for a continuously active, non-remapped track,
+            # check if the current appearance has diverged from its own gallery.
+            # A sharp drop signals an ID steal (SAM3 ghost memory assigned this
+            # track slot to a different returning person with no gap).
+            if (
+                person_id not in self._pending_reid
+                and person_id not in self._severed_ids
+                and person_id not in self._id_remap
+                and person_id in self._person_gallery_buffer
+                and len(self._person_gallery_buffer[person_id]) >= self.min_gallery_frames
+            ):
+                gallery_desc = self._gallery_descriptor(person_id)
+                if gallery_desc is not None:
+                    self_sim = float(np.dot(feat, gallery_desc))
+                    if self_sim < self.drift_threshold:
+                        self._drift_severed_ids.add(person_id)
+                        self._severed_ids.add(person_id)
+                        self._pending_reid[person_id] = self.reid_match_window
+                        logging.info(
+                            f"{self.gpu_label}Drift-sever: SAM3 id {person_id} "
+                            f"self-sim={self_sim:.3f} < {self.drift_threshold} "
+                            f"in {self.video_id} @ frame {frame_idx} — likely ID steal"
+                        )
+
             should_try_reid = False
             if person_id not in self._person_gallery_buffer and person_id not in self._id_remap:
                 should_try_reid = True
@@ -158,20 +237,41 @@ class InVideoReidentifier:
                 for pid, _ in self._person_gallery_buffer.items():
                     if pid in frame_canonical_ids:
                         continue
-                    desc = self._gallery_descriptor(pid)
-                    if desc is not None:
-                        sims[pid] = float(np.dot(feat, desc))
-                best_id = max(sims, key=lambda pid: sims[pid]) if sims else None
+                    s = self._combined_sim(feat, betas, pid)
+                    if s > -1.0:
+                        sims[pid] = s
+
+                # Severed tracks (gap OR drift) bypass covisibility: after an
+                # absence the ID may have been reassigned to a different physical
+                # person, making pre-gap covisibility stale. The sim threshold
+                # (0.55) is the primary guard against false merges. Frame-level
+                # exclusion (frame_canonical_ids) already blocks same-frame dupes.
+                is_severed = person_id in self._severed_ids
+                best_id = max(
+                    (
+                        pid for pid in sims
+                        if is_severed
+                        or frozenset({person_id, pid}) not in self._covisible_ids
+                    ),
+                    key=lambda pid: sims[pid],
+                    default=None,
+                )
 
                 if (
                     best_id is not None
                     and sims[best_id] >= self.reid_threshold
-                    and frozenset({person_id, best_id}) not in self._covisible_ids
                 ):
                     self._id_remap[person_id] = best_id
                     canonical_id = best_id
                     self._pending_reid.pop(person_id, None)
+                    # Clean stale covisibility before discarding from severed sets,
+                    # so the condition still holds.
+                    if is_severed or person_id in self._drift_severed_ids:
+                        self._covisible_ids = {
+                            p for p in self._covisible_ids if person_id not in p
+                        }
                     self._severed_ids.discard(person_id)
+                    self._drift_severed_ids.discard(person_id)
                     # Merge gallery buffers into the canonical person's buffer.
                     if person_id != best_id and person_id in self._person_gallery_buffer:
                         self._person_gallery_buffer.setdefault(best_id, []).extend(
@@ -185,20 +285,33 @@ class InVideoReidentifier:
                         self._person_feat_buffer.setdefault(best_id, []).extend(
                             self._person_feat_buffer.pop(person_id)
                         )
+                    # Merge betas galleries.
+                    if person_id != best_id and person_id in self._betas_sum:
+                        self._betas_sum[best_id] = (
+                            self._betas_sum.get(best_id, np.zeros_like(self._betas_sum[person_id]))
+                            + self._betas_sum.pop(person_id)
+                        )
+                        self._betas_count[best_id] = (
+                            self._betas_count.get(best_id, 0)
+                            + self._betas_count.pop(person_id)
+                        )
                     logging.info(
                         f"{self.gpu_label}Re-ID: SAM3 id {person_id} → "
                         f"person {best_id} (sim={sims[best_id]:.3f}) "
                         f"in {self.video_id} frame {frame_idx}"
                     )
                 else:
-                    if best_id is not None and sims:
-                        covis_blocked = frozenset({person_id, best_id}) in self._covisible_ids
+                    if sims:
+                        all_sims = "  ".join(
+                            f"P{pid}={sims[pid]:.3f}"
+                            + ("[CV]" if frozenset({person_id, pid}) in self._covisible_ids else "")
+                            for pid in sorted(sims, key=lambda p: sims[p], reverse=True)
+                        )
+                        outcome = "no-non-cv-candidate" if best_id is None else f"rejected(thr={self.reid_threshold:.2f})"
                         logging.info(
                             f"[within-video reid] {self.gpu_label}{self.video_id} "
-                            f"frame {frame_idx}  SAM3 id {person_id} → "
-                            f"best match person {best_id}  "
-                            f"sim={sims[best_id]:.3f}  "
-                            f"({'covis-blocked' if covis_blocked else f'rejected (thr={self.reid_threshold:.2f})'})"
+                            f"frame {frame_idx}  SAM3 id {person_id}  [{outcome}]  "
+                            f"all_sims: {all_sims}"
                         )
                     if person_id in self._pending_reid:
                         self._pending_reid[person_id] -= 1
@@ -207,20 +320,26 @@ class InVideoReidentifier:
                             self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
                             del self._pending_reid[person_id]
                             self._severed_ids.discard(person_id)
+                            self._drift_severed_ids.discard(person_id)
                     else:
                         self._update_gallery(person_id, feat, conf)
                         self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
                         self._severed_ids.discard(person_id)
+                        self._drift_severed_ids.discard(person_id)
 
             elif should_try_reid and not self._person_gallery_buffer:
                 self._update_gallery(person_id, feat, conf)
                 self._person_feat_buffer.setdefault(person_id, []).append((frame_idx, feat.copy()))
                 self._pending_reid.pop(person_id, None)
 
-            # Update the canonical person's gallery with this frame.
+            # Update the canonical person's appearance gallery with this frame.
             if canonical_id in self._person_gallery_buffer:
                 self._update_gallery(canonical_id, feat, conf)
                 self._person_feat_buffer.setdefault(canonical_id, []).append((frame_idx, feat.copy()))
+
+        # Update betas gallery for the canonical person whenever betas are available.
+        if betas is not None:
+            self._update_betas(canonical_id, betas)
 
         self._track_last_seen[person_id] = frame_idx
         return canonical_id

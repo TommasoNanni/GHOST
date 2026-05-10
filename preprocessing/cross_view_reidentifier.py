@@ -332,7 +332,18 @@ class CrossVideoReidentifier:
             min_overlap: int = 30,
         ) -> tuple[float, int]:
             N, M = len(feats_a), len(feats_b)
-            S = feats_a @ feats_b.T
+            # Remove the temporal mean (DC component) from each sequence so that
+            # the similarity captures pose *variation* rather than absolute pose.
+            # Without this, all per-frame L2-normalised pose vectors cluster near
+            # the "average human skeleton" direction, giving cosine ~0.93 for every
+            # person pair and making xcorr non-discriminative.
+            fa = feats_a - feats_a.mean(axis=0)
+            fb = feats_b - feats_b.mean(axis=0)
+            na = np.linalg.norm(fa, axis=1, keepdims=True)
+            nb = np.linalg.norm(fb, axis=1, keepdims=True)
+            fa = np.where(na > 1e-6, fa / na, fa)
+            fb = np.where(nb > 1e-6, fb / nb, fb)
+            S = fa @ fb.T
             best_score, best_offset = -1.0, 0
             for tau in range(-(M - 1), N):
                 diag = np.diagonal(S, offset=-tau)
@@ -406,14 +417,18 @@ class CrossVideoReidentifier:
                     if pose_b is None:
                         continue
                     feats_b, confs_b = pose_b
-                    s, _ = _xcorr_sim(feats_a, feats_b)
+                    s, offset = _xcorr_sim(feats_a, feats_b)
+                    logging.info(
+                        f"  pose xcorr  {vid_a}:P{pa} vs {vid_b}:P{pb}"
+                        f"  sim={s:.3f}  best_offset={offset:+d} frames"
+                    )
                     sim_mat[i, j]    += w_pose * s
                     weight_mat[i, j] += w_pose
 
             return np.where(weight_mat > 0, sim_mat / weight_mat, 0.0)
 
         # ── Geometric consistency helper ───────────────────────────────
-        GEO_CORR_THRESHOLD = 0.5
+        GEO_CORR_THRESHOLD = 0.3
         GEO_MIN_OVERLAP    = 30
 
         def _geo_consistency(
