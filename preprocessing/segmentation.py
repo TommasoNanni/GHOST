@@ -345,6 +345,7 @@ class PersonSegmenter:
             try:
                 self._predictor.model.new_det_thresh = self.new_det_thresh
                 self._predictor.model.score_threshold_detection = self.score_threshold_detection
+                self._predictor.model.o2o_matching_masklets_enable = True
             except AttributeError:
                 pass
 
@@ -610,6 +611,7 @@ class PersonSegmenter:
             try:
                 predictor.model.new_det_thresh = new_det_thresh
                 predictor.model.score_threshold_detection = score_threshold_detection
+                predictor.model.o2o_matching_masklets_enable = True
             except AttributeError:
                 pass
 
@@ -829,58 +831,89 @@ class PersonSegmenter:
     def _filter_short_tracks(
         mask_data_dir: Path,
         json_data_dir: Path,
-        min_frames: int = 3,
+        min_frames: int = 15,
     ) -> None:
-        """Remove person IDs that appear in fewer than *min_frames* frames.
+        """Zero out short consecutive runs within each track.
 
-        Hallucinated detections from SAM3 (spurious new-detection prompts
-        that get confirmed for only 1-2 frames) inflate person counts and
-        generate ghost re-ID entries.  Scanning the per-frame .npy masks
-        after propagation and zeroing out short-lived IDs removes these.
+        For each track ID, find all contiguous runs of frames where it appears.
+        Any run shorter than *min_frames* consecutive frames is zeroed out in
+        both the .npy masks and the JSON metadata.  Longer runs in the same
+        track are kept untouched.
         """
         npy_files = sorted(mask_data_dir.glob("*.npy"))
         if not npy_files:
             return
 
-        # Count the number of frames each non-zero ID appears in.
-        appearance_count: dict[int, int] = {}
+        # Collect sorted frame indices where each track ID appears.
+        frames_by_id: dict[int, list[int]] = {}
         for p in npy_files:
             arr = np.load(str(p))
+            frame_idx = int(p.stem.replace("mask_", ""))
             for uid in np.unique(arr):
                 if uid == 0:
                     continue
-                appearance_count[int(uid)] = appearance_count.get(int(uid), 0) + 1
+                frames_by_id.setdefault(int(uid), []).append(frame_idx)
 
-        short_ids = {
-            uid for uid, cnt in appearance_count.items() if cnt < min_frames
-        }
-        if not short_ids:
+        # For each track, split into consecutive runs and flag short ones.
+        # bad_frames[frame_idx] = set of track IDs to zero out at that frame.
+        bad_frames: dict[int, set[int]] = {}
+        total_runs_removed = 0
+        for uid, frame_list in frames_by_id.items():
+            frame_list.sort()
+            # Split into consecutive runs (no holes).
+            runs: list[list[int]] = []
+            current_run = [frame_list[0]]
+            for fi in frame_list[1:]:
+                if fi == current_run[-1] + 1:
+                    current_run.append(fi)
+                else:
+                    runs.append(current_run)
+                    current_run = [fi]
+            runs.append(current_run)
+
+            for run in runs:
+                if len(run) < min_frames:
+                    total_runs_removed += 1
+                    for fi in run:
+                        bad_frames.setdefault(fi, set()).add(uid)
+
+        if not bad_frames:
             return
 
         logging.info(
-            f"Filtering {len(short_ids)} short-lived track(s) "
-            f"(< {min_frames} frames): {sorted(short_ids)}"
+            f"Filtering {total_runs_removed} short consecutive run(s) "
+            f"(< {min_frames} frames) across {len({uid for s in bad_frames.values() for uid in s})} track(s)"
         )
 
-        # Zero out short-lived IDs in every .npy mask file.
-        for p in npy_files:
-            arr = np.load(str(p))
-            if any(uid in np.unique(arr) for uid in short_ids):
-                for uid in short_ids:
-                    arr[arr == uid] = 0
-                np.save(str(p), arr)
+        # Build a frame_idx→path map for fast lookup.
+        npy_by_frame: dict[int, Path] = {
+            int(p.stem.replace("mask_", "")): p for p in npy_files
+        }
 
-        # Remove their entries from corresponding JSON metadata files.
+        # Zero out short runs in .npy masks.
+        for fi, uids in bad_frames.items():
+            p = npy_by_frame.get(fi)
+            if p is None:
+                continue
+            arr = np.load(str(p))
+            for uid in uids:
+                arr[arr == uid] = 0
+            np.save(str(p), arr)
+
+        # Remove short-run entries from JSON metadata.
         for jp in sorted(json_data_dir.glob("*.json")):
+            frame_idx = int(jp.stem.replace("mask_", ""))
+            uids_to_remove = bad_frames.get(frame_idx)
+            if not uids_to_remove:
+                continue
             with open(jp) as f:
                 data = json.load(f)
             labels = data.get("labels", {})
-            if any(str(uid) in labels for uid in short_ids):
-                for uid in short_ids:
-                    labels.pop(str(uid), None)
-                data["labels"] = labels
-                with open(jp, "w") as f:
-                    json.dump(data, f)
+            for uid in uids_to_remove:
+                labels.pop(str(uid), None)
+            data["labels"] = labels
+            with open(jp, "w") as f:
+                json.dump(data, f)
 
     # ------------------------------------------------------------------
     # Mask compaction
