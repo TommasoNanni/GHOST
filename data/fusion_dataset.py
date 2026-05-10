@@ -257,12 +257,11 @@ class FusionDatapoint(Dataset, ABC):
         return cam
 
     @staticmethod
-    def _get_est_ext(cam_calib: dict | None, frame_index: int) -> np.ndarray | None:
-        """Return estimated extrinsics as (3, 4) for the given frame, or None.
+    def _get_est_ext(cam_calib: dict | None) -> np.ndarray | None:
+        """Return estimated extrinsics as (3, 4), or None if unavailable.
 
-        Camera 0 (reference) returns identity. Other cameras look up the
-        per-frame Kabsch-estimated R, t stored by the alignment-loading step.
-        Returns None when no alignment is available for this camera/frame.
+        Camera 0 (reference) returns identity. Other cameras use the
+        single Kabsch-estimated (R, t) stored by the alignment-loading step.
         """
         if cam_calib is None:
             return None
@@ -270,15 +269,11 @@ class FusionDatapoint(Dataset, ABC):
             ext = np.zeros((3, 4), dtype=np.float64)
             ext[:3, :3] = np.eye(3)
             return ext
-        lut = cam_calib.get("est_ext_lut")
-        if lut is None:
-            return None
-        idx = lut.get(frame_index)
-        if idx is None:
+        if "est_ext_R" not in cam_calib:
             return None
         ext = np.zeros((3, 4), dtype=np.float64)
-        ext[:3, :3] = cam_calib["est_ext_R"][idx]
-        ext[:3, 3] = cam_calib["est_ext_t"][idx]
+        ext[:3, :3] = cam_calib["est_ext_R"]
+        ext[:3, 3] = cam_calib["est_ext_t"]
         return ext
 
     def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
@@ -915,17 +910,15 @@ class RICHFusionDatapoint(FusionDatapoint):
                 if i == 0:
                     self._cameras[i]["est_ext_is_reference"] = True
                 elif (cam0_name, cam_i_name) in alignment:
-                    frame_indices, R_arr, t_arr = alignment[(cam0_name, cam_i_name)]
+                    R_arr, t_arr = alignment[(cam0_name, cam_i_name)]
                     self._cameras[i]["est_ext_R"] = R_arr
                     self._cameras[i]["est_ext_t"] = t_arr
-                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 elif (cam_i_name, cam0_name) in alignment:
-                    frame_indices, R_arr, t_arr = alignment[(cam_i_name, cam0_name)]
-                    R_inv = np.transpose(R_arr, (0, 2, 1))
-                    t_inv = -np.einsum("tij,tj->ti", R_inv, t_arr)
+                    R_arr, t_arr = alignment[(cam_i_name, cam0_name)]
+                    R_inv = R_arr.T
+                    t_inv = -R_inv @ t_arr
                     self._cameras[i]["est_ext_R"] = R_inv
                     self._cameras[i]["est_ext_t"] = t_inv
-                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 else:
                     logger.warning(f"No alignment found for {cam_i_name} relative to {cam0_name}")
         else:
@@ -1068,7 +1061,7 @@ class RICHFusionDatapoint(FusionDatapoint):
         cam_calib: dict | None = None,
         frame_index: int = 0,
     ) -> np.ndarray:
-        """Use the per-frame Kabsch-estimated cam-0→cam-i extrinsic for inputs["camera"].
+        """Use the Kabsch-estimated cam-0→cam-i extrinsic for inputs["camera"].
 
         Position 7 carries the GT focal length from calibration instead of the
         predicted focal — it is used as fixed context, not predicted by the network.
@@ -1079,7 +1072,7 @@ class RICHFusionDatapoint(FusionDatapoint):
         intr = cam_calib.get("intrinsics") if cam_calib else None
         focal_gt = float(intr[0, 0]) if intr is not None else float(focal_length)
 
-        est = self._get_est_ext(cam_calib, frame_index)
+        est = self._get_est_ext(cam_calib)
         if est is not None:
             from scipy.spatial.transform import Rotation as SciR
             q_xyzw = SciR.from_matrix(est[:3, :3]).as_quat()
@@ -1494,17 +1487,15 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
                 if i == 0:
                     self._cameras[i]["est_ext_is_reference"] = True
                 elif (cam0_name, cam_i_name) in alignment:
-                    frame_indices, R_arr, t_arr = alignment[(cam0_name, cam_i_name)]
+                    R_arr, t_arr = alignment[(cam0_name, cam_i_name)]
                     self._cameras[i]["est_ext_R"] = R_arr
                     self._cameras[i]["est_ext_t"] = t_arr
-                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 elif (cam_i_name, cam0_name) in alignment:
-                    frame_indices, R_arr, t_arr = alignment[(cam_i_name, cam0_name)]
-                    R_inv = np.transpose(R_arr, (0, 2, 1))
-                    t_inv = -np.einsum("tij,tj->ti", R_inv, t_arr)
+                    R_arr, t_arr = alignment[(cam_i_name, cam0_name)]
+                    R_inv = R_arr.T
+                    t_inv = -R_inv @ t_arr
                     self._cameras[i]["est_ext_R"] = R_inv
                     self._cameras[i]["est_ext_t"] = t_inv
-                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 else:
                     logger.warning(f"No Kabsch alignment for {cam_i_name} ↔ {cam0_name}")
         else:
@@ -1531,7 +1522,7 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
     ) -> np.ndarray:
         """Build the ``[8]`` camera token: ``[qw, qx, qy, qz, tx, ty, tz, fx]``.
 
-        Uses per-frame Kabsch-estimated extrinsics when available; falls back to
+        Uses Kabsch-estimated extrinsics when available; falls back to
         identity rotation + pred_cam_t.
         """
         focal_gt = (
@@ -1539,7 +1530,7 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
             if cam_calib is not None and "K" in cam_calib
             else float(focal_length)
         )
-        est = self._get_est_ext(cam_calib, frame_index)
+        est = self._get_est_ext(cam_calib)
         if est is not None:
             from scipy.spatial.transform import Rotation as SciR
             q_xyzw = SciR.from_matrix(est[:3, :3]).as_quat()
@@ -1798,17 +1789,15 @@ class EgoHumansFusionDatapoint(FusionDatapoint):
                 if i == 0:
                     self._cameras[i]["est_ext_is_reference"] = True
                 elif (cam0_name, cam_name) in alignment:
-                    frame_indices, R_arr, t_arr = alignment[(cam0_name, cam_name)]
+                    R_arr, t_arr = alignment[(cam0_name, cam_name)]
                     self._cameras[i]["est_ext_R"] = R_arr
                     self._cameras[i]["est_ext_t"] = t_arr
-                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 elif (cam_name, cam0_name) in alignment:
-                    frame_indices, R_arr, t_arr = alignment[(cam_name, cam0_name)]
-                    R_inv = np.transpose(R_arr, (0, 2, 1))
-                    t_inv = -np.einsum("tij,tj->ti", R_inv, t_arr)
+                    R_arr, t_arr = alignment[(cam_name, cam0_name)]
+                    R_inv = R_arr.T
+                    t_inv = -R_inv @ t_arr
                     self._cameras[i]["est_ext_R"] = R_inv
                     self._cameras[i]["est_ext_t"] = t_inv
-                    self._cameras[i]["est_ext_lut"] = {int(fi): idx for idx, fi in enumerate(frame_indices)}
                 else:
                     logger.warning(f"No alignment for {cam_name} relative to {cam0_name}")
 
@@ -2157,10 +2146,10 @@ class EgoHumansFusionDatapoint(FusionDatapoint):
         cam_calib: dict | None = None,
         frame_index: int = 0,
     ) -> np.ndarray:
-        """Build [8] camera token using per-frame Kabsch-estimated extrinsics when available."""
+        """Build [8] camera token using Kabsch-estimated extrinsics when available."""
         intr = cam_calib.get("intrinsics") if cam_calib else None
         focal_gt = float(intr[0, 0]) if intr is not None else float(focal_length)
-        est = self._get_est_ext(cam_calib, frame_index)
+        est = self._get_est_ext(cam_calib)
         if est is not None:
             from scipy.spatial.transform import Rotation as SciR
             q_xyzw = SciR.from_matrix(est[:3, :3]).as_quat()

@@ -210,7 +210,7 @@ class GeometricReidentifier:
             parent[ry] = rx
 
         # ── Proximity check for each aligned camera pair ──────────────────────
-        for (vid_a, vid_b), (align_frames, R_arr, t_arr) in alignment.items():
+        for (vid_a, vid_b), (R_arr, t_arr) in alignment.items():
             bg_a = background_data.get(vid_a, {})
             bg_b = background_data.get(vid_b, {})
             if not bg_a or not bg_b:
@@ -221,11 +221,9 @@ class GeometricReidentifier:
                 continue
 
             delta = offsets.get(vid_a, 0) - offsets.get(vid_b, 0)
-            align_lut = {int(fi): idx for idx, fi in enumerate(align_frames)}
             logging.info(
                 f"Geometric ReID [{scene_id}]: checking pair {vid_a}↔{vid_b} "
-                f"— {len(align_frames)} alignment frames, delta={delta} frames, "
-                f"bg_a={sorted(bg_a)}, bg_b={sorted(bg_b)}"
+                f"— delta={delta} frames, bg_a={sorted(bg_a)}, bg_b={sorted(bg_b)}"
             )
 
             for pid_a, data_a in bg_a.items():
@@ -233,12 +231,11 @@ class GeometricReidentifier:
                 for pid_b, data_b in bg_b.items():
                     frames_b = {int(fi): idx for idx, fi in enumerate(data_b["frame_indices"])}
 
-                    # Keep only frames that have a body detection in both cameras
-                    # AND a Kabsch estimate for that frame.
+                    # Keep only frames that have a body detection in both cameras.
                     common = [
-                        (fi, frames_a[fi], frames_b[fi + delta])
+                        (frames_a[fi], frames_b[fi + delta])
                         for fi in frames_a
-                        if (fi + delta) in frames_b and fi in align_lut
+                        if (fi + delta) in frames_b
                     ]
                     if len(common) < self.min_overlap_frames:
                         logging.info(
@@ -247,17 +244,13 @@ class GeometricReidentifier:
                         )
                         continue
 
-                    fi_list  = [c[0] for c in common]
-                    rows_a   = [c[1] for c in common]
-                    rows_b   = [c[2] for c in common]
+                    rows_a = [c[0] for c in common]
+                    rows_b = [c[1] for c in common]
                     pos_a = data_a["pred_cam_t"][rows_a]  # (N, 3)
                     pos_b = data_b["pred_cam_t"][rows_b]  # (N, 3)
 
-                    # Per-frame transform: X_b = R @ X_a + t
-                    align_idxs = [align_lut[fi] for fi in fi_list]
-                    R_frames = R_arr[align_idxs]           # (N, 3, 3)
-                    t_frames = t_arr[align_idxs]           # (N, 3)
-                    pos_a_in_b = np.einsum("nij,nj->ni", R_frames, pos_a) + t_frames  # (N, 3)
+                    # Single static transform: X_b = R @ X_a + t
+                    pos_a_in_b = pos_a @ R_arr.T + t_arr[None, :]  # (N, 3)
                     dists = np.linalg.norm(pos_a_in_b - pos_b, axis=-1)
                     median_dist = float(np.median(dists))
                     mean_dist   = float(np.mean(dists))
@@ -302,22 +295,30 @@ class GeometricReidentifier:
             delta = offsets.get(vid_x, 0) - offsets.get(vid_y, 0)
             if (vid_x, vid_y) in alignment:
                 R, t = alignment[(vid_x, vid_y)]
-                # X_y = R @ X_x + t  (row notation: px @ R.T + t)
-                xform = lambda px, R=R, t=t: px @ R.T + t[None, :]
+                invert = False
             elif (vid_y, vid_x) in alignment:
                 R, t = alignment[(vid_y, vid_x)]
-                # X_x = R @ X_y + t  →  X_y = R^T (X_x − t)  (row: (px−t) @ R)
-                xform = lambda px, R=R, t=t: (px - t[None, :]) @ R
+                invert = True
             else:
                 return None
             fx = {int(fi): i for i, fi in enumerate(dx["frame_indices"])}
             fy = {int(fi): i for i, fi in enumerate(dy["frame_indices"])}
-            common = [(fx[fi], fy[fi + delta]) for fi in fx if (fi + delta) in fy]
+            common = [
+                (fx[fi], fy[fi + delta])
+                for fi in fx
+                if (fi + delta) in fy
+            ]
             if len(common) < self.min_overlap_frames:
                 return None
-            px = dx["pred_cam_t"][[r for r, _ in common]]
-            py = dy["pred_cam_t"][[r for _, r in common]]
-            return float(np.median(np.linalg.norm(xform(px) - py, axis=-1)))
+            rows_x = np.array([c[0] for c in common])
+            rows_y = np.array([c[1] for c in common])
+            px = dx["pred_cam_t"][rows_x]   # (N, 3)
+            py = dy["pred_cam_t"][rows_y]   # (N, 3)
+            if not invert:
+                px_xformed = px @ R + t[None, :]
+            else:
+                px_xformed = (px - t[None, :]) @ R
+            return float(np.median(np.linalg.norm(px_xformed - py, axis=-1)))
 
         def _group_score(
             node: tuple[str, int], members: list[tuple[str, int]]

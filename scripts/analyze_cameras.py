@@ -115,19 +115,15 @@ def main() -> None:
         key = ("cam_00", cam_name)
         key_inv = (cam_name, "cam_00")
         if key in alignment:
-            _, R_arr, t_arr = alignment[key]
+            R_pred, t_pred = alignment[key]
         elif key_inv in alignment:
-            _, R_arr, t_arr = alignment[key_inv]
-            R_arr = np.transpose(R_arr, (0, 2, 1))
-            t_arr = -np.einsum("tij,tj->ti", R_arr, t_arr)
+            R_inv, t_inv = alignment[key_inv]
+            R_pred = R_inv.T
+            t_pred = -R_pred @ t_inv
         else:
             print(f"  {cam_name} | NOT FOUND in alignment")
             continue
 
-        # Average across frames for comparison with a single GT transform.
-        from scipy.spatial.transform import Rotation as SciR
-        R_pred = SciR.mean(SciR.from_matrix(R_arr)).as_matrix()
-        t_pred = t_arr.mean(axis=0)
         R_gt, t_gt = gt_rel[i]
 
         re = rot_error_deg(R_gt, R_pred)

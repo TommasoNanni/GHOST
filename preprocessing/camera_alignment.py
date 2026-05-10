@@ -1,7 +1,8 @@
 """Camera alignment utilities.
 
 This module provides a compact `CameraAlignment` class that estimates
-per-frame relative camera poses from per-view body outputs and offers simple I/O.
+a single relative camera pose per pair (static cameras) from per-view
+body outputs and offers simple I/O.
 """
 
 from __future__ import annotations
@@ -15,11 +16,10 @@ import numpy as np
 
 
 class CameraAlignment:
-    """Estimate and persist per-frame relative camera poses using Kabsch.
+    """Estimate and persist relative camera poses using Kabsch (static cameras).
 
-    For each camera pair and each frame where both cameras have a detected
-    person, a separate rigid transform (R, t) is estimated.  This supports
-    both static and moving cameras without special-casing.
+    For each camera pair all shared-person 3D joint correspondences across all
+    frames are pooled into a single Kabsch fit, producing one (R, t) per pair.
     """
 
     @staticmethod
@@ -101,12 +101,11 @@ class CameraAlignment:
         video_dirs: dict[str, Path],
         min_correspondences: int = 3,
         scene_dir: Path | None = None,
-    ) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        """Estimate per-frame pairwise relative camera poses from per-view body outputs.
+    ) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
+        """Estimate a single pairwise relative camera pose per pair.
 
-        For each camera pair, a separate (R, t) is estimated per frame using
-        the 3D joint correspondences available at that frame. Frames with fewer
-        than `min_correspondences` joint pairs are skipped.
+        All 3D joint correspondences across all shared frames are pooled into
+        one Kabsch fit per pair. This assumes static cameras.
 
         Parameters
         ----------
@@ -114,19 +113,18 @@ class CameraAlignment:
             Each directory is expected to contain a `body_data/` folder with
             `body_params_summary.json` and `person_<id>.npz` files.
         min_correspondences : int
-            Minimum number of 3D point correspondences required per frame to
-            attempt estimation. Default is 3 (minimum for Kabsch).
+            Minimum total 3D correspondences across all frames to attempt
+            estimation. Default is 3 (minimum for Kabsch).
         scene_dir : Path, optional
             Scene-level output directory containing ``cross_view_reid.json``
             and ``temporal_offsets.json``.  When provided, only foreground
-            persons are used for alignment and frame indices are adjusted for
-            temporal desynchronisation before matching.
+            persons are used and frame indices are adjusted for temporal
+            desynchronisation before matching.
 
         Returns
         -------
-        dict mapping (video_id_A, video_id_B) ->
-            (frame_indices, R_array, t_array)
-            where frame_indices has shape (T,), R_array (T, 3, 3), t_array (T, 3).
+        dict mapping (video_id_A, video_id_B) -> (R, t)
+            R has shape (3, 3), t has shape (3,).
         """
         foreground: dict[str, set[int]] = {}
         if scene_dir is not None:
@@ -195,7 +193,7 @@ class CameraAlignment:
                 )
 
         active_vids = [v for v in video_ids if v in video_persons]
-        results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
 
         for ii, vid_a in enumerate(active_vids):
             for vid_b in active_vids[ii + 1:]:
@@ -208,8 +206,9 @@ class CameraAlignment:
 
                 delta = offsets.get(vid_a, 0) - offsets.get(vid_b, 0)
 
-                # Build a mapping: frame_index -> (pts_a_list, pts_b_list)
-                frame_pts: dict[int, tuple[list[np.ndarray], list[np.ndarray]]] = {}
+                # Pool all correspondences across all shared frames.
+                pts_a_all: list[np.ndarray] = []
+                pts_b_all: list[np.ndarray] = []
                 for pid in shared_pids:
                     data_a = persons_a[pid]
                     data_b = persons_b[pid]
@@ -226,70 +225,53 @@ class CameraAlignment:
                         n = min(len(joints_a), len(joints_b))
                         if n < 1:
                             continue
-                        if fi not in frame_pts:
-                            frame_pts[fi] = ([], [])
-                        frame_pts[fi][0].append(joints_a[:n])
-                        frame_pts[fi][1].append(joints_b[:n])
+                        pts_a_all.append(joints_a[:n])
+                        pts_b_all.append(joints_b[:n])
 
-                if not frame_pts:
+                if not pts_a_all:
                     logging.warning(f"Camera alignment: {vid_a} ↔ {vid_b}: no common frames")
                     continue
 
-                frame_indices_list: list[int] = []
-                R_list: list[np.ndarray] = []
-                t_list: list[np.ndarray] = []
+                pts_a = np.concatenate(pts_a_all, axis=0).astype(np.float64)
+                pts_b = np.concatenate(pts_b_all, axis=0).astype(np.float64)
 
-                for fi in sorted(frame_pts):
-                    pts_a = np.concatenate(frame_pts[fi][0], axis=0).astype(np.float64)
-                    pts_b = np.concatenate(frame_pts[fi][1], axis=0).astype(np.float64)
-                    if len(pts_a) < min_correspondences:
-                        continue
-                    try:
-                        R, t = self._kabsch(pts_a, pts_b)
-                    except ValueError:
-                        continue
-                    frame_indices_list.append(fi)
-                    R_list.append(R)
-                    t_list.append(t)
-
-                if not frame_indices_list:
-                    logging.warning(f"Camera alignment: {vid_a} ↔ {vid_b}: no frames passed min_correspondences={min_correspondences}")
+                if len(pts_a) < min_correspondences:
+                    logging.warning(
+                        f"Camera alignment: {vid_a} ↔ {vid_b}: only {len(pts_a)} "
+                        f"correspondences (need {min_correspondences})"
+                    )
                     continue
 
-                frame_indices = np.array(frame_indices_list, dtype=np.int64)
-                R_array = np.stack(R_list, axis=0)   # (T, 3, 3)
-                t_array = np.stack(t_list, axis=0)   # (T, 3)
+                try:
+                    R, t = self._kabsch(pts_a, pts_b)
+                except ValueError as e:
+                    logging.warning(f"Camera alignment: {vid_a} ↔ {vid_b}: Kabsch failed: {e}")
+                    continue
 
-                residuals_all = []
-                for i, fi in enumerate(frame_indices_list):
-                    pts_a = np.concatenate(frame_pts[fi][0], axis=0).astype(np.float64)
-                    pts_b = np.concatenate(frame_pts[fi][1], axis=0).astype(np.float64)
-                    residuals_all.append(pts_b - (pts_a @ R_list[i].T + t_list[i][None, :]))
-                residuals_cat = np.concatenate(residuals_all, axis=0)
-                rmse = float(np.sqrt((residuals_cat ** 2).sum(axis=-1).mean()))
+                residuals = pts_b - (pts_a @ R.T + t[None, :])
+                rmse = float(np.sqrt((residuals ** 2).sum(axis=-1).mean()))
                 logging.info(
-                    f"Camera alignment: {vid_a} - {vid_b}: {len(frame_indices)} frames, "
-                    f"RMSE = {rmse:.4f} m, mean |t| = {np.linalg.norm(t_array, axis=-1).mean():.3f} m"
+                    f"Camera alignment: {vid_a} - {vid_b}: {len(pts_a)} correspondences, "
+                    f"RMSE = {rmse:.4f} m, |t| = {np.linalg.norm(t):.3f} m"
                 )
-                results[(vid_a, vid_b)] = (frame_indices, R_array, t_array)
+                results[(vid_a, vid_b)] = (R, t)
 
         return results
 
     @staticmethod
     def save(
-        alignment: dict[tuple[str, str], tuple[np.ndarray, np.ndarray, np.ndarray]],
+        alignment: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]],
         output_dir: Path,
     ) -> Path:
         """Save computed alignments to `<output_dir>/camera_alignment.npz`.
 
-        Keys per pair: `<vid_a>__to__<vid_b>__frames`, `__R`, `__t`.
+        Keys per pair: `<vid_a>__to__<vid_b>__R` (3×3) and `__t` (3,).
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         arrays: dict[str, np.ndarray] = {}
-        for (vid_a, vid_b), (frame_indices, R, t) in alignment.items():
+        for (vid_a, vid_b), (R, t) in alignment.items():
             prefix = f"{vid_a}__to__{vid_b}"
-            arrays[f"{prefix}__frames"] = frame_indices
             arrays[f"{prefix}__R"] = R
             arrays[f"{prefix}__t"] = t
         path = output_dir / "camera_alignment.npz"
@@ -298,13 +280,13 @@ class CameraAlignment:
         return path
 
     @staticmethod
-    def load(path: Path) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    def load(path: Path) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
         """Load alignments previously written by `save`.
 
-        Returns a dict mapping (vid_a, vid_b) ->
-            (frame_indices, R_array, t_array).
+        Returns a dict mapping (vid_a, vid_b) -> (R, t)
+            where R has shape (3, 3) and t has shape (3,).
         """
-        results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
         with np.load(str(path)) as f:
             prefixes: set[str] = set()
             for key in f.files:
@@ -315,10 +297,9 @@ class CameraAlignment:
                 if len(parts) != 2:
                     continue
                 vid_a, vid_b = parts
-                frame_indices = f[f"{prefix}__frames"]
                 R = f[f"{prefix}__R"]
                 t = f[f"{prefix}__t"]
-                results[(vid_a, vid_b)] = (frame_indices, R, t)
+                results[(vid_a, vid_b)] = (R, t)
         return results
 
     @staticmethod
@@ -344,18 +325,18 @@ class CameraAlignment:
 
 def estimate_relative_camera_poses(
     video_dirs: dict[str, Path], min_correspondences: int = 3
-) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray, np.ndarray]]:
+) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
     return CameraAlignment().estimate(video_dirs, min_correspondences)
 
 
 def save_camera_alignment(
-    alignment: dict[tuple[str, str], tuple[np.ndarray, np.ndarray, np.ndarray]],
+    alignment: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]],
     output_dir: Path,
 ) -> Path:
     return CameraAlignment.save(alignment, output_dir)
 
 
-def load_camera_alignment(path: Path) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray, np.ndarray]]:
+def load_camera_alignment(path: Path) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
     return CameraAlignment.load(path)
 
 
