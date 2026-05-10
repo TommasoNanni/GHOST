@@ -216,7 +216,7 @@ def main():
     if not train_dps:
         raise RuntimeError("No valid training scenes could be loaded.")
 
-    train_ds = RICHFusionDataset(train_dps, augment=True)   # type: ignore[arg-type]
+    train_ds = RICHFusionDataset(train_dps, augment=False)  # type: ignore[arg-type]
     val_ds   = RICHFusionDataset(val_dps)  if val_dps else None  # type: ignore[arg-type]
 
     # ── Architecture ──────────────────────────────────────────────────────────
