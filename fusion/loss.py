@@ -95,15 +95,11 @@ class EpipolarLoss(Loss):
         preds: (pose_aggr, shape_aggr, camera, body_transl_world)
         """
         pose_aggr, _, camera, _ = preds[:4]
-        K = camera.shape[2]
+        K = camera.shape[1]  # camera is (B, K, 8) — static
         if K < 2:
             return pose_aggr.new_zeros([])
         B, T, P = pose_aggr.shape[:3]
 
-        # kp2d: SAM3D observed 2D keypoints in pixel space (B, T, K, P, 70, 2).
-        # Forwarded from inputs by the trainer.  Without real observations the
-        # epipolar constraint is trivially zero (any 3D point re-projected through
-        # the same cameras that defined F will satisfy x^T F x = 0 algebraically).
         kp2d_obs = targets.get("kp2d")
         if kp2d_obs is None:
             return pose_aggr.new_zeros([])
@@ -114,9 +110,17 @@ class EpipolarLoss(Loss):
 
         for i in range(K):
             for j in range(i + 1, K):
-                R_i, t_i, K_i = extract_cameras(camera[:, :, i], self.img_size)
-                R_j, t_j, K_j = extract_cameras(camera[:, :, j], self.img_size)
-                F = self.compute_fundamental_matrix(R_i, t_i, R_j, t_j, K_i, K_j)
+                # camera[:, i] is (B, 8) — static extrinsic for camera i.
+                R_i, t_i, K_i = extract_cameras(camera[:, i], self.img_size)  # (B,3,3),(B,3),(B,3,3)
+                R_j, t_j, K_j = extract_cameras(camera[:, j], self.img_size)
+                # Unsqueeze T=1 so compute_fundamental_matrix gets its expected (B, T, ...) inputs.
+                # The result is (B, 1, 3, 3) — same F for every frame since cameras are static.
+                F_static = self.compute_fundamental_matrix(
+                    R_i.unsqueeze(1), t_i.unsqueeze(1),
+                    R_j.unsqueeze(1), t_j.unsqueeze(1),
+                    K_i.unsqueeze(1), K_j.unsqueeze(1),
+                )  # (B, 1, 3, 3)
+                F = F_static.expand(-1, T, -1, -1)  # (B, T, 3, 3)
 
                 # Observed 2D keypoints from SAM3D (pixel space) — independent of
                 # the model's own camera/pose estimates, so the constraint is real.
@@ -586,21 +590,22 @@ class TranslationMSELoss(Loss):
         body_transl_world_per_cam = preds[5]   # (B, T, K, P, 3) — world frame, per camera
         person_visible            = preds[6]   # (B, T, K, P)
         gt_transl_world           = targets["trans"]   # (B, T, P, 3)
-        cam_gt                    = targets["camera"]  # (B, T, K, 8)
+        cam_gt                    = targets["camera"]  # (B, K, 8) — static cameras
 
         gt_valid = targets.get("gt_valid")  # (B, T, P) bool or None
 
         B, T, K, P, _ = body_transl_world_per_cam.shape
 
         # Identify cameras with real GT (non-zero quaternion sentinel).
-        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
+        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, K)
 
         # Expand GT world translation over K cameras.
         gt_transl_world_exp = gt_transl_world.unsqueeze(2).expand(B, T, K, P, 3)
 
         # Build mask: camera must have GT, person must be visible, frame must have GT annotation.
         vis_mask = person_visible > 0
-        vis_mask = vis_mask & cam_valid.unsqueeze(-1).expand_as(vis_mask)
+        # cam_valid (B, K) → (B, 1, K, 1) → broadcast over (B, T, K, P)
+        vis_mask = vis_mask & cam_valid.unsqueeze(1).unsqueeze(-1).expand_as(vis_mask)
         if gt_valid is not None:
             vis_mask = vis_mask & gt_valid.unsqueeze(2).expand_as(vis_mask)
 
@@ -638,7 +643,7 @@ class CameraMSELossVGGT(Loss):
         _, _, camera_pred, _ = preds[:4]
         cam_gt = targets["camera"]
 
-        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
+        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, K) — static cameras
         if not cam_valid.any():
             return camera_pred.new_zeros([])
 
@@ -679,8 +684,8 @@ class CameraMSELoss(Loss):
         """
         Computes geodesic rotation + MSE translation between predicted and GT cameras.
 
-        camera pred : (B, T, K, 8) — [quat(4), trans(3), focal_raw(1)]
-        camera GT   : (B, T, K, 8) — same layout
+        camera pred : (B, K, 8) — [quat(4), trans(3), focal_raw(1)], static
+        camera GT   : (B, K, 8) — same layout
 
         Returns
         -------
@@ -691,7 +696,7 @@ class CameraMSELoss(Loss):
 
         # Only supervise cameras where GT is available (valid quaternion norm > 0.5).
         # Cameras with no person detection stay at zero quaternion in gt_camera.
-        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
+        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, K) — static cameras
         if not cam_valid.any():
             return camera_pred.new_zeros([])
 

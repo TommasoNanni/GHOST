@@ -15,13 +15,13 @@ dataset::
     inputs = dict(
         pose       = Tensor[T, K, P, J, 6],
         shape      = Tensor[T, K, P, 10],
-        camera     = Tensor[T, K, 8],
+        camera     = Tensor[K, 8],
         joint_mask = Tensor[T, K, P, J],
     )
     targets = dict(
         pose       = Tensor[T, K, P, J, 6],
         shape      = Tensor[T, K, P, 10],
-        camera     = Tensor[T, K, 8],
+        camera     = Tensor[K, 8],
         keypoints_3d = Tensor[T, K, P, 70, 3],
     )
 """
@@ -378,8 +378,8 @@ class FusionDatapoint(Dataset, ABC):
         translation = np.zeros((T, K, P, 3), dtype=np.float32)
         body_transl_cam = np.zeros((T, K, P, 3), dtype=np.float32)  # body root in each camera's local frame
         shape = np.zeros((T, K, P, 10), dtype=np.float32)
-        camera = np.zeros((T, K, 8), dtype=np.float32)
-        camera[:, :, 0] = 1.0  # identity quaternion (w=1); prevents NaN in model forward for undetected cameras
+        camera = np.zeros((K, 8), dtype=np.float32)
+        camera[:, 0] = 1.0  # identity quaternion (w=1); prevents NaN in model forward for undetected cameras
         joint_mask = np.zeros((T, K, P, J), dtype=np.float32)
         # Binary presence mask: 1 when person p was detected in camera k at frame t.
         # Stored as bool to save memory; shape (T, K, P).
@@ -390,7 +390,7 @@ class FusionDatapoint(Dataset, ABC):
         # Target arrays (may be overwritten by build_gt_targets).
         gt_body_pose = np.zeros_like(pose)                              # ground-truth body pose (T, K, P, J, 6)
         gt_body_shape = np.zeros_like(shape)                            # ground-truth SMPL-X betas (T, K, P, 10)
-        gt_camera = np.zeros_like(camera)
+        gt_camera = np.zeros((K, 8), dtype=np.float32)                 # (K, 8) — one extrinsic per camera, static
         # gt_camera stays at zero for cameras not filled by build_gt_targets.
         # Zero quaternion (norm=0) is the "no GT" sentinel used by cam_valid
         # checks (norm > 0.5) in all losses to skip unsupervised cameras.
@@ -401,7 +401,7 @@ class FusionDatapoint(Dataset, ABC):
             cam_persons = self._raw[k]
             pids = self._pid_order[k]
             cam_calib = self._cameras[k] if k < len(self._cameras) else None
-            cam_camera_filled = np.zeros(T, dtype=bool)
+            cam_camera_filled = False  # filled once per camera (static extrinsic)
 
             for p_slot, pid in enumerate(pids):
                 if p_slot >= P:
@@ -469,19 +469,19 @@ class FusionDatapoint(Dataset, ABC):
                     else:
                         joint_mask[t, k, p_slot, :] = 1.0
 
-                    # --- Camera ---
-                    if not cam_camera_filled[t]:
+                    # --- Camera (static: fill once per camera from first detection) ---
+                    if not cam_camera_filled:
                         pct = pdata.get("pred_cam_t")  # body root in camera frame (NPZ key)
                         fl = pdata.get("focal_length")
                         if pct is not None and gr is not None:
-                            camera[t, k] = self.convert_camera(
+                            camera[k] = self.convert_camera(
                                 pct[li],
                                 float(fl[li]) if fl is not None else 1000.0,
                                 gr[li],
                                 cam_calib=cam_calib,
                                 frame_index=gf_int,
                             )
-                            cam_camera_filled[t] = True
+                            cam_camera_filled = True
 
                     # --- 3D keypoints ---
                     kp = pdata.get("pred_keypoints_3d")
@@ -502,7 +502,7 @@ class FusionDatapoint(Dataset, ABC):
                         t=t,
                         pose_out=gt_body_pose[t, k, p_slot],
                         shape_out=gt_body_shape[t, k, p_slot],
-                        camera_out=gt_camera[t, k],
+                        camera_out=gt_camera[k],
                         kp3d_out=gt_kp3d[t, k, p_slot],
                         transl_out=gt_body_transl_world[t, k, p_slot],
                     )
@@ -540,7 +540,7 @@ class FusionDatapoint(Dataset, ABC):
         targets = {
             "pose": torch.from_numpy(gt_body_pose[:, 0]),           # [T, P, J, 6]  ground-truth body pose
             "shape": torch.from_numpy(gt_body_shape[:, 0]),         # [T, P, 10]    ground-truth SMPL-X betas
-            "camera": torch.from_numpy(gt_camera),                  # [T, K, 8]
+            "camera": torch.from_numpy(gt_camera),                  # [K, 8] — static extrinsic per camera
             "keypoints_3d": torch.from_numpy(gt_kp3d[:, 0]),        # [T, P, 70, 3]
             "trans": torch.from_numpy(gt_body_transl_world_cam0),   # [T, P, 3]     ground-truth body root in world frame
             "gt_valid": torch.from_numpy(gt_valid),                 # [T, P] bool
@@ -1208,8 +1208,8 @@ class RICHFusionDatapoint(FusionDatapoint):
 
     def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
         for k, vec in enumerate(self._gt_camera_vecs):
-            if k < gt_camera.shape[1]:
-                gt_camera[:, k] = vec
+            if k < gt_camera.shape[0]:
+                gt_camera[k] = vec
 
     def build_gt_targets(
         self,
@@ -1548,8 +1548,8 @@ class DNARenderingFusionDatapoint(FusionDatapoint):
 
     def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
         for k, vec in enumerate(self._gt_camera_vecs):
-            if k < gt_camera.shape[1]:
-                gt_camera[:, k] = vec
+            if k < gt_camera.shape[0]:
+                gt_camera[k] = vec
 
     def build_gt_targets(
         self,
@@ -2040,8 +2040,8 @@ class EgoHumansFusionDatapoint(FusionDatapoint):
 
     def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
         for k, vec in enumerate(self._gt_camera_vecs):
-            if k < gt_camera.shape[1]:
-                gt_camera[:, k] = vec
+            if k < gt_camera.shape[0]:
+                gt_camera[k] = vec
 
     def build_gt_targets(
         self,
@@ -2207,40 +2207,43 @@ def _swap_reference_camera(
         rotation_6d_to_matrix, matrix_to_rotation_6d,
     )
 
-    cam_gt = targets["camera"]   # (T, K, 8)  [qw,qx,qy,qz, tx,ty,tz, focal_raw]
-    T, K, _ = cam_gt.shape
+    cam_gt = targets["camera"]   # (K, 8)  [qw,qx,qy,qz, tx,ty,tz, focal_raw]
+    K, _ = cam_gt.shape
 
     # Skip augmentation if GT camera for ``ref`` is missing (zero quaternion).
-    if cam_gt[:, ref, :4].norm(dim=-1).mean().item() < 0.5:
+    if cam_gt[ref, :4].norm().item() < 0.5:
         return inputs, targets
 
-    q_ref = cam_gt[:, ref, :4]           # (T, 4)  [qw,qx,qy,qz]
-    t_ref = cam_gt[:, ref, 4:7]          # (T, 3)
-    R_ref   = quaternion_to_matrix(q_ref)          # (T, 3, 3)
-    R_ref_T = R_ref.transpose(-2, -1)              # (T, 3, 3)
+    q_ref = cam_gt[ref, :4]    # (4,)
+    t_ref = cam_gt[ref, 4:7]   # (3,)
+    R_ref   = quaternion_to_matrix(q_ref.unsqueeze(0)).squeeze(0)   # (3, 3)
+    R_ref_T = R_ref.t()                                               # (3, 3)
 
     def _retransform_cameras(cam: torch.Tensor) -> torch.Tensor:
-        """Re-express a (T, K, 8) camera tensor relative to the new reference."""
+        """Re-express a (K, 8) camera tensor relative to the new reference."""
         cam = cam.clone()
         for k in range(K):
-            R_k    = quaternion_to_matrix(cam[:, k, :4])            # (T, 3, 3)
-            t_k    = cam[:, k, 4:7]                                  # (T, 3)
-            new_R  = torch.bmm(R_k, R_ref_T)                         # (T, 3, 3)
-            new_t  = t_k - torch.bmm(new_R, t_ref.unsqueeze(-1)).squeeze(-1)  # (T, 3)
-            cam[:, k, :4] = matrix_to_quaternion(new_R)
-            cam[:, k, 4:7] = new_t
+            R_k   = quaternion_to_matrix(cam[k, :4].unsqueeze(0)).squeeze(0)  # (3, 3)
+            t_k   = cam[k, 4:7]                                                 # (3,)
+            new_R = R_k @ R_ref_T                                               # (3, 3)
+            new_t = t_k - new_R @ t_ref                                         # (3,)
+            cam[k, :4] = matrix_to_quaternion(new_R.unsqueeze(0)).squeeze(0)
+            cam[k, 4:7] = new_t
         return cam
 
     def _swap_k(t: torch.Tensor) -> torch.Tensor:
+        """Swap cameras 0 and ref along the K dimension (dim 1 for T,K,... tensors)."""
         t = t.clone()
         t[:, [0, ref]] = t[:, [ref, 0]]
         return t
 
-    # ── Transform + swap camera tensors ────────────────────────────────
-    new_cam_in = _swap_k(_retransform_cameras(inputs["camera"]))
-    new_cam_gt = _swap_k(_retransform_cameras(cam_gt))
+    # ── Transform + swap camera tensors (K, 8) ─────────────────────────
+    new_cam_in = _retransform_cameras(inputs["camera"])
+    new_cam_in[[0, ref]] = new_cam_in[[ref, 0]]
+    new_cam_gt = _retransform_cameras(cam_gt)
+    new_cam_gt[[0, ref]] = new_cam_gt[[ref, 0]]
 
-    # ── Swap K dim for all other K-shaped inputs ────────────────────────
+    # ── Swap K dim (dim 1) for all other K-shaped (T, K, ...) inputs ───
     new_inputs = {
         k: (_swap_k(v) if isinstance(v, torch.Tensor) and v.dim() >= 2 and v.shape[1] == K else v)
         for k, v in inputs.items()
@@ -2256,20 +2259,20 @@ def _swap_reference_camera(
     if "trans" in new_targets:
         trans = new_targets["trans"]                                  # (T, P, 3)
         new_targets["trans"] = (
-            torch.einsum("tij,tpj->tpi", R_ref, trans) + t_ref[:, None, :]
+            torch.einsum("ij,tpj->tpi", R_ref, trans) + t_ref[None, None, :]
         )
 
     if "keypoints_3d" in new_targets:
         kp3d = new_targets["keypoints_3d"]                           # (T, P, 70, 3)
         new_targets["keypoints_3d"] = (
-            torch.einsum("tij,tpqj->tpqi", R_ref, kp3d) + t_ref[:, None, None, :]
+            torch.einsum("ij,tpqj->tpqi", R_ref, kp3d) + t_ref[None, None, None, :]
         )
 
     if "pose" in new_targets:
         pose = new_targets["pose"]                                    # (T, P, J, 6)
         Tp, Pp = pose.shape[:2]
         R_root = rotation_6d_to_matrix(pose[:, :, 0, :].reshape(-1, 6)).reshape(Tp, Pp, 3, 3)
-        new_R_root = torch.einsum("tij,tpjk->tpik", R_ref, R_root)
+        new_R_root = torch.einsum("ij,tpjk->tpik", R_ref, R_root)
         new_pose = pose.clone()
         new_pose[:, :, 0, :] = matrix_to_rotation_6d(new_R_root.reshape(-1, 3, 3)).reshape(Tp, Pp, 6)
         new_targets["pose"] = new_pose

@@ -9,18 +9,18 @@ def extract_cameras(camera_params, img_size):
 
     Parameters
     ----------
-    camera_params : (B, T, 8) — [quat(4), trans(3), focal_raw(1)]
-        focal_raw is an unconstrained scalar; softplus is applied internally
-        to ensure the focal length is positive.
+    camera_params : (B, 8) or (B, T, 8) — [quat(4), trans(3), focal_raw(1)]
+        (B, 8)    — static camera (one extrinsic per scene, no T).
+        (B, T, 8) — dynamic camera (one extrinsic per frame).
     img_size : (H, W)
 
     Returns
     -------
-    R : (B, T, 3, 3)
-    t : (B, T, 3)
-    K : (B, T, 3, 3)
+    R     : (..., 3, 3)
+    t     : (..., 3)
+    K_mat : (..., 3, 3)  intrinsics
     """
-    B, T = camera_params.shape[:2]
+    static = camera_params.dim() == 2  # True for (B, 8)
 
     quat      = camera_params[..., 0:4]
     trans     = camera_params[..., 4:7]
@@ -28,14 +28,15 @@ def extract_cameras(camera_params, img_size):
 
     R = quaternion_to_matrix(quat)
     t = trans
-    focal = F.softplus(focal_raw)   # (B, T) — guaranteed positive
+    focal = F.softplus(focal_raw)
 
-    H, W = img_size
-    K = torch.zeros(B, T, 3, 3, device=camera_params.device, dtype=camera_params.dtype)
-    K[:, :, 0, 0] = focal
-    K[:, :, 1, 1] = focal
-    K[:, :, 0, 2] = W / 2
-    K[:, :, 1, 2] = H / 2
-    K[:, :, 2, 2] = 1
+    H_img, W_img = img_size
+    K_mat = torch.zeros(*camera_params.shape[:-1], 3, 3,
+                        device=camera_params.device, dtype=camera_params.dtype)
+    K_mat[..., 0, 0] = focal
+    K_mat[..., 1, 1] = focal
+    K_mat[..., 0, 2] = W_img / 2
+    K_mat[..., 1, 2] = H_img / 2
+    K_mat[..., 2, 2] = 1
 
-    return R, t, K
+    return R, t, K_mat

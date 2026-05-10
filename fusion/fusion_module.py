@@ -70,7 +70,7 @@ class SSTEncoder(nn.Module):
         -------
         pose_emb   : (B, T, K, P, J, D)   all 55 joints — split by caller
         shape_emb  : (B, T, K, P, D)
-        camera_emb : (B, T, K, D)
+        camera_emb : (B, K, D)            static — no T dimension
         trans_emb  : (B, T, K, P, D)
         """
         return (
@@ -518,44 +518,37 @@ class PoseCameraCrossAttention(nn.Module):
         Parameters
         ----------
         pose_stream   : (B, T, K, P, J, D)  — world-frame pose, updated state
-        camera_stream : (B, T, K, D)
-        pose_cam_kv   : (B, T, K, P, J, D)  — camera-frame pose, frozen input
-                        used as KV in cam→pose direction so each camera attends
-                        to its own view of the body (distinct per camera).
-        cam_vis       : (B, T, K) float — 1 if camera active, 0 if absent.
-                        When provided, absent cameras are hard-masked (-inf) as
-                        KV keys in the pose→camera direction so body tokens do
-                        not absorb signal from cameras that detected nothing.
+        camera_stream : (B, K, D)            — static camera stream, no T
+        pose_cam_kv   : (B, T, K, P, J, D)  — camera-frame pose used as KV for cam→pose
+        cam_vis       : (B, T, K) float — 1 if camera active at frame t, 0 if absent.
 
         Returns
         -------
-        pose_stream, camera_stream (same shapes, updated)
+        pose_stream  : (B, T, K, P, J, D)  updated
+        camera_stream: (B, K, D)           updated
         """
         H = self.pose_to_cam_attn.num_heads
 
-        # Pose → Camera: each joint queries all K camera tokens
+        # ── Pose → Camera: each spatial token queries all K camera tokens ──
+        # Camera KV broadcast over (T, P, J): cameras condition every body token.
         x = self.pose_to_cam_norm(pose_stream)
-        x = x.permute(0, 1, 3, 4, 2, 5).contiguous().reshape(B * T * P * J, K, D)
+        x = x.permute(0, 1, 3, 4, 2, 5).contiguous().reshape(B * T * P * J, K, D)  # Q
         cam_kv = (
-            camera_stream
-            .unsqueeze(2).unsqueeze(2)
+            camera_stream                           # (B, K, D)
+            .unsqueeze(1).unsqueeze(1).unsqueeze(1) # (B, 1, 1, 1, K, D)
             .expand(B, T, P, J, K, D)
-            .reshape(B * T * P * J, K, D)
+            .reshape(B * T * P * J, K, D)           # KV
         )
 
         if cam_vis is not None:
-            # Build (B*T*P*J, K) hard key mask: 0 for present, -inf for absent.
-            # Broadcast camera presence over (P, J) — every body token sees the
-            # same set of active cameras.
             flat = cam_vis[:, :, None, None, :].expand(B, T, P, J, K)  # (B,T,P,J,K)
             key_mask = flat.reshape(B * T * P * J, K).new_zeros(B * T * P * J, K)
             key_mask = key_mask.masked_fill(
                 flat.reshape(B * T * P * J, K) == 0, float('-inf')
             )
-            # Expand to (N*H, K_q, K_kv): same key mask for every query position.
             attn_mask = (
-                key_mask.unsqueeze(1).expand(-1, K, -1)   # (N, K_q, K_kv)
-                .unsqueeze(1).expand(-1, H, -1, -1)        # (N, H, K_q, K_kv)
+                key_mask.unsqueeze(1).expand(-1, K, -1)
+                .unsqueeze(1).expand(-1, H, -1, -1)
                 .reshape(B * T * P * J * H, K, K)
             )
             x = _safe_mha(self.pose_to_cam_attn, x, cam_kv, cam_kv, attn_mask, H)
@@ -564,14 +557,32 @@ class PoseCameraCrossAttention(nn.Module):
         x = x.reshape(B, T, P, J, K, D).permute(0, 1, 4, 2, 3, 5).contiguous()
         pose_stream = pose_stream + dropout(x)
 
-        # Camera → Pose: each camera queries its own camera-frame pose tokens.
-        # Using camera-frame KV (distinct per camera) instead of world-frame pose
-        # (identical across cameras) so each camera gets a unique update.
-        x = self.cam_to_pose_norm(camera_stream)
-        x = x.reshape(B * T * K, 1, D)
-        pose_cam_kv_flat = pose_cam_kv.reshape(B * T * K, P * J, D)
-        x, _ = self.cam_to_pose_attn(x, pose_cam_kv_flat, pose_cam_kv_flat)
-        camera_stream = camera_stream + dropout(x.reshape(B, T, K, D))
+        # ── Camera → Pose: camera aggregates body evidence from ALL T frames ──
+        # Each camera k attends to its own camera-frame pose across every frame,
+        # so the correction signal comes from the full trajectory rather than a
+        # single frame.  Total attention complexity is the same as the old per-frame
+        # design: O(B*K * T*P*J) either way.
+        x_cam = self.cam_to_pose_norm(camera_stream)   # (B, K, D)
+        x_cam = x_cam.reshape(B * K, 1, D)             # Q: (B*K, 1, D)
+
+        # KV: rearrange to (B, K, T, P, J, D) then flatten T*P*J.
+        pose_kv = pose_cam_kv.permute(0, 2, 1, 3, 4, 5).contiguous()  # (B, K, T, P, J, D)
+        pose_kv = pose_kv.reshape(B * K, T * P * J, D)                 # (B*K, T*P*J, D)
+
+        # Mask out KV positions from frames where camera k had no detections.
+        kv_mask = None
+        if cam_vis is not None:
+            presence = cam_vis.permute(0, 2, 1)                              # (B, K, T)
+            presence = presence.unsqueeze(-1).unsqueeze(-1).expand(B, K, T, P, J)
+            absent   = ~presence.bool()                                       # True = masked
+            absent   = absent.reshape(B * K, T * P * J)
+            # Guard: if camera has no detections at all, unmask everything so
+            # softmax still produces a valid (uniform) distribution.
+            all_absent = absent.all(dim=-1, keepdim=True)
+            kv_mask = absent & ~all_absent
+
+        x_cam, _ = self.cam_to_pose_attn(x_cam, pose_kv, pose_kv, key_padding_mask=kv_mask)
+        camera_stream = camera_stream + dropout(x_cam.reshape(B, K, D))
 
         return pose_stream, camera_stream
 
@@ -603,23 +614,20 @@ class CameraPoseEncoding(nn.Module):
         """
         Parameters
         ----------
-        camera : (B, T, K, 8)  — [quat(4), trans(3), focal(1)]
+        camera : (B, K, 8)  — [quat(4), trans(3), focal(1)]
                  Quaternion uses pytorch3d convention [w, x, y, z].
 
         Returns
         -------
-        (B, T, K, D)
+        (B, K, D)
         """
-        B, T, K, _ = camera.shape
-        quat  = camera[..., :4]   # (B, T, K, 4)  [w, x, y, z]
-        trans = camera[..., 4:7]  # (B, T, K, 3)
+        B, K, _ = camera.shape
+        quat  = camera[..., :4]   # (B, K, 4)  [w, x, y, z]
+        trans = camera[..., 4:7]  # (B, K, 3)
 
-        # Feed quaternion + translation directly — no singularity anywhere.
-        # Axis-angle conversion was singular at identity (reference camera always
-        # has quat=[1,0,0,0]), producing NaN/infinite gradients.
-        geom = torch.cat([quat, trans], dim=-1).reshape(B * T * K, 7)  # (BTK, 7)
+        geom = torch.cat([quat, trans], dim=-1).reshape(B * K, 7)  # (BK, 7)
 
-        return self.mlp(geom).reshape(B, T, K, self.embedding_dim)   # (B, T, K, D)
+        return self.mlp(geom).reshape(B, K, self.embedding_dim)   # (B, K, D)
 
 
 class FeedForward(nn.Module):
@@ -744,53 +752,34 @@ class ShapeStreamLayer(nn.Module):
 
 
 class CameraStreamLayer(nn.Module):
-    """One layer of the camera stream: cross-camera attn → windowed temporal attn → FFN."""
+    """One layer of the camera stream: cross-camera attn → FFN.
+
+    Cameras are static so there is no temporal dimension — the stream operates
+    directly on (B, K, D) tokens.  Temporal attention is omitted by design.
+    """
 
     def __init__(self, embedding_dim: int, num_heads: int, temporal_window: int, dropout: float, name: str = "camera"):
         super().__init__()
         self.view_attn = CrossViewAttention(embedding_dim, num_heads, dropout)
-        self.temporal_norm = nn.LayerNorm(embedding_dim)
-        self.temporal_attn = WindowedTemporalAttentionSDPA(embedding_dim, num_heads, temporal_window, dropout, name=name)
         self.ff = FeedForward(embedding_dim)
 
     def forward(
         self,
         x: torch.Tensor,
-        B: int, T: int, K: int, D: int,
-        pe: PositionalEncoding | None,
+        B: int, K: int, D: int,
         dropout: nn.Dropout,
-        temporal_conf: torch.Tensor | None = None,
         cam_attn_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Parameters
         ----------
-        x            : (B, T, K, D)
-        temporal_conf: (B*K, T) binary presence scores, or None.
-        cam_attn_mask: (B*T*num_heads, K, K) additive mask — -inf for absent cameras,
-                       0 for present ones.  Built by SSTNetwork using
-                       _build_confidence_mask(camera_visible.reshape(B*T, K)).
-                       All-absent rows are pre-set to 0.0 by _build_confidence_mask
-                       and further guarded by _safe_mha inside CrossViewAttention,
-                       so no NaN can enter the backward pass.
+        x            : (B, K, D)
+        cam_attn_mask: (B*num_heads, K, K) additive mask — -inf for absent cameras,
+                       0 for present ones.  Built from scene-level camera presence
+                       (any detection across all T frames).
         """
-        # Cross-camera attention: at each frame, all K cameras attend to each other.
-        # Reshape (B, T, K, D) → (B*T, K, D) so K is the sequence dimension.
-        x_flat = x.reshape(B * T, K, D)
-        x_flat = self.view_attn(x_flat, attn_mask=cam_attn_mask)  # residual included
-        x = x_flat.reshape(B, T, K, D)
-
-        # Camera temporal attention disabled: cameras are static (fixed tripods),
-        # so the camera token is identical at every timestep and temporal attention
-        # learns nothing. Re-enable if moving cameras are supported in future.
-        # h = self.temporal_norm(x)
-        # h = h.permute(0, 2, 1, 3).contiguous().reshape(B * K, T, D)
-        # if pe is not None:
-        #     h = pe(h)
-        # h = self.temporal_attn(h, confidence=temporal_conf)
-        # h = h.reshape(B, K, T, D).permute(0, 2, 1, 3).contiguous()
-        # x = x + dropout(h)
-
+        # Cross-camera attention directly on (B, K, D).
+        x = self.view_attn(x, attn_mask=cam_attn_mask)
         x = self.ff(x)
         return x
 
@@ -934,10 +923,10 @@ class SSTOutputHeads(nn.Module):
         spatial_stream: torch.Tensor,     # (B, T, K, P, 2, D)
         kin_stream: torch.Tensor,         # (B, T, K, P, 54, D)
         shape_stream: torch.Tensor,       # (B, T, K, P, D)
-        camera_stream: torch.Tensor,      # (B, T, K, D)
+        camera_stream: torch.Tensor,      # (B, K, D)           — static, no T
         pose_input: torch.Tensor,         # (B, T, K, P, 55, 6) — joint 0 in camera frame
         body_transl_cam_in: torch.Tensor, # (B, T, K, P, 3)     — in camera frame
-        camera_input: torch.Tensor,       # (B, T, K, 8)
+        camera_input: torch.Tensor,       # (B, K, 8)           — static camera input
         shape_input: torch.Tensor,        # (B, T, K, P, 10) raw input betas
         person_visible: torch.Tensor,     # (B, T, K, P) float: 1 = visible, 0 = absent
         B: int, T: int, K: int, P: int, J: int, D: int,
@@ -945,6 +934,7 @@ class SSTOutputHeads(nn.Module):
         from pytorch3d.transforms import quaternion_to_matrix, rotation_6d_to_matrix
 
         BTK = B * T * K
+        BK  = B * K
 
         # Confidence weights for the mean: (B, T, K, P) → (B, T, P, 1) denominator.
         w_sum = person_visible.sum(dim=2, keepdim=True).clamp(min=1e-8)  # (B, T, 1, P)
@@ -955,40 +945,31 @@ class SSTOutputHeads(nn.Module):
                 print(f"[NaN] {name}: {(~torch.isfinite(t)).sum().item()} non-finite "
                       f"out of {t.numel()} (shape={tuple(t.shape)})")
 
-        # STEP 1: Camera — decoded first so the predicted extrinsics are used for back-projection.
-        camera = self.camera_norm(camera_stream)
-        camera_flat = camera.reshape(BTK, D)
-        rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, T, K, 7)
+        # STEP 1: Camera — decoded once per camera (static), then broadcast over T for back-projection.
+        camera = self.camera_norm(camera_stream)   # (B, K, D)
+        camera_flat = camera.reshape(BK, D)
+        rot_trans_delta = self.camera_rot_trans_head(camera_flat).reshape(B, K, 7)
         # Camera 0 is the world origin — anchor it to identity rotation + zero translation.
-        # Out-of-place to preserve gradient flow through camera_stream.
-        cam0_zero = rot_trans_delta.new_zeros(B, T, 1, 7)
-        rot_trans_delta = torch.cat([cam0_zero, rot_trans_delta[:, :, 1:, :]], dim=2)
+        cam0_zero = rot_trans_delta.new_zeros(B, 1, 7)
+        rot_trans_delta = torch.cat([cam0_zero, rot_trans_delta[:, 1:, :]], dim=1)
         if self.force_gt_cameras:
             rot_trans_delta = torch.zeros_like(rot_trans_delta)
-        # Focal length (position 7) is the GT focal from calibration — pass through unchanged.
-        # Normalize the quaternion after adding the delta: input_quat + delta is not unit,
-        # and a non-unit quaternion in quaternion_to_matrix produces a non-orthogonal matrix
-        # that scales z-coordinates, potentially putting joints behind cameras.
-        quat_out  = F.normalize(camera_input[..., :4] + rot_trans_delta[..., :4], dim=-1)
-        trans_out = camera_input[..., 4:7] + rot_trans_delta[..., 4:7]
-        camera_out = torch.cat([quat_out, trans_out, camera_input[..., 7:8]], dim=-1)
+        quat_out  = F.normalize(camera_input[..., :4] + rot_trans_delta[..., :4], dim=-1)  # (B, K, 4)
+        trans_out = camera_input[..., 4:7] + rot_trans_delta[..., 4:7]                      # (B, K, 3)
+        camera_out = torch.cat([quat_out, trans_out, camera_input[..., 7:8]], dim=-1)        # (B, K, 8)
         _nan_check("camera_stream", camera_stream)
         _nan_check("camera_out", camera_out)
 
-        # Extract rotation and translation from the predicted camera.
+        # Broadcast camera_out over T for per-frame back-projection.
         # Convention: v_cam = cam_rot_w2c @ v_world + cam_transl_w2c
-        # Guard: replace near-zero quaternions (unfilled camera slots) with identity
-        # so quaternion_to_matrix never divides by ~0. These slots are already
-        # zeroed out in person_visible (see SSTNetwork.forward), so their
-        # back-projected translations never enter any loss.
-        q = camera_out[..., :4].reshape(BTK, 4)
+        q = camera_out[..., :4].unsqueeze(1).expand(-1, T, -1, -1).reshape(BTK, 4)
         q_safe = torch.where(
             (q.pow(2).sum(dim=-1, keepdim=True) > 0.01),
             q,
             q.new_tensor([1., 0., 0., 0.]).expand_as(q),
         )
-        cam_rot_w2c    = quaternion_to_matrix(q_safe)  # (BTK, 3, 3)
-        cam_transl_w2c = camera_out[..., 4:7]                                       # (B, T, K, 3)
+        cam_rot_w2c    = quaternion_to_matrix(q_safe)                           # (BTK, 3, 3)
+        cam_transl_w2c = camera_out[..., 4:7].unsqueeze(1).expand(-1, T, -1, -1)  # (B, T, K, 3)
         _nan_check("cam_rot_w2c", cam_rot_w2c)
 
         # STEP 2: Kinematic joints 1-54
@@ -1237,7 +1218,7 @@ class SSTNetwork(nn.Module):
         ----------
         pose               : [B, T, K, P, J, 6] or [T, K, P, J, 6]  — world-frame (cam-0)
         shape              : [B, T, K, P, betas] or [T, K, P, betas]
-        camera             : [B, T, K, 8] or [T, K, 8]  — [quat(4), trans(3), focal_raw(1)]
+        camera             : [B, K, 8] or [K, 8]  — [quat(4), trans(3), focal_raw(1)], static
         joint_mask         : [B, T, K, P, J] or [T, K, P, J]  (confidence ∈ [0,1])
         person_mask        : [B, T, K, P] or [T, K, P]  bool
         body_transl_cam_in : [B, T, K, P, 3] or [T, K, P, 3]  — body root translation in camera frame
@@ -1246,7 +1227,7 @@ class SSTNetwork(nn.Module):
         -------
         pose_aggr  : [B, T, P, J, 6]
         shape_aggr : [B, P, 10]
-        camera     : [B, T, K, 8]
+        camera     : [B, K, 8]
         body_transl_world : [B, T, P, 3]
         """
         # ensure batch dim
@@ -1254,7 +1235,7 @@ class SSTNetwork(nn.Module):
             pose = pose.unsqueeze(0)
         if shape.dim() == 4:
             shape = shape.unsqueeze(0)
-        if camera.dim() == 3:
+        if camera.dim() == 2:
             camera = camera.unsqueeze(0)
         if joint_mask.dim() == 4:
             joint_mask = joint_mask.unsqueeze(0)
@@ -1264,7 +1245,7 @@ class SSTNetwork(nn.Module):
             body_transl_cam_in = body_transl_cam_in.unsqueeze(0)
 
         assert pose.shape[:4] == shape.shape[:4]
-        assert pose.shape[:3] == camera.shape[:3]
+        assert pose.shape[0] == camera.shape[0] and pose.shape[2] == camera.shape[1]  # B and K match
         assert pose.shape[:5] == joint_mask.shape
         assert pose.shape[:4] == person_mask.shape
         assert pose.shape[:4] == body_transl_cam_in.shape[:4]
@@ -1295,7 +1276,7 @@ class SSTNetwork(nn.Module):
         # camera identity before the first attention layer. Previously this was re-added
         # at every layer iteration (cumulative), which caused the same fixed PE to
         # accumulate L times and overwhelm the learned body features.
-        cam_pe = self.camera_pose_encoding(camera).unsqueeze(3).unsqueeze(4)  # (B,T,K,1,1,D)
+        cam_pe = self.camera_pose_encoding(camera).unsqueeze(1).unsqueeze(3).unsqueeze(4)  # (B,1,K,1,1,D)
         spatial_stream = torch.cat([
             pose_emb[:, :, :, :, :1, :],   # root orient  (B,T,K,P,1,D)
             trans_emb.unsqueeze(4),          # translation  (B,T,K,P,1,D)
@@ -1348,16 +1329,16 @@ class SSTNetwork(nn.Module):
         person_cross_view_mask = self._build_confidence_mask(person_cross_view_mask_flat, H)
         person_temporal_conf = person_visible.permute(0, 2, 3, 1).reshape(B * K * P, T)
 
-        # Camera-level presence: camera k is "active" at frame t iff at least one
-        # person was detected in it.  Drives temporal masking in the camera stream.
+        # Camera-level presence per frame — still needed as cam_vis for PoseCameraXAttn.
         camera_visible = person_visible.any(dim=-1).to(pose_emb.dtype)   # (B, T, K)
-        camera_temporal_conf = camera_visible.permute(0, 2, 1).reshape(B * K, T)
 
-        # Cross-camera attention mask: (B*T*H, K, K) — absent cameras are -inf keys.
-        # _build_confidence_mask sets all-absent rows to 0.0 (uniform attn) to prevent
-        # NaN softmax; _safe_mha inside CrossViewAttention zeros those outputs afterwards.
+        # Scene-level camera presence: camera k active if it has at least one detection
+        # across all T frames.  Used for the cross-camera attention mask on (B, K, D).
+        camera_visible_scene = camera_visible.any(dim=1).to(pose_emb.dtype)  # (B, K)
+
+        # Cross-camera attention mask: (B*H, K, K).
         camera_cross_view_mask = self._build_confidence_mask(
-            camera_visible.reshape(B * T, K), H
+            camera_visible_scene, H
         )
 
         shape_stream = shape_emb
@@ -1393,10 +1374,8 @@ class SSTNetwork(nn.Module):
             _nc(f"layer{layer_idx}/spatial_stream", spatial_stream)
 
             camera_stream = self.camera_layers[layer_idx](
-                camera_stream, B, T, K, D,
-                pe=pe,
+                camera_stream, B, K, D,
                 dropout=self.dropout,
-                temporal_conf=camera_temporal_conf,
                 cam_attn_mask=camera_cross_view_mask,
             )
             _nc(f"layer{layer_idx}/camera_stream", camera_stream)

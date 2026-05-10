@@ -292,11 +292,11 @@ class Trainer:
         Saved arrays (all float32, batch dim squeezed when B=1):
           pose                  (T, P, J, 6)  – predicted 6-D body pose in cam-0 world frame
           shape                 (T, P, 10)    – predicted SMPL-X betas
-          camera                (T, K, 8)     – predicted [quat(4), trans(3), focal_raw(1)] per camera
+          camera                (K, 8)        – predicted [quat(4), trans(3), focal_raw(1)] per camera (static)
           body_transl_world     (T, P, 3)     – predicted body root translation in world (cam-0) frame
           gt_body_pose          (T, P, J, 6)  – ground-truth body pose       (when available in targets)
           gt_body_shape         (T, P, 10)    – ground-truth body shape      (when available in targets)
-          gt_camera             (T, K, 8)     – ground-truth camera          (when available in targets)
+          gt_camera             (K, 8)        – ground-truth camera (static, when available in targets)
           gt_body_transl_world  (T, P, 3)     – ground-truth body root translation in world frame (when available)
         """
         path = Path(path)
@@ -448,7 +448,7 @@ class Trainer:
                             )
                     # body_transl_world range (always log for first step to confirm init)
                     if self._step == 0 and len(preds) > 2 and isinstance(preds[2], torch.Tensor):
-                        _cp = preds[2]   # (B, T, K, 8)
+                        _cp = preds[2]   # (B, K, 8) — static cameras
                         _qnorm = _cp[..., :4].norm(dim=-1)
                         _tmag  = _cp[..., 4:7].norm(dim=-1)
                         logger.info(
@@ -633,9 +633,9 @@ class Trainer:
             and isinstance(targets, dict)
             and "camera" in targets
         ):
-            camera_pred = preds[2].float()           # (B, T, K, 8)
-            cam_gt      = targets["camera"].float()  # (B, T, K, 8)
-            cam_valid   = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, T, K)
+            camera_pred = preds[2].float()           # (B, K, 8) — static cameras
+            cam_gt      = targets["camera"].float()  # (B, K, 8)
+            cam_valid   = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, K)
             if cam_valid.any():
                 cp = camera_pred[cam_valid]  # (N, 8)
                 cg = cam_gt[cam_valid]        # (N, 8)
