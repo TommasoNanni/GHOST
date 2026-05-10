@@ -223,8 +223,12 @@ def main() -> None:
     parser.add_argument(
         "--fps", type=int, default=30, help="Output video frame rate (default: 30)"
     )
+    parser.add_argument(
+        "--frames_dir", type=Path, default=None,
+        help="Directory containing extracted frames (overrides default video_dir/frames/)",
+    )
     args = parser.parse_args()
-    visualize_reid(args.video_dir, fps=args.fps)
+    visualize_reid(args.video_dir, fps=args.fps, frames_dir=args.frames_dir)
 
 
 if __name__ == "__main__":

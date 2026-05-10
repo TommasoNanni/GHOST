@@ -183,18 +183,18 @@ def parse_aria_calib(calib_txt: Path) -> dict:
     return {"intrinsics": intr, "extrinsic": ext, "width": w, "height": h}
 
 
-def build_undistort_maps_radtanthinprism(
+def build_undistort_maps_aria_fisheye(
     intr: np.ndarray,
     width: int,
     height: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build cv2.remap maps for the radtanthinprism distortion model.
+    """Build cv2.remap maps for Aria's FisheyeRadTanThinPrism model.
 
-    For each destination pixel (u, v) in the undistorted image we compute
-    its normalised undistorted position, apply the forward distortion model
-    to obtain the distorted normalised position, then convert back to pixel
-    coords in the original image.  The same K is used for both images
-    (no field-of-view change).
+    For each pixel (u, v) in the undistorted output image:
+      1. Unproject to a 3D ray using the pinhole model (output is always pinhole).
+      2. Project that ray into the distorted source image using the fisheye model,
+         where the distortion radius is the polar angle θ from the optical axis,
+         not the projected distance as in a standard pinhole model.
 
     Parameters
     ----------
@@ -202,11 +202,11 @@ def build_undistort_maps_radtanthinprism(
 
     Returns
     -------
-    map1, map2 : float32 remap arrays for cv2.remap
+    map1, map2 : float32 remap arrays (source coords in distorted image) for cv2.remap
     K_new      : (3,3) pinhole intrinsics of the undistorted image
     """
     f, cx, cy = intr[0], intr[1], intr[2]
-    k  = intr[3:9]    # k0..k5 (radial)
+    k  = intr[3:9]    # k0..k5 (radial, applied to θ)
     p0, p1 = intr[9], intr[10]
     s  = intr[11:15]  # s0..s3 (thin prism)
 
@@ -215,30 +215,39 @@ def build_undistort_maps_radtanthinprism(
         np.arange(height, dtype=np.float64),
     )
 
-    # Normalised coords (no distortion) for each destination pixel
+    # Step 1 — unproject output pixel to ray (xn, yn, 1) via pinhole
     xn = (us - cx) / f
     yn = (vs - cy) / f
 
-    # Forward radtanthinprism distortion
-    r2  = xn**2 + yn**2
-    r4  = r2**2
-    r6  = r2**3
-    r8  = r4**2
-    r10 = r4 * r6
-    r12 = r6**2
+    # Step 2 — project ray into distorted source image via fisheye model
+    # The distortion radius is θ (polar angle), not the projected distance.
+    r_tan = np.sqrt(xn**2 + yn**2)          # = tan(θ) since Z = 1
+    theta = np.arctan(r_tan)                 # polar angle from optical axis
 
-    radial = 1.0 + k[0]*r2 + k[1]*r4 + k[2]*r6 + k[3]*r8 + k[4]*r10 + k[5]*r12
+    th2 = theta**2
+    r_d = theta * (1.0 + k[0]*th2 + k[1]*th2**2 + k[2]*th2**3
+                       + k[3]*th2**4 + k[4]*th2**5 + k[5]*th2**6)
 
-    xt = 2*p0*xn*yn + p1*(r2 + 2*xn**2)
-    yt = p0*(r2 + 2*yn**2) + 2*p1*xn*yn
+    # Scale normalised ray to fisheye-projected coords; guard centre (r_tan → 0)
+    scale = np.where(r_tan > 1e-8, r_d / r_tan, 1.0)
+    tx = xn * scale
+    ty = yn * scale
 
-    xs = s[0]*r2 + s[1]*r4
-    ys = s[2]*r2 + s[3]*r4
+    r_d2 = r_d**2
+    r_d4 = r_d2**2
 
-    xd = radial*xn + xt + xs
-    yd = radial*yn + yt + ys
+    # Tangential distortion
+    xt = 2*p0*tx*ty + p1*(r_d2 + 2*tx**2)
+    yt = p0*(r_d2 + 2*ty**2) + 2*p1*tx*ty
 
-    # Source pixel coords in the distorted image
+    # Thin-prism distortion
+    xs = s[0]*r_d2 + s[1]*r_d4
+    ys = s[2]*r_d2 + s[3]*r_d4
+
+    xd = tx + xt + xs
+    yd = ty + yt + ys
+
+    # Step 3 — convert back to source pixel coords in the distorted image
     map1 = (f * xd + cx).astype(np.float32)
     map2 = (f * yd + cy).astype(np.float32)
 
@@ -387,7 +396,7 @@ def process_aria_cameras(
 
         aria_id  = aria_dir.name        # e.g. "aria01"
         calib_dir = aria_dir / "calib"
-        src_dir   = aria_dir / "images"
+        src_dir   = aria_dir / "images" / "rgb"
         dst_dir   = aria_dir / "images_undistorted"
 
         if not calib_dir.is_dir() or not src_dir.is_dir():
@@ -426,7 +435,7 @@ def process_aria_cameras(
         first_data = parse_aria_calib(first_calib_path)
         intr = first_data["intrinsics"]
         W, H = first_data["width"], first_data["height"]
-        map1, map2, K_new = build_undistort_maps_radtanthinprism(intr, W, H)
+        map1, map2, K_new = build_undistort_maps_aria_fisheye(intr, W, H)
 
         # ── Undistort frames ──────────────────────────────────────────────
         print(f"  Undistorting {aria_id}: {len(src_frames)} frames …")
@@ -592,6 +601,7 @@ def process_sequence(
     smpl_model: dict | None,
     smplx_model: dict | None,
     skip_smpl: bool,
+    skip_exo: bool = False,
 ) -> str:
     activity_dir = archive_path.parent
     seq_name     = archive_path.name.replace(".tar.gz", "")
@@ -623,7 +633,7 @@ def process_sequence(
         print(f"  Already extracted: {seq_name}")
 
     # ── 2. Exo cameras ────────────────────────────────────────────────────
-    calibration = process_exo_cameras(seq_dir, balance, skip_existing, jobs)
+    calibration = {} if skip_exo else process_exo_cameras(seq_dir, balance, skip_existing, jobs)
 
     # ── 3. Aria ego cameras ───────────────────────────────────────────────
     aria_calib = process_aria_cameras(seq_dir, skip_existing, jobs)
@@ -662,6 +672,8 @@ def main() -> None:
                         help="Threads per sequence for frame undistortion (default: 8)")
     parser.add_argument("--skip_existing", action="store_true",
                         help="Skip sequences whose calibration.json already exists")
+    parser.add_argument("--skip_exo", action="store_true",
+                        help="Skip exo camera undistortion")
     parser.add_argument("--skip_smpl", action="store_true",
                         help="Skip SMPL→SMPL-X conversion")
     parser.add_argument("--activity", default=None,
@@ -712,6 +724,7 @@ def main() -> None:
             smpl_model=smpl_model,
             smplx_model=smplx_model,
             skip_smpl=args.skip_smpl,
+            skip_exo=args.skip_exo,
         )
         print(f"  → {status}")
 

@@ -825,8 +825,12 @@ class EgoHumansDataset(Dataset):
                         cam02/
                             images_undistorted/
                                 ...
-                        ...cam08/
-                    ego/                    ← ignored (aria cameras)
+                        ...cam08/           ← ignored (exo cameras not used)
+                    ego/
+                        aria01/
+                            images_undistorted/
+                            calib/
+                        ...ariaN/
                     processed_data/         ← GT annotations
                     colmap/                 ← raw COLMAP output
                 002_tagging/
@@ -835,9 +839,10 @@ class EgoHumansDataset(Dataset):
                 001_legoassemble/
                     ...
 
-    Each exo camera becomes a :class:`Video` in image-sequence mode backed by
-    its ``images_undistorted/`` directory.  Sequences without a
-    ``calibration.json`` are skipped (not yet preprocessed).
+    Each aria ego-camera becomes a :class:`Video` in image-sequence mode backed
+    by its ``ego/<aria>/images_undistorted/`` directory.  Exo cameras are
+    ignored.  Sequences without a ``calibration.json`` are skipped (not yet
+    preprocessed by ``scripts/prepare_egohumans.py``).
 
     Parameters
     ----------
@@ -956,13 +961,13 @@ class EgoHumansDataset(Dataset):
         return [s.scene_id for s in self.scenes]
 
     def _list_camera_dirs(self, seq_dir: Path) -> list[tuple[Path, str]]:
-        """Return sorted (images_undistorted_dir, cam_name) pairs for exo cameras."""
-        exo_dir = seq_dir / "exo"
-        if not exo_dir.is_dir():
+        """Return sorted (images_undistorted_dir, cam_name) pairs for aria ego cameras."""
+        ego_dir = seq_dir / "ego"
+        if not ego_dir.is_dir():
             return []
         result = []
-        for cam_dir in sorted(exo_dir.iterdir()):
-            if not cam_dir.is_dir():
+        for cam_dir in sorted(ego_dir.iterdir()):
+            if not cam_dir.is_dir() or not cam_dir.name.startswith("aria"):
                 continue
             undist_dir = cam_dir / "images_undistorted"
             if undist_dir.is_dir() and any(
@@ -975,22 +980,35 @@ class EgoHumansDataset(Dataset):
         return Video(frames_dir=undist_dir, resolution=self.resolution)
 
     def _load_calibration(self, seq_dir: Path) -> dict[str, dict]:
-        """Load calibration.json and convert lists back to numpy arrays."""
+        """Load calibration.json and convert lists back to numpy arrays.
+
+        Aria cameras have no static R/t in calibration.json (they move); their
+        per-frame extrinsics live in aria_extrinsics/<aria>.npz.  We load frame-0
+        as a static placeholder so the pipeline doesn't crash; the fusion dataset
+        reads per-frame extrinsics directly from the npz.
+        """
         calib_path = seq_dir / "calibration.json"
         with open(calib_path) as f:
             raw = json.load(f)
         calibration: dict[str, dict] = {}
         for cam_name, entry in raw.items():
             K = np.array(entry["K"], dtype=np.float32)
-            R = np.array(entry["R"], dtype=np.float32)
-            t = np.array(entry["t"], dtype=np.float32)
+            if "R" in entry and "t" in entry:
+                R = np.array(entry["R"], dtype=np.float32)
+                t = np.array(entry["t"], dtype=np.float32)
+            else:
+                # Aria: load frame-0 extrinsic from the per-frame npz as a placeholder
+                ext_path = seq_dir / entry["extrinsics_path"]
+                ext_data = np.load(str(ext_path))["extrinsics"]  # (N, 3, 4)
+                R = ext_data[0, :, :3].astype(np.float32)
+                t = ext_data[0, :, 3].astype(np.float32)
             ext = np.concatenate([R, t[:, None]], axis=1)   # (3, 4)
             calibration[cam_name] = {
                 "K":           K,
                 "R":           R,
                 "t":           t,
-                "extrinsics":  ext,    # world-to-cam, same convention as RICH
-                "intrinsics":  K,      # alias used by FusionDatapoint.convert_camera
+                "extrinsics":  ext,
+                "intrinsics":  K,
                 "width":       entry["width"],
                 "height":      entry["height"],
             }

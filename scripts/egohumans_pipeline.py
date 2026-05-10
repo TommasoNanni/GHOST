@@ -67,7 +67,6 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     # Step 3: Match person IDs across camera views
     print(f"\n--- Running cross-view person re-identification ---")
     scene_output_dir = Path(next(iter(video_dirs.values()))).parent
-    _reid_already_done = (scene_output_dir / "cross_view_reid.json").exists()
     reidentifier.match_across_views(
         scene=scene,
         video_dirs=video_dirs,
@@ -128,23 +127,25 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir):
     except Exception as e:
         print(f"  ERROR: FusionDatapoint failed to load: {e}")
 
-    # Step 7: Visualise the re-ID corrected segmentation (only if ReID ran this session)
-    if not _reid_already_done:
-        print(f"\n--- Visualising re-ID corrected segmentation ---")
-        for video in scene.videos:
-            if video.video_id not in video_dirs:
-                continue
-            print(f"  {video.video_id}")
-            try:
-                visualize_reid(
-                    video_dir=Path(video_dirs[video.video_id]),
-                    fps=int(video.fps),
-                    frames_dir=video.frames_home,
-                )
-            except FileNotFoundError as e:
-                print(f"  WARNING: skipping visualisation — {e}")
-    else:
-        print(f"\n--- Skipping re-ID visualisation (cross-view ReID was already done) ---")
+    # Step 7: Visualise the re-ID corrected segmentation for any video missing its mp4
+    print(f"\n--- Visualising re-ID corrected segmentation ---")
+    for video in scene.videos:
+        if video.video_id not in video_dirs:
+            continue
+        vid_dir = Path(video_dirs[video.video_id])
+        vis_path = vid_dir / f"{video.video_id}_segmentation_reid.mp4"
+        if vis_path.exists():
+            print(f"  {video.video_id}: already exists, skipping")
+            continue
+        print(f"  {video.video_id}")
+        try:
+            visualize_reid(
+                video_dir=vid_dir,
+                fps=int(video.fps),
+                frames_dir=video.frames_home,
+            )
+        except FileNotFoundError as e:
+            print(f"  WARNING: skipping visualisation — {e}")
 
 
 def main():
@@ -157,7 +158,7 @@ def main():
     args = parser.parse_args()
 
     egohumans_data_root = CONFIG.data.egohumans_data_root
-    output_dir = CONFIG.data.output_directory
+    output_dir = CONFIG.data.egohumans_output_directory
     scenes_slice = CONFIG.data.slice
 
     ds = EgoHumansDataset(
