@@ -9,6 +9,9 @@ prints per-scene and aggregate summaries.
 Scenes listed in SKIP_SCENES are silently skipped — use this to exclude
 scenes where you know cross-view re-ID is unreliable.
 
+Individual cameras can be excluded per scene via SKIP_CAMERAS without
+dropping the whole scene (e.g. a camera with track-stealing artefacts).
+
 Usage (GPU node):
     pixi run python evaluation/alignment_experiments_multi.py
 """
@@ -28,15 +31,30 @@ import torch
 from synchronize_videos.synchronizer import Synchronizer
 from utilities.body_data import load_person_smplx_pose
 
-VERBOSE     = False   # set True to see per-person DTW offsets and shift distributions
-SCENES_ROOT = Path("preprocessing_outputs/new_within")
+VERBOSE     = False    # set True to see per-person DTW offsets and shift distributions
+SCENES_ROOT = Path("/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich11_segmentation_test")
 # Scene folder names (relative to SCENES_ROOT) to skip entirely.
 # Add scenes here when you know cross-view re-ID is bad on them.
 SKIP_SCENES: list[str] = [
-    "Pavallion_003_018_tossball"
+    "Pavallion_013_plankjack"
 ]
-N_TRIALS  = 10    # random-shift trials per scene
-MAX_SHIFT = 100   # maximum absolute shift (frames)
+# When non-empty, only these scenes are evaluated (overrides SKIP_SCENES).
+# Useful for focused diagnosis on specific failing cases.
+ONLY_SCENES: list[str] = []
+# "Pavallion_000_plankjack",       # MAE 174 — periodic motion, false harmonics
+# "ParkingLot2_014_phonetalk2",    # MAE 173 — static, flat cost surface
+# "ParkingLot2_008_phonetalk1",    # MAE 146 — static, flat cost surface
+# "ParkingLot2_014_takingphotos2", # MAE  36 — low-motion
+# "ParkingLot1_005_pushup3",       # MAE  26 — periodic
+# Per-scene cameras to exclude (e.g. track-stealing artefacts).
+# The scene is still evaluated with its remaining cameras.
+SKIP_CAMERAS: dict[str, list[str]] = {
+    "Pavallion_003_018_tossball": ["cam_06"],
+    "ParkingLot2_008_pushup2": ["cam_03"],
+    "ParkingLot2_014_takingphotos2": ["cam_01"],
+}
+N_TRIALS  = 10     # random-shift trials per scene
+MAX_SHIFT = 30    # maximum absolute shift (frames)
 SEED      = 42
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -47,7 +65,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_scene(scene_dir: Path) -> dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]]:
+def load_scene(
+    scene_dir: Path,
+    exclude_cameras: list[str] | None = None,
+) -> dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]]:
     """Load joint rotation sequences for all cameras in a scene.
 
     Loads smplx_body_pose (T, 63), smplx_left_hand_pose (T, 45) and
@@ -59,15 +80,23 @@ def load_scene(scene_dir: Path) -> dict[str, dict[int, tuple[torch.Tensor, torch
     Confidence comes from pred_joint_confidence[:, 1:52], which covers
     the same 51 joints in SMPL-X joint ordering (skipping root at index 0).
 
+    Parameters
+    ----------
+    exclude_cameras : list of camera directory names to skip for this scene.
+
     Returns
     -------
     cam_data : {cam_id: {person_id: (rotations T×51×3, conf T×51)}}
     """
+    exclude_cameras = exclude_cameras or []
     cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]] = {}
 
     for cam_dir in sorted(scene_dir.iterdir()):
         body_dir = cam_dir / "body_data"
         if not cam_dir.is_dir() or not body_dir.exists():
+            continue
+        if cam_dir.name in exclude_cameras:
+            logger.info(f"  {cam_dir.name}: skipped (in SKIP_CAMERAS)")
             continue
 
         persons: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
@@ -182,6 +211,8 @@ def run_trial(
         "estimated":   estimated.cpu().tolist(),
         "errors":      errors.tolist(),
         "mae":         mae,
+        "median_ae":   errors.median().item(),
+        "within_half": (errors <= 0.5).float().mean().item(),
         "within_1":    (errors <= 1).float().mean().item(),
         "within_2":    (errors <= 2).float().mean().item(),
     }
@@ -200,7 +231,10 @@ def run_scene(
     logger.info(f"\n{'=' * 60}")
     logger.info(f"Scene: {scene_dir.name}")
 
-    cam_data = load_scene(scene_dir)
+    exclude_cams = SKIP_CAMERAS.get(scene_dir.name, [])
+    if exclude_cams:
+        logger.info(f"  Excluding cameras: {exclude_cams}")
+    cam_data = load_scene(scene_dir, exclude_cameras=exclude_cams)
     if len(cam_data) < 2:
         logger.warning(f"  Skipping: need ≥2 cameras, found {len(cam_data)}")
         return None
@@ -239,48 +273,60 @@ def run_scene(
         logger.warning(f"  All trials skipped for {scene_dir.name} — no usable results")
         return None
 
-    all_mae      = [r["mae"]      for r in results]
-    all_within_1 = [r["within_1"] for r in results]
-    all_within_2 = [r["within_2"] for r in results]
+    all_mae        = [r["mae"]         for r in results]
+    all_median_ae  = [r["median_ae"]   for r in results]
+    all_within_half= [r["within_half"] for r in results]
+    all_within_1   = [r["within_1"]    for r in results]
+    all_within_2   = [r["within_2"]    for r in results]
     all_spreads  = [
         max(r["true_shifts"].values()) - min(r["true_shifts"].values())
         for r in results
     ]
 
     logger.info(f"\n  SUMMARY — {scene_dir.name}  ({N_TRIALS} trials)")
-    logger.info(f"    Shift spread  mean={np.mean(all_spreads):.1f}  median={np.median(all_spreads):.1f}  max={np.max(all_spreads):.1f}")
-    logger.info(f"    MAE           mean={np.mean(all_mae):.2f}  median={np.median(all_mae):.2f}  max={np.max(all_mae):.2f}")
-    logger.info(f"    Within 1fr    {np.mean(all_within_1)*100:.1f}%")
-    logger.info(f"    Within 2fr    {np.mean(all_within_2)*100:.1f}%")
+    logger.info(f"    Shift spread    mean={np.mean(all_spreads):.1f}  median={np.median(all_spreads):.1f}  max={np.max(all_spreads):.1f}")
+    logger.info(f"    MAE (frames)    mean={np.mean(all_mae):.2f}  median={np.median(all_mae):.2f}  max={np.max(all_mae):.2f}")
+    logger.info(f"    MedAE (frames)  mean={np.mean(all_median_ae):.2f}")
+    logger.info(f"    Within 0.5fr    {np.mean(all_within_half)*100:.1f}%")
+    logger.info(f"    Within 1fr      {np.mean(all_within_1)*100:.1f}%")
+    logger.info(f"    Within 2fr      {np.mean(all_within_2)*100:.1f}%")
 
     return {
-        "scene":      scene_dir.name,
-        "n_cameras":  len(cam_ids),
-        "n_persons":  len(pids),
-        "mae_mean":   float(np.mean(all_mae)),
-        "mae_median": float(np.median(all_mae)),
-        "mae_max":    float(np.max(all_mae)),
-        "within_1":   float(np.mean(all_within_1)),
-        "within_2":   float(np.mean(all_within_2)),
-        "trial_results": results,
+        "scene":           scene_dir.name,
+        "n_cameras":       len(cam_ids),
+        "n_persons":       len(pids),
+        "spread_mean":     float(np.mean(all_spreads)),
+        "mae_mean":        float(np.mean(all_mae)),
+        "mae_median":      float(np.median(all_mae)),
+        "mae_max":         float(np.max(all_mae)),
+        "median_ae_mean":  float(np.mean(all_median_ae)),
+        "within_half":     float(np.mean(all_within_half)),
+        "within_1":        float(np.mean(all_within_1)),
+        "within_2":        float(np.mean(all_within_2)),
+        "trial_results":   results,
     }
 
 if __name__ == "__main__":
     logger.info(f"Scenes root: {SCENES_ROOT}")
     logger.info(f"Device: {DEVICE}  |  trials per scene: {N_TRIALS}  |  max_shift: {MAX_SHIFT}")
-    if SKIP_SCENES:
+    if ONLY_SCENES:
+        logger.info(f"Running only scenes: {ONLY_SCENES}")
+    elif SKIP_SCENES:
         logger.info(f"Skipping scenes: {SKIP_SCENES}")
 
     scene_dirs = sorted(
         d for d in SCENES_ROOT.iterdir()
-        if d.is_dir() and d.name not in SKIP_SCENES
+        if d.is_dir() and (
+            d.name in ONLY_SCENES if ONLY_SCENES
+            else d.name not in SKIP_SCENES
+        )
     )
     if not scene_dirs:
         raise RuntimeError(f"No scene directories found under {SCENES_ROOT}")
 
     logger.info(f"Found {len(scene_dirs)} scene(s): {[d.name for d in scene_dirs]}")
 
-    sync = Synchronizer(method="cross_corr", device=DEVICE, min_overlap=100)
+    sync = Synchronizer(method="cross_corr", device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
     rng  = np.random.default_rng(SEED)
 
     scene_summaries = []
@@ -293,22 +339,55 @@ if __name__ == "__main__":
         logger.error("No usable scenes found — nothing to summarise.")
         sys.exit(1)
 
-    all_mae      = [s["mae_mean"]  for s in scene_summaries]
-    all_within_1 = [s["within_1"]  for s in scene_summaries]
-    all_within_2 = [s["within_2"]  for s in scene_summaries]
+    all_spread     = [s["spread_mean"]     for s in scene_summaries]
+    all_mae        = [s["mae_mean"]        for s in scene_summaries]
+    all_median_ae  = [s["median_ae_mean"]  for s in scene_summaries]
+    all_within_half= [s["within_half"]     for s in scene_summaries]
+    all_within_1   = [s["within_1"]        for s in scene_summaries]
+    all_within_2   = [s["within_2"]        for s in scene_summaries]
 
     logger.info("\n" + "=" * 60)
     logger.info(f"AGGREGATE SUMMARY  ({len(scene_summaries)} scene(s)  ×  {N_TRIALS} trials each)")
     logger.info("")
-    logger.info(f"  {'Scene':<30}  {'Cams':>4}  {'Pers':>4}  {'MAE mean':>9}  {'Within-1':>9}  {'Within-2':>9}")
-    logger.info(f"  {'-'*30}  {'-'*4}  {'-'*4}  {'-'*9}  {'-'*9}  {'-'*9}")
+
+    # ── per-scene table (frames) ──────────────────────────────────────────
+    hdr = f"  {'Scene':<35}  {'Cams':>4}  {'Pers':>4}  {'Spread':>7}  {'MAE':>6}  {'MedAE':>6}  {'W-0.5':>7}  {'W-1':>7}  {'W-2':>7}"
+    sep = f"  {'-'*35}  {'-'*4}  {'-'*4}  {'-'*7}  {'-'*6}  {'-'*6}  {'-'*7}  {'-'*7}  {'-'*7}"
+    logger.info("  All values in frames")
+    logger.info(hdr)
+    logger.info(sep)
     for s in scene_summaries:
         logger.info(
-            f"  {s['scene']:<30}  {s['n_cameras']:>4}  {s['n_persons']:>4}  "
-            f"{s['mae_mean']:>9.2f}  {s['within_1']*100:>8.1f}%  {s['within_2']*100:>8.1f}%"
+            f"  {s['scene']:<35}  {s['n_cameras']:>4}  {s['n_persons']:>4}  "
+            f"{s['spread_mean']:>7.1f}  "
+            f"{s['mae_mean']:>6.2f}  {s['median_ae_mean']:>6.2f}  "
+            f"{s['within_half']*100:>6.1f}%  {s['within_1']*100:>6.1f}%  {s['within_2']*100:>6.1f}%"
         )
-    logger.info(f"  {'-'*30}  {'-'*4}  {'-'*4}  {'-'*9}  {'-'*9}  {'-'*9}")
+    logger.info(sep)
     logger.info(
-        f"  {'MEAN':<30}  {'':>4}  {'':>4}  "
-        f"{np.mean(all_mae):>9.2f}  {np.mean(all_within_1)*100:>8.1f}%  {np.mean(all_within_2)*100:>8.1f}%"
+        f"  {'MEAN':<35}  {'':>4}  {'':>4}  "
+        f"{np.mean(all_spread):>7.1f}  "
+        f"{np.mean(all_mae):>6.2f}  {np.mean(all_median_ae):>6.2f}  "
+        f"{np.mean(all_within_half)*100:>6.1f}%  {np.mean(all_within_1)*100:>6.1f}%  {np.mean(all_within_2)*100:>6.1f}%"
     )
+
+    # ── ms conversion ─────────────────────────────────────────────────────
+    for fps in [15, 30]:
+        ms = 1000.0 / fps
+        logger.info("")
+        logger.info(f"  ── Assuming {fps} fps  (1 frame = {ms:.1f} ms) ──")
+        logger.info(
+            f"    MAE            {np.mean(all_mae)*ms:>7.1f} ms"
+        )
+        logger.info(
+            f"    MedAE          {np.mean(all_median_ae)*ms:>7.1f} ms"
+        )
+        logger.info(
+            f"    Within {0.5*ms:.0f} ms   {np.mean(all_within_half)*100:>6.1f}%   (≤0.5 fr)"
+        )
+        logger.info(
+            f"    Within {1*ms:.0f} ms    {np.mean(all_within_1)*100:>6.1f}%   (≤1 fr)"
+        )
+        logger.info(
+            f"    Within {2*ms:.0f} ms    {np.mean(all_within_2)*100:>6.1f}%   (≤2 fr)"
+        )
