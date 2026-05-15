@@ -812,10 +812,10 @@ class RICHFusionDatapoint(FusionDatapoint):
         also pre-converts the GT extrinsics to ``[qx, qy, qz, qw, tx, ty, tz]``
         vectors in ``self._gt_camera_vecs`` for use in targets.
         """
-        rich_data_root = Path(kwargs.get("rich_data_root", ""))
+        rich_gt_dir = Path(kwargs.get("rich_gt_dir", kwargs.get("rich_data_root", "")))
         scene_name = self.scene_dir.name
         stem = self._scene_stem(scene_name)
-        calib_dir = rich_data_root / "scan_calibration" / stem / "calibration"
+        calib_dir = rich_gt_dir / "scan_calibration" / stem / "calibration"
 
         self._cameras = []
         self._gt_camera_vecs: list[np.ndarray] = []  # (8,) per camera
@@ -931,9 +931,9 @@ class RICHFusionDatapoint(FusionDatapoint):
         SMPL-X parameters for one person (batch dim = 1, squeezed out).
         GT is world-space so it is replicated across all camera slots.
         """
-        rich_data_root = Path(kwargs.get("rich_data_root", ""))
+        rich_gt_dir = Path(kwargs.get("rich_gt_dir", kwargs.get("rich_data_root", "")))
         scene_name = self.scene_dir.name
-        gt_root = rich_data_root / "train_body" / scene_name
+        gt_root = rich_gt_dir / "train_body" / scene_name
 
         # Load SMPL-X hand PCA basis so 12-dim GT hand coefficients can be
         # decoded to 45-dim axis-angle (15 joints × 3).

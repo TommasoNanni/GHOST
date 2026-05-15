@@ -1,11 +1,13 @@
 data:
   egoexo_data_root: null
-  rich_data_root: "/capstor/scratch/cscs/tnanni/datasets/rich/train"
+  rich_data_root: "/tmp/rich_train"
+  rich_gt_dir: "/capstor/scratch/cscs/tnanni/datasets/rich"
   egohumans_data_root: "/capstor/scratch/cscs/tnanni/datasets/egohumans"
   rich_max_side: 1440  # resize RICH frames so longest side <= this before SAM3; null to skip
+  rich_frames_base_dir: "/tmp/rich_frames"  # writable dir for resized frames (needed when data root is read-only)
   output_directory: "/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich11_segmentation_test"
   egohumans_output_directory: "/iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_segmentation_test"
-  slice: null # Number of scenes to load (set for testing)
+  slice: null # Number of scenes to load (null = all)
   exclude_egocentric: true # Exclude egocentric videos for simplicity
   smplx_model_path: "body_models/SMPLX_NEUTRAL.pkl"
   mhr_model_path: "MHR/assets"
@@ -49,20 +51,23 @@ fusion:
   loss:
     VPoser_path: "checkpoints/V02_05/"
     pose_mse_weight: 8.0
-    shape_mse_weight: 1.0
-    epipolar_weight: 0.1
+    shape_mse_weight: 0.1
+    epipolar_weight: 10.0
     temporal_weight: 0.1
     bone_length_weight: 0.01
-    camera_mse_weight: 10.0
-    triangulation_weight: 0.05
+    camera_rotation_mse_weight: 10.0
+    camera_translation_mse_weight: 1.0
+    gt_translation_mse_weight: 1.0
+    triangulation_weight: 0.5
     translation_mse_weight: 1.0
     shape_reg_weight: 1.0
     translation_temporal_weight: 0.1
     vposer_weight: 0.001
-    joint_position_weight: 1.0
+    joint_position_weight: 8.0
   training:
-    max_epochs: 500
+    max_epochs: 400
     lr: 0.0001
+    camera_lr: 0.005
     batch_size: 1
     grad_clip: 1.0
     scheduler: cosine  # cosine | plateau | null

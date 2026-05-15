@@ -145,7 +145,7 @@ class Video:
             "original_w": self.original_w,
         }
 
-    def extract_frames(self, frame_dir: Path) -> tuple[Path, list[str]]:
+    def extract_frames(self, frame_dir: Path, resize_dst: Path | None = None) -> tuple[Path, list[str]]:
         """Locate or extract frames for this video.
 
         Resolution order:
@@ -174,7 +174,7 @@ class Video:
                 if p.suffix.lower() in _IMAGE_EXTS
             )
             if frames:
-                return self._maybe_resize(self.frames_dir, frames)
+                return self._maybe_resize(self.frames_dir, frames, dst_dir=resize_dst)
 
         # Case 2: path is itself an image directory.
         if self.path is not None and self.path.is_dir():
@@ -186,7 +186,7 @@ class Video:
                     if p.suffix.lower() in _IMAGE_EXTS
                 )
                 if frames:
-                    return self._maybe_resize(frames_subdir, frames)
+                    return self._maybe_resize(frames_subdir, frames, dst_dir=resize_dst)
             # Use images directly from this directory — no copying or
             # symlinking; the source data stays exactly where it is.
             images_in_root = sorted(
@@ -194,7 +194,7 @@ class Video:
                 if p.suffix.lower() in _IMAGE_EXTS
             )
             if images_in_root:
-                return self._maybe_resize(self.path, images_in_root)
+                return self._maybe_resize(self.path, images_in_root, dst_dir=resize_dst)
             # No images found anywhere.
             return self.path, []
 
@@ -299,6 +299,15 @@ class Video:
         When only *frames_dir* was supplied at construction, that directory
         is returned as-is.
         """
+        # frames_dir is set explicitly after extract_frames/resize; prefer it
+        # when it is populated and lives outside self.path (e.g. redirected to
+        # a writable location when data_root is on a read-only mount).
+        if self.frames_dir is not None:
+            if self.path is None or not self.frames_dir.is_relative_to(self.path):
+                if self.frames_dir.is_dir() and any(
+                    p.suffix.lower() in _IMAGE_EXTS for p in self.frames_dir.iterdir()
+                ):
+                    return self.frames_dir
         if self.path is not None:
             if self.path.is_dir():
                 frames_subdir = self.path / "frames"
@@ -318,7 +327,12 @@ class Video:
             f"fps={self.fps:.1f}, dur={self.duration_s:.1f}s)"
         )
 
-    def _maybe_resize(self, src_dir: Path, src_frames: list[str]) -> tuple[Path, list[str]]:
+    def _maybe_resize(
+        self,
+        src_dir: Path,
+        src_frames: list[str],
+        dst_dir: Path | None = None,
+    ) -> tuple[Path, list[str]]:
         """Return (src_dir, src_frames) as-is, or write aspect-ratio-preserving
         resized copies to a frames/ subdirectory when max_side is set and the
         images are larger than max_side on their longest dimension."""
@@ -330,13 +344,15 @@ class Video:
         if first is None or max(first.shape[:2]) <= self._max_side:
             return src_dir, src_frames
 
-        # Write resized copies to a frames/ subdirectory next to the source.
+        # Write resized copies to dst_dir if provided, otherwise next to source.
         # If src_dir is already named "frames", write to a sibling "frames_resized/".
-        dst_dir = (
-            src_dir.parent / "frames_resized"
-            if src_dir.name == "frames"
-            else src_dir / "frames"
-        )
+        caller_provided_dst = dst_dir is not None
+        if not caller_provided_dst:
+            dst_dir = (
+                src_dir.parent / "frames_resized"
+                if src_dir.name == "frames"
+                else src_dir / "frames"
+            )
         dst_dir.mkdir(parents=True, exist_ok=True)
         existing = sorted(p.name for p in dst_dir.iterdir() if p.suffix.lower() in _IMAGE_EXTS)
         if existing:
@@ -355,11 +371,14 @@ class Video:
             img = cv2.resize(img, (round(w * scale), round(h * scale)))
             cv2.imwrite(str(dst_dir / name), img)
 
-        # Delete the high-res originals now that resized copies are on disk.
-        for name in src_frames:
-            p = src_dir / name
-            if p.exists():
-                p.unlink()
+        # Delete the high-res originals only when resizing in-place (src and dst
+        # are on the same filesystem). When dst_dir was explicitly provided the
+        # source is kept intact (e.g. read-only squashfuse mount).
+        if not caller_provided_dst:
+            for name in src_frames:
+                p = src_dir / name
+                if p.exists():
+                    p.unlink()
 
         self.frames_dir = dst_dir
         return dst_dir, src_frames
@@ -653,8 +672,10 @@ class RichDataset(Dataset):
         image_extensions: tuple[str, ...] = (".jpg", ".jpeg", ".bmp", ".png"),
         slice: int | None = None,
         max_side: int | None = None,
+        frames_base_dir: str | Path | None = None,
     ):
         self.data_root = Path(data_root)
+        self._frames_base_dir = Path(frames_base_dir) if frames_base_dir else None
         self.resolution = resolution
         self.image_extensions = image_extensions
         self._max_side = max_side
@@ -717,8 +738,24 @@ class RichDataset(Dataset):
         print(f"Ensuring frames/ layout for {total_cams} cameras ...")
         for scene in tqdm.tqdm(self.scenes, desc="Scenes"):
             for video in tqdm.tqdm(scene.videos, desc=f"  {scene.scene_id}", leave=False):
-                actual_dir, _ = video.extract_frames(video.frames_home)
+                if self._frames_base_dir is not None:
+                    resize_dst = self._frames_base_dir / scene.scene_id / video.video_id / "frames"
+                    resize_dst.mkdir(parents=True, exist_ok=True)
+                else:
+                    resize_dst = None
+                actual_dir, _ = video.extract_frames(video.frames_home, resize_dst=resize_dst)
                 video.frames_dir = actual_dir
+                if video.frame_resolution == (0, 0) and actual_dir.is_dir():
+                    first = next(
+                        (p for p in sorted(actual_dir.iterdir())
+                         if p.suffix.lower() in _IMAGE_EXTS), None
+                    )
+                    if first is not None:
+                        import cv2 as _cv2
+                        _img = _cv2.imread(str(first))
+                        if _img is not None:
+                            video.original_h, video.original_w = _img.shape[:2]
+                            video.frame_resolution = (video.original_h, video.original_w)
         print("Frame layout ready.")
 
     def __len__(self) -> int:
