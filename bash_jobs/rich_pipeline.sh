@@ -1,21 +1,22 @@
 #!/bin/bash
-#SBATCH --time=24:00:00
-#SBATCH --account=ls_polle
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=24
-#SBATCH --mem-per-cpu=8G
-#SBATCH --gpus=2
-#SBATCH --gres=gpumem:40G 
+#SBATCH --time=01:30:00
+#SBATCH --account=a144
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --gpus-per-node=4
 #SBATCH --job-name=rich_pipeline
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL          
 #SBATCH --mail-user=tnanni@ethz.ch
+#SBATCH --partition=debug
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd /cluster/project/cvg/students/tnanni/ghost
+cd /users/tnanni/ghost
+ulimit -c 0  # disable core dumps — they fill up home quota
 
 echo "=== GPU STATUS ==="
 nvidia-smi
@@ -23,14 +24,10 @@ echo "========================="
 
 echo "Job ID:       $SLURM_JOB_ID"
 echo "Node:         $SLURMD_NODENAME"
-echo "GPUs:         $SLURM_GPUS"
 echo "Start:        $(date)"
-echo "Working dir:  $SCRIPT_DIR"
 echo ""
 
-
-# Run via pixi (activates the correct conda env automatically)
-pixi run python -m scripts.rich_pipeline
+srun pixi run python -m scripts.rich_pipeline
 
 echo ""
 echo "Done: $(date)"

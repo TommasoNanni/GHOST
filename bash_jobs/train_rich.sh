@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=1:30:00
+#SBATCH --time=01:30:00
 #SBATCH --account=a144
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -42,7 +42,7 @@ srun pixi run torchrun \
     --rdzv_backend=c10d \
     --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
     --rdzv_id="$SLURM_JOB_ID" \
-    -m scripts.train_rich --resume
+    -m scripts.train_rich 
 
 echo ""
 echo "Done: $(date)"

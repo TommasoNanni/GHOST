@@ -1,24 +1,35 @@
 #!/bin/bash
 #SBATCH --job-name=rich_dl_scratch
-#SBATCH --account=ls_polle
-#SBATCH --output=/cluster/scratch/tnanni/rich_dl_scratch_%j.log
-#SBATCH --ntasks=1
+#SBATCH --account=a144
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem-per-cpu=4G
-#SBATCH --time=20:00:00
+#SBATCH --mem=32G
+#SBATCH --time=01:30:00
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=tnanni@ethz.ch
-#
+#SBATCH --partition=debug
+
 # Download RICH train scenes to scratch, extract and convert images there,
-# then move the processed scene directory to the final destination on project.
+# then move the processed scene directory to the final destination.
 #
 # Submit with credentials:
 #   sbatch --export=ALL,RICH_USER=youruser,RICH_PASS=yourpass bash_jobs/download_process_rich_via_scratch.sh
 set -euo pipefail
 
-RICH_TRAIN_ROOT="/cluster/project/cvg/data/rich/ps/project/multi-ioi/rich_release/train"
-SCRATCH_DIR="/cluster/scratch/tnanni/rich_staging"
-GHOST_DIR="/cluster/project/cvg/students/tnanni/ghost"
+cd /users/tnanni/ghost
+ulimit -c 0
+
+echo "Job ID:  $SLURM_JOB_ID"
+echo "Node:    $SLURMD_NODENAME"
+echo "Start:   $(date)"
+echo ""
+
+RICH_TRAIN_ROOT="/capstor/scratch/cscs/tnanni/datasets/rich/train"
+SCRATCH_DIR="/capstor/scratch/cscs/tnanni/rich_staging"
+GHOST_DIR="/users/tnanni/ghost"
 
 mkdir -p "$SCRATCH_DIR"
 
@@ -45,7 +56,7 @@ PASSWORD=$(urle "$PASSWORD")
 
 # ── Scenes to download ───────────────────────────────────────────────────────
 SCENES=(
-    # "BBQ_001_guitar.tar.gz" # DOWNLOADED
+    # "BBQ_001_guitar.tar.gz"
     # "BBQ_001_juggle.tar.gz" # DOWNLOADED
     # "LectureHall_018_wipingchairs1.tar.gz" # DOWNLOADED
     # "LectureHall_018_wipingspray1.tar.gz" # DOWNLOADED
@@ -137,7 +148,6 @@ for tarfile in "${SCENES[@]}"; do
 
     # ── 3a. Convert BMP → JPEG on scratch ─────────────────
     echo "[$(date '+%H:%M:%S')] Converting BMP → JPEG ..."
-    cd "$GHOST_DIR"
     CONDA_OVERRIDE_CUDA=12.6 pixi run python -m utilities.convert_rich_bmp_to_jpeg \
         --root "$scratch_scene" \
         --quality 92 \
