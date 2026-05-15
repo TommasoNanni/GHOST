@@ -31,11 +31,15 @@ from fusion.loss import (
     BoneLengthconsistencyLoss,
     CameraMSELoss,
     CameraMSELossVGGT,
+    CameraRotationMSELoss,
+    CameraTranslationMSELoss,
     EpipolarLoss,
+    JointPositionLoss,
     PoseMSELoss,
     ShapeMSELoss,
     ShapeRegularizationLoss,
     TemporalSmoothnessLoss,
+    GTCameraTranslationMSELoss,
     TranslationMSELoss,
     TranslationSmoothnessLoss,
     TriangulationLoss,
@@ -71,7 +75,7 @@ FORCE_GT_CAMERAS: bool = False
 
 # Slice the sequence to the first MAX_T frames before training.
 # Set to None to use the full sequence.
-MAX_T: int = None
+MAX_T: int = 30
 
 
 def main():
@@ -89,14 +93,18 @@ def main():
     epipolar_weight              = CONFIG.fusion.loss.epipolar_weight
     temporal_weight              = CONFIG.fusion.loss.temporal_weight
     bone_length_weight           = CONFIG.fusion.loss.bone_length_weight
-    camera_mse_weight            = CONFIG.fusion.loss.camera_mse_weight
-    triangulation_weight         = CONFIG.fusion.loss.triangulation_weight
-    translation_mse_weight       = CONFIG.fusion.loss.translation_mse_weight
+    camera_rotation_mse_weight    = CONFIG.fusion.loss.camera_rotation_mse_weight
+    camera_translation_mse_weight = CONFIG.fusion.loss.camera_translation_mse_weight
+    gt_translation_mse_weight     = CONFIG.fusion.loss.gt_translation_mse_weight
+    triangulation_weight          = CONFIG.fusion.loss.triangulation_weight
+    translation_mse_weight        = CONFIG.fusion.loss.translation_mse_weight
     shape_reg_weight             = CONFIG.fusion.loss.shape_reg_weight
     translation_temporal_weight  = CONFIG.fusion.loss.translation_temporal_weight
     vposer_weight                = CONFIG.fusion.loss.vposer_weight
+    joint_position_weight        = CONFIG.fusion.loss.joint_position_weight
     # Training params
     lr                      = CONFIG.fusion.training.lr
+    camera_lr               = CONFIG.fusion.training.camera_lr
     max_epochs              = CONFIG.fusion.training.max_epochs
     batch_size              = CONFIG.fusion.training.batch_size
     grad_clip               = CONFIG.fusion.training.grad_clip
@@ -193,7 +201,15 @@ def main():
         if isinstance(module, WindowedTemporalAttention):
             module.forward = torch.compile(module.forward, dynamic=True)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    camera_modules = {"camera_layers", "camera_pose_encoding", "output_heads.camera_rot_trans_head"}
+    camera_params = set()
+    for name, param in model.named_parameters():
+        if any(name.startswith(m) for m in camera_modules):
+            camera_params.add(param)
+    optimizer = torch.optim.Adam([
+        {"params": [p for p in model.parameters() if p not in camera_params], "lr": lr},
+        {"params": list(camera_params), "lr": camera_lr},
+    ])
 
     if scheduler_name == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -211,16 +227,20 @@ def main():
         logger.warning(f"VPoserLoss unavailable ({e}); skipping.")
         vposer_loss = None
     _all_losses = {
-        "pose":            (PoseMSELoss(body_only=False),                       pose_mse_weight),
-        "shape":           (ShapeMSELoss(),                      shape_mse_weight),
-        "epipolar":        (EpipolarLoss(img_size=img_size),     epipolar_weight),
-        "temporal":        (TemporalSmoothnessLoss(),            temporal_weight),
-        "bone":            (BoneLengthconsistencyLoss(),         bone_length_weight),
-        "camera_mse":      (CameraMSELossVGGT(),                  camera_mse_weight),
-        "triangulation":   (TriangulationLoss(),                 triangulation_weight),
-        "translation_mse":      (TranslationMSELoss(),                translation_mse_weight),
-        "shape_reg":            (ShapeRegularizationLoss(),           shape_reg_weight),
-        "translation_temporal": (TranslationSmoothnessLoss(),         translation_temporal_weight),
+        "pose":                  (PoseMSELoss(body_only=False),        pose_mse_weight),
+        "joint_position":        (JointPositionLoss(),                 joint_position_weight),
+        "shape":                 (ShapeMSELoss(),                      shape_mse_weight),
+        "epipolar":              (EpipolarLoss(img_size=img_size),     epipolar_weight),
+        "temporal":              (TemporalSmoothnessLoss(),            temporal_weight),
+        "bone":                  (BoneLengthconsistencyLoss(),         bone_length_weight),
+        "camera_rotation_mse":   (CameraRotationMSELoss(),            camera_rotation_mse_weight),
+        "camera_translation_mse":(CameraTranslationMSELoss(),         camera_translation_mse_weight),
+
+        "triangulation":         (TriangulationLoss(),                 triangulation_weight),
+        "translation_mse":       (TranslationMSELoss(),               translation_mse_weight),
+        "gt_translation_mse":    (GTCameraTranslationMSELoss(),       gt_translation_mse_weight),
+        "shape_reg":             (ShapeRegularizationLoss(),           shape_reg_weight),
+        "translation_temporal":  (TranslationSmoothnessLoss(),         translation_temporal_weight),
         **({"vposer": (vposer_loss, vposer_weight)} if vposer_loss is not None else {}),
     }
     losses = {k: v for k, v in _all_losses.items() if k not in DISABLED_LOSSES}
@@ -244,7 +264,7 @@ def main():
     def metric_fn(preds, targets, mc):
         pose_aggr, shape_aggr, camera_pred, body_transl_world = preds[:4]
         B, T, P = pose_aggr.shape[:3]
-        K = camera_pred.shape[2]
+        K = camera_pred.shape[1]  # camera_pred is (B, K, 8) — static
 
         t_idx = torch.arange(0, T, METRIC_STRIDE, device=pose_aggr.device)
 
@@ -270,31 +290,31 @@ def main():
             gt_rotmats   = rotation_6d_to_matrix(targets["pose"][:, t_idx].float()).cpu().numpy()
 
             T_sub = len(t_idx)
+            # Cameras are static — (B, K, 8), no T dimension.
             cam_rot_w2c    = quaternion_to_matrix(
-                camera_pred[:, t_idx, :, :4].float().reshape(-1, 4)
-            ).reshape(B, T_sub, K, 3, 3).cpu().numpy()
-            cam_transl_w2c = camera_pred[:, t_idx, :, 4:7].float().cpu().numpy()
+                camera_pred[..., :4].float().reshape(B * K, 4)
+            ).reshape(B, K, 3, 3).cpu().numpy()
+            cam_transl_w2c = camera_pred[..., 4:7].float().cpu().numpy()  # (B, K, 3)
 
             gt_cam_rot_w2c    = quaternion_to_matrix(
-                targets["camera"][:, t_idx, :, :4].float().reshape(-1, 4)
-            ).reshape(B, T_sub, K, 3, 3).cpu().numpy()
-            gt_cam_transl_w2c = targets["camera"][:, t_idx, :, 4:7].float().cpu().numpy()
+                targets["camera"][..., :4].float().reshape(B * K, 4)
+            ).reshape(B, K, 3, 3).cpu().numpy()
+            gt_cam_transl_w2c = targets["camera"][..., 4:7].float().cpu().numpy()  # (B, K, 3)
 
-        cam_centres    = -np.einsum("...ji,...j->...i", cam_rot_w2c,    cam_transl_w2c)
+        cam_centres    = -np.einsum("...ji,...j->...i", cam_rot_w2c,    cam_transl_w2c)   # (B, K, 3)
         gt_cam_centres = -np.einsum("...ji,...j->...i", gt_cam_rot_w2c, gt_cam_transl_w2c)
 
         gt_valid_np  = targets["gt_valid"][:, t_idx].cpu().numpy() if "gt_valid" in targets else None
         cam_valid_np = (
-            targets["camera"][:, t_idx, :, :4].float().norm(dim=-1) > 0.5
-        ).cpu().numpy()  # (B, T_sub, K)
+            targets["camera"][..., :4].float().norm(dim=-1) > 0.5
+        ).cpu().numpy()  # (B, K)
 
-        t_mid_sub = T_sub // 2
         for b in range(B):
-            valid = cam_valid_np[b, t_mid_sub]
-            Cp = cam_centres[b, t_mid_sub][valid]
-            Cg = gt_cam_centres[b, t_mid_sub][valid]
-            Rp = cam_rot_w2c[b, t_mid_sub][valid]
-            Rg = gt_cam_rot_w2c[b, t_mid_sub][valid]
+            valid = cam_valid_np[b]        # (K,)
+            Cp = cam_centres[b][valid]
+            Cg = gt_cam_centres[b][valid]
+            Rp = cam_rot_w2c[b][valid]
+            Rg = gt_cam_rot_w2c[b][valid]
             pred_spread = float(np.linalg.norm(Cp - Cp.mean(0), axis=-1).max()) if valid.sum() >= 3 else 0.0
             if valid.sum() >= 3 and pred_spread > 1e-3:
                 mc["TE"].update(Cp, Cg)
@@ -320,9 +340,10 @@ def main():
                 mc["PA-MPJRE"].update(pr, gr)
 
     curriculum_schedule = {
-        0:   ["pose", "shape", "camera_mse", "translation_mse"],
-        100: ["temporal", "bone", "shape_reg", "translation_temporal", "vposer"],
-        200: ["epipolar", "triangulation"],
+        0:   ["camera_rotation_mse", "pose", "shape", "gt_translation_mse"],
+        50:  ["camera_translation_mse"],
+        200: ["epipolar"],
+        400: ["triangulation"],
     }
 
     if CONFIG.fusion.use_wandb:

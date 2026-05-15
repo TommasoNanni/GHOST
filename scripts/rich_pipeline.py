@@ -432,6 +432,7 @@ def main():
             mhr_model_path  = CONFIG.data.mhr_model_path,
             reid_threshold = CONFIG.parameters_extraction.reid_threshold,
             reid_match_window = getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
+            rich_data_root = CONFIG.data.rich_data_root,
         )
         reidentifier = CrossVideoReidentifier(
             threshold = getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),

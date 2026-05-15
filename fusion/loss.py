@@ -519,6 +519,17 @@ class TriangulationLoss(Loss):
         if K < 2:
             return body_transl_world_per_cam.new_zeros([])
 
+        # Scene scale: max pairwise GT camera centre distance, used to normalise
+        # translation disagreement so it is unit-free (same range as rot_loss).
+        cam_gt = targets["camera"]                                          # (B, K, 8)
+        B = cam_gt.shape[0]
+        R_gt = quaternion_to_matrix(
+            F.normalize(cam_gt[..., :4], dim=-1).reshape(B * K, 4)
+        ).reshape(B, K, 3, 3)
+        centres = -torch.einsum("...ji,...j->...i", R_gt, cam_gt[..., 4:7])  # (B, K, 3)
+        diff_c  = centres.unsqueeze(2) - centres.unsqueeze(1)                # (B, K, K, 3)
+        scene_scale_sq = diff_c.norm(dim=-1).detach().amax(dim=(-2, -1)).clamp(min=1.0).pow(2)  # (B,)
+
         trans_loss = body_transl_world_per_cam.new_zeros([])
         rot_loss   = body_transl_world_per_cam.new_zeros([])
         num_pairs  = 0
@@ -536,10 +547,13 @@ class TriangulationLoss(Loss):
                     n = float(body_transl_world_per_cam[:, :, i].shape[0] * body_transl_world_per_cam[:, :, i].shape[1] * body_transl_world_per_cam[:, :, i].shape[2])
 
                 diff_t = body_transl_world_per_cam[:, :, i] - body_transl_world_per_cam[:, :, j]    # (B, T, P, 3)
+                # Normalise by scene_scale² so trans_loss is unit-free, matching rot_loss range.
+                scale_sq = scene_scale_sq.view(B, 1, 1)                     # (B, 1, 1)
+                diff_t_norm = diff_t.pow(2).sum(-1) / scale_sq               # (B, T, P)
                 if mask is not None:
-                    trans_loss = trans_loss + (diff_t.pow(2).sum(-1) * mask).sum() / n
+                    trans_loss = trans_loss + (diff_t_norm * mask).sum() / n
                 else:
-                    trans_loss = trans_loss + diff_t.pow(2).mean()
+                    trans_loss = trans_loss + diff_t_norm.mean()
 
                 identity_6d = body_orient_world_per_cam.new_tensor([1., 0., 0., 0., 1., 0.])
                 def _safe_6d(x6d, vis):  # vis: (B, T, P)
@@ -617,6 +631,60 @@ class TranslationMSELoss(Loss):
         return F.mse_loss(body_transl_world_per_cam[vis_mask], gt_transl_world_exp[vis_mask])
 
 
+class GTCameraTranslationMSELoss(Loss):
+    """Same supervision as TranslationMSELoss but back-projects using GT cameras.
+
+    Gradient flows only to body_transl_cam (preds[7]) — no gradient reaches
+    any camera parameter — eliminating the conflict with CameraTranslationMSELoss.
+
+    Use during early training phases (before predicted cameras have converged).
+    Switch to TranslationMSELoss once camera translation is approximately correct,
+    so the model learns geometric consistency with its own predicted cameras.
+    """
+
+    def __init__(self, name: str = "GT-camera translation loss", weight: float = 1.0) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        body_transl_cam = preds[7]             # (B, T, K, P, 3) — camera frame
+        person_visible  = preds[6]             # (B, T, K, P)
+        gt_transl_world = targets["trans"]     # (B, T, P, 3)
+        cam_gt          = targets["camera"]    # (B, K, 8)
+
+        gt_valid = targets.get("gt_valid")
+
+        B, T, K, P, _ = body_transl_cam.shape
+
+        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5   # (B, K)
+
+        # GT rotation matrices and translation vectors from the camera stream.
+        R_gt = quaternion_to_matrix(
+            F.normalize(cam_gt[..., :4], dim=-1).reshape(B * K, 4)
+        ).reshape(B, K, 3, 3)                            # (B, K, 3, 3)
+        t_gt = cam_gt[..., 4:7]                          # (B, K, 3)
+
+        # Recompute back-projection with GT cameras: (body_transl_cam - t_gt) @ R_gt
+        # Use the same BTK-flat bmm pattern as the model forward pass.
+        BTK = B * T * K
+        R_gt_flat = R_gt.unsqueeze(1).expand(B, T, K, 3, 3).reshape(BTK, 3, 3)
+        t_gt_flat = t_gt.unsqueeze(1).expand(B, T, K, 3).reshape(BTK, 1, 3)
+        body_transl_world_gt_cam = torch.bmm(
+            body_transl_cam.reshape(BTK, P, 3) - t_gt_flat, R_gt_flat
+        ).reshape(B, T, K, P, 3)
+
+        gt_transl_world_exp = gt_transl_world.unsqueeze(2).expand(B, T, K, P, 3)
+
+        vis_mask = person_visible > 0
+        vis_mask = vis_mask & cam_valid.unsqueeze(1).unsqueeze(-1).expand_as(vis_mask)
+        if gt_valid is not None:
+            vis_mask = vis_mask & gt_valid.unsqueeze(2).expand_as(vis_mask)
+
+        if not vis_mask.any():
+            return body_transl_cam.new_zeros([])
+
+        return F.mse_loss(body_transl_world_gt_cam[vis_mask], gt_transl_world_exp[vis_mask])
+
+
 class CameraMSELossVGGT(Loss):
     """Camera loss following VGGT: Huber loss on [quat(4), trans_normalised(3)].
 
@@ -657,13 +725,96 @@ class CameraMSELossVGGT(Loss):
         dot = (q * q_gt).sum(dim=-1, keepdim=True)
         q   = torch.where(dot < 0, -q, q)
 
-        t_pred_n = camera_pred_v[..., 4:7] / self.trans_scale
-        t_gt_n   = cam_gt_v[..., 4:7]      / self.trans_scale
+        # Quaternion: Huber (robust to outlier cameras).
+        # Translation: L1 on values normalised by trans_scale so that both terms
+        # have comparable gradient magnitude (~0.1/element vs ~0.02/element for quat).
+        rot_loss   = F.huber_loss(q, q_gt, delta=self.huber_delta)
+        trans_loss = F.l1_loss(camera_pred_v[..., 4:7] / self.trans_scale,
+                               cam_gt_v[..., 4:7]      / self.trans_scale)
 
-        g_pred = torch.cat([q,    t_pred_n], dim=-1)
-        g_gt   = torch.cat([q_gt, t_gt_n],  dim=-1)
+        return rot_loss + trans_loss
 
-        return F.huber_loss(g_pred, g_gt, delta=self.huber_delta)
+
+class CameraRotationMSELoss(Loss):
+    """Supervises only the rotation component of predicted cameras.
+
+    Huber loss on quaternions with double-cover resolution. Intended to be
+    activated early in the curriculum together with pose_mse, which provides
+    a second gradient path to camera rotation via root back-projection.
+    """
+
+    def __init__(
+        self,
+        name: str = "Camera rotation loss",
+        weight: float = 1.0,
+        huber_delta: float = 0.1,
+    ) -> None:
+        super().__init__(name, weight)
+        self.huber_delta = huber_delta
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        _, _, camera_pred, _ = preds[:4]
+        cam_gt = targets["camera"]
+
+        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5
+        if not cam_valid.any():
+            return camera_pred.new_zeros([])
+
+        q     = F.normalize(camera_pred[cam_valid][..., :4], dim=-1)
+        q_gt  = F.normalize(cam_gt[cam_valid][..., :4],      dim=-1)
+        dot   = (q * q_gt).sum(dim=-1, keepdim=True)
+        q     = torch.where(dot < 0, -q, q)
+        return F.huber_loss(q, q_gt, delta=self.huber_delta)
+
+
+class CameraTranslationMSELoss(Loss):
+    """Supervises only the translation component of predicted cameras.
+
+    L1 loss normalised by the maximum pairwise distance between GT camera
+    centres in the scene. This makes the loss unit-free and scene-adaptive:
+    a 1 m error in a scene where cameras are 10 m apart is penalised less
+    than the same error in a 2 m scene. The scale is computed from GT cameras
+    and detached so no gradient flows through it.
+
+    Intended to be activated together with translation_mse after camera
+    rotation has converged, so back-projection is meaningful.
+    """
+
+    def __init__(
+        self,
+        name: str = "Camera translation loss",
+        weight: float = 1.0,
+    ) -> None:
+        super().__init__(name, weight)
+
+    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
+        _, _, camera_pred, _ = preds[:4]
+        cam_gt = targets["camera"]
+
+        cam_valid = cam_gt[..., :4].norm(dim=-1) > 0.5  # (B, K)
+        if not cam_valid.any():
+            return camera_pred.new_zeros([])
+
+        # Compute GT camera centres: c = -R^T @ t
+        B, K = cam_gt.shape[:2]
+        R_gt = quaternion_to_matrix(cam_gt[..., :4].reshape(B * K, 4)).reshape(B, K, 3, 3)
+        t_gt = cam_gt[..., 4:7]                                           # (B, K, 3)
+        centres = -torch.einsum("...ji,...j->...i", R_gt, t_gt)           # (B, K, 3)
+
+        # Max pairwise distance across valid cameras — one scale per batch element.
+        # Detached: the normalisation factor is a fixed scene property, not a prediction.
+        diff = centres.unsqueeze(2) - centres.unsqueeze(1)                # (B, K, K, 3)
+        dists = diff.norm(dim=-1)                                         # (B, K, K)
+        scene_scale = dists.detach().amax(dim=(-2, -1)).clamp(min=1.0)   # (B,) — floor at 1 m
+
+        pred_t = camera_pred[..., 4:7]   # (B, K, 3)
+        gt_t   = cam_gt[..., 4:7]        # (B, K, 3)
+
+        # Normalise per batch element and mask to valid cameras only.
+        scale = scene_scale.view(B, 1, 1)                                 # (B, 1, 1)
+        err = (pred_t - gt_t).abs() / scale                              # (B, K, 3)
+        mask = cam_valid.unsqueeze(-1).expand_as(err)                    # (B, K, 3)
+        return err[mask].mean()
 
 
 class CameraMSELoss(Loss):

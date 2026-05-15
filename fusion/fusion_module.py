@@ -940,11 +940,6 @@ class SSTOutputHeads(nn.Module):
         w_sum = person_visible.sum(dim=2, keepdim=True).clamp(min=1e-8)  # (B, T, 1, P)
         w_sum = w_sum.squeeze(2).unsqueeze(-1)                           # (B, T, P, 1)
 
-        def _nan_check(name, t):
-            if not torch.isfinite(t).all():
-                print(f"[NaN] {name}: {(~torch.isfinite(t)).sum().item()} non-finite "
-                      f"out of {t.numel()} (shape={tuple(t.shape)})")
-
         # STEP 1: Camera — decoded once per camera (static), then broadcast over T for back-projection.
         camera = self.camera_norm(camera_stream)   # (B, K, D)
         camera_flat = camera.reshape(BK, D)
@@ -957,8 +952,6 @@ class SSTOutputHeads(nn.Module):
         quat_out  = F.normalize(camera_input[..., :4] + rot_trans_delta[..., :4], dim=-1)  # (B, K, 4)
         trans_out = camera_input[..., 4:7] + rot_trans_delta[..., 4:7]                      # (B, K, 3)
         camera_out = torch.cat([quat_out, trans_out, camera_input[..., 7:8]], dim=-1)        # (B, K, 8)
-        _nan_check("camera_stream", camera_stream)
-        _nan_check("camera_out", camera_out)
 
         # Broadcast camera_out over T for per-frame back-projection.
         # Convention: v_cam = cam_rot_w2c @ v_world + cam_transl_w2c
@@ -970,7 +963,6 @@ class SSTOutputHeads(nn.Module):
         )
         cam_rot_w2c    = quaternion_to_matrix(q_safe)                           # (BTK, 3, 3)
         cam_transl_w2c = camera_out[..., 4:7].unsqueeze(1).expand(-1, T, -1, -1)  # (B, T, K, 3)
-        _nan_check("cam_rot_w2c", cam_rot_w2c)
 
         # STEP 2: Kinematic joints 1-54
         # Camera-independent local rotations: pool across K then decode delta.
@@ -984,24 +976,15 @@ class SSTOutputHeads(nn.Module):
         vis_sum = vis.sum(dim=2).clamp(min=1e-8)                  # (B, T, P, 1, 1)
         kin_input_mean = (pose_input[:, :, :, :, 1:, :] * vis).sum(dim=2) / vis_sum  # (B, T, P, 54, 6)
         kin_aggr = kin_input_mean + kin_delta
-        _nan_check("kin_stream", kin_stream)
-        _nan_check("kin_aggr", kin_aggr)
 
         # STEP 3: Root orient (joint 0): per-camera → back-project → mean
         # Decode per-camera delta in camera frame (no pooling).
-        print(f"[HEAD ID] spatial_stream id={id(spatial_stream)} data_ptr={spatial_stream.data_ptr()}")
-        if spatial_stream.requires_grad:
-            spatial_stream.register_hook(lambda g: print(f"[HEAD GRAD] spatial_stream(inside_heads) max={g.abs().max().item():.3e}"))
         _root_x = spatial_stream[:, :, :, :, 0, :]
         root_feat = _root_x + (self.root_norm(_root_x) - _root_x).detach()  # (B, T, K, P, D)
-        if root_feat.requires_grad:
-            root_feat.register_hook(lambda g: print(f"[HEAD GRAD] root_feat max={g.abs().max().item():.3e}"))
         root_cam_delta = self.root_head(
             root_feat.reshape(BTK * P, D)
         ).reshape(B, T, K, P, 6)
         root_cam_6d = pose_input[:, :, :, :, 0, :] + root_cam_delta  # (B, T, K, P, 6)
-        _nan_check("spatial_stream", spatial_stream)
-        _nan_check("root_cam_6d", root_cam_6d)
 
         # Guard: absent cameras have zero 6D input → rotation_6d_to_matrix would NaN.
         # Replace with identity 6D [1,0,0, 0,1,0] for those slots; they are masked
@@ -1014,8 +997,6 @@ class SSTOutputHeads(nn.Module):
         R_body_cam      = rotation_6d_to_matrix(root_cam_6d.reshape(BTK * P, 6))          # (BTK*P, 3, 3)
         cam_rot_w2c_exp = cam_rot_w2c.unsqueeze(1).expand(BTK, P, 3, 3).reshape(BTK * P, 3, 3)
         R_body_world    = cam_rot_w2c_exp.transpose(-1, -2) @ R_body_cam                  # (BTK*P, 3, 3)
-        _nan_check("R_body_cam", R_body_cam)
-        _nan_check("R_body_world", R_body_world)
 
         body_orient_world_per_cam = torch.cat(
             [R_body_world[:, 0, :], R_body_world[:, 1, :]], dim=-1
@@ -1045,20 +1026,10 @@ class SSTOutputHeads(nn.Module):
         sign_diag = torch.cat([ones2, d.unsqueeze(-1)], dim=-1)
         R_mean    = U @ torch.diag_embed(sign_diag) @ Vt          # (B, T, P, 3, 3)
         root_aggr = matrix_to_rotation_6d(R_mean)                 # (B, T, P, 6)
-        if root_aggr.requires_grad:
-            root_aggr.register_hook(lambda g: print(f"[HEAD GRAD] root_aggr max={g.abs().max().item():.3e}"))
-        # Diversity check: if all root predictions are identical (collapsed), std≈0.
-        # Expected: nonzero std across T frames; near-zero std = mode collapse or bad init.
-        with torch.no_grad():
-            ra = root_aggr.detach()  # (B, T, P, 6)
-            print(f"[ROOT DIV] std={ra.std().item():.4e}  max={ra.max().item():.4e}  min={ra.min().item():.4e}")
-        _nan_check("root_aggr", root_aggr)
 
         # STEP 4: Translation: per-camera → back-project → mean
         _trans_x = spatial_stream[:, :, :, :, 1, :]
         trans_feat = _trans_x + (self.trans_norm(_trans_x) - _trans_x).detach()  # (B, T, K, P, D)
-        if trans_feat.requires_grad:
-            trans_feat.register_hook(lambda g: print(f"[HEAD GRAD] trans_feat max={g.abs().max().item():.3e}"))
         body_transl_cam_delta = self.trans_head(
             trans_feat.reshape(BTK * P, D)
         ).reshape(B, T, K, P, 3)
@@ -1071,10 +1042,6 @@ class SSTOutputHeads(nn.Module):
         body_transl_world_per_cam = torch.bmm(
             body_transl_cam_flat - cam_transl_w2c_flat, cam_rot_w2c
         ).reshape(B, T, K, P, 3)
-        if body_transl_world_per_cam.requires_grad:
-            body_transl_world_per_cam.register_hook(lambda g: print(f"[HEAD GRAD] body_transl_world_per_cam max={g.abs().max().item():.3e}"))
-        _nan_check("body_transl_cam", body_transl_cam)
-        _nan_check("body_transl_world_per_cam", body_transl_world_per_cam)
 
         # Confidence-weighted mean across cameras.
         body_transl_world = (
@@ -1083,8 +1050,6 @@ class SSTOutputHeads(nn.Module):
 
         # Concatenate root + kinematic → full world-frame pose
         pose_aggr = torch.cat([root_aggr.unsqueeze(-2), kin_aggr], dim=-2)  # (B, T, P, 55, 6)
-        _nan_check("pose_aggr", pose_aggr)
-        _nan_check("body_transl_world", body_transl_world)
 
         # STEP 5: Shape 
         visible_flat = person_visible.reshape(B, T * K, P)
@@ -1250,26 +1215,10 @@ class SSTNetwork(nn.Module):
         assert pose.shape[:4] == person_mask.shape
         assert pose.shape[:4] == body_transl_cam_in.shape[:4]
 
-        def _nc(name, t):
-            if not torch.isfinite(t).all():
-                print(f"[NaN] {name}: {(~torch.isfinite(t)).sum().item()}/{t.numel()} "
-                      f"non-finite (shape={tuple(t.shape)})")
-
-        _nc("input/pose", pose)
-        _nc("input/shape", shape)
-        _nc("input/camera", camera)
-        _nc("input/joint_mask", joint_mask)
-        _nc("input/body_transl_cam_in", body_transl_cam_in)
-
         pose_emb, shape_emb, camera_emb, trans_emb = self.encoder(
             pose, shape, camera, body_transl_cam_in
         )
         B, T, K, P, J, D = pose_emb.shape
-
-        _nc("emb/pose_emb", pose_emb)
-        _nc("emb/shape_emb", shape_emb)
-        _nc("emb/camera_emb", camera_emb)
-        _nc("emb/trans_emb", trans_emb)
 
         # Spatial stream: [root_orient(0), translation(1)] — attend cameras.
         # Camera pose encoding injected once here to give each spatial token its geometric
@@ -1281,18 +1230,6 @@ class SSTNetwork(nn.Module):
             pose_emb[:, :, :, :, :1, :],   # root orient  (B,T,K,P,1,D)
             trans_emb.unsqueeze(4),          # translation  (B,T,K,P,1,D)
         ], dim=4) + cam_pe                   # → (B,T,K,P,2,D)
-
-        _spatial_grad_step = [0]
-        def _hook_spatial(tag):
-            def _h(g):
-                print(f"[SPATIAL GRAD] step={_spatial_grad_step[0]}  {tag}  "
-                      f"norm={g.float().norm().item():.4e}  "
-                      f"max={g.float().abs().max().item():.4e}")
-            return _h
-        def _reg(t, tag):
-            if t.requires_grad:
-                t.register_hook(_hook_spatial(tag))
-            return t
 
         # Kinematic stream: 54 body joints — no camera cross-attn.
         kin_stream = pose_emb[:, :, :, :, 1:, :]  # (B,T,K,P,54,D)
@@ -1358,10 +1295,8 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
             )
-            _nc(f"layer{layer_idx}/kin_stream", kin_stream)
 
             # Spatial stream: root + translation attend each other, cameras, time.
-            _reg(spatial_stream, f"L{layer_idx}/0_after_cam_pe")
             spatial_stream = self.spatial_layers[layer_idx](
                 spatial_stream, B, T, K, P, 2, D, H,
                 joint_mask=sp_joint_mask,
@@ -1370,30 +1305,21 @@ class SSTNetwork(nn.Module):
                 pe=pe,
                 dropout=self.dropout,
             )
-            _reg(spatial_stream, f"L{layer_idx}/1_after_spatial_layer")
-            _nc(f"layer{layer_idx}/spatial_stream", spatial_stream)
 
             camera_stream = self.camera_layers[layer_idx](
                 camera_stream, B, K, D,
                 dropout=self.dropout,
                 cam_attn_mask=camera_cross_view_mask,
             )
-            _nc(f"layer{layer_idx}/camera_stream", camera_stream)
 
             spatial_stream, camera_stream = self.spatial_cam_attns[layer_idx](
                 spatial_stream, camera_stream, spatial_stream,
                 B, T, K, P, 2, D, self.dropout,
                 cam_vis=camera_visible,
             )
-            _reg(spatial_stream, f"L{layer_idx}/2_after_cam_attn")
-            _nc(f"layer{layer_idx}/spatial_stream_post_cam_attn", spatial_stream)
-            _nc(f"layer{layer_idx}/camera_stream_post_cam_attn", camera_stream)
 
             # One-directional: kinematic joints inform spatial tokens (not reverse).
             spatial_stream = self.kin_to_spatial_attns[layer_idx](spatial_stream, kin_stream, kin_conf=kin_mask)
-            _reg(spatial_stream, f"L{layer_idx}/3_after_kin2sp")
-            print(f"[LOOP ID] L{layer_idx}/3 spatial_stream id={id(spatial_stream)} data_ptr={spatial_stream.data_ptr()}")
-            _nc(f"layer{layer_idx}/spatial_stream_post_kin2sp", spatial_stream)
 
             shape_stream = self.shape_layers[layer_idx](
                 shape_stream, B, T, K, P, D,
@@ -1402,7 +1328,6 @@ class SSTNetwork(nn.Module):
                 view_mask=person_cross_view_mask,
                 temporal_conf=person_temporal_conf,
             )
-            _nc(f"layer{layer_idx}/shape_stream", shape_stream)
 
 
         # decode
