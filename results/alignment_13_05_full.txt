@@ -1,0 +1,81 @@
+Alignment results on all the rich videos and scenes 13/05/26
+
+Max shift 100, 10 trials per video, all videos
+
+============================================================
+INFO  AGGREGATE SUMMARY  (55 scene(s)  ×  10 trials each)
+INFO  
+INFO    All values in frames
+INFO    Scene                                Cams  Pers     MAE   MedAE    W-0.5      W-1      W-2
+INFO    -----------------------------------  ----  ----  ------  ------  -------  -------  -------
+INFO    BBQ_001_guitar                          8     1    2.25    1.43    51.2%    53.8%    75.0%
+INFO    BBQ_001_juggle                          8     1   24.07   27.04     6.2%     6.2%     6.2%
+INFO    LectureHall_018_wipingchairs1           7     1    0.08    0.07   100.0%   100.0%   100.0%
+INFO    LectureHall_018_wipingspray1            3     1    0.00    0.00   100.0%   100.0%   100.0%
+INFO    LectureHall_020_wipingtable1            5     1    0.23    0.21    80.0%   100.0%   100.0%
+INFO    ParkingLot1_002_burpee3                 8     1    0.40    0.40    89.1%    89.1%    89.1%
+INFO    ParkingLot1_002_overfence2              8     1    3.37    3.56    12.5%    12.5%    50.0%
+INFO    ParkingLot1_002_stretching1             8     1    0.72    0.77    72.9%    85.4%    85.4%
+INFO    ParkingLot1_004_005_greet...eating1     8     2    0.40    0.31    67.5%    92.5%   100.0%
+INFO    ParkingLot1_004_burpeejump1             8     1   15.70   17.33    43.8%    43.8%    56.2%
+INFO    ParkingLot1_004_eating1                 8     1    2.21    1.28    47.5%    71.2%    86.2%
+INFO    ParkingLot1_004_phonetalk1              8     1   15.36    7.43    18.8%    22.5%    33.8%
+INFO    ParkingLot1_004_pushup2                 8     1    4.39    3.83    17.2%    31.2%    48.4%
+INFO    ParkingLot1_005_burpeejump2             8     1    6.91    7.24    27.5%    32.5%    32.5%
+INFO    ParkingLot1_005_overfence1              8     1    0.42    0.35    68.8%    81.2%   100.0%
+INFO    ParkingLot1_005_pushup2                 8     1   17.65   18.54    25.0%    29.2%    37.5%
+INFO    ParkingLot1_005_pushup3                 8     1   26.10   26.28     6.2%     6.2%     6.2%
+INFO    ParkingLot1_007_eating1                 8     1    0.96    0.88    32.5%    51.2%    91.2%
+INFO    ParkingLot1_007_eating2                 8     1    1.11    0.66    43.8%    67.5%    92.5%
+INFO    ParkingLot1_007_overfence2              8     1   16.53   17.21    12.5%    12.5%    12.5%
+INFO    ParkingLot2_008_burpeejump1             7     1    7.89    5.44    48.6%    54.3%    54.3%
+INFO    ParkingLot2_008_eating1                 7     1   26.53   16.15    20.0%    30.0%    40.0%
+INFO    ParkingLot2_008_overfence1              7     1    4.80    1.98     0.0%    35.7%    50.0%
+INFO    ParkingLot2_008_overfence2              7     1    9.71    5.26    41.4%    48.6%    51.4%
+INFO    ParkingLot2_008_overfence3              7     1    7.45    1.43    57.1%    67.1%    67.1%
+INFO    ParkingLot2_008_phonetalk1              7     1  146.09  126.43     0.0%     0.0%     0.0%
+INFO    ParkingLot2_008_pushup1                 7     1    8.79    9.75    32.1%    32.1%    32.1%
+INFO    ParkingLot2_008_pushup2                 6     1   17.60    7.50    38.3%    53.3%    53.3%
+INFO    ParkingLot2_014_burpeejump1             6     1   18.32   14.60    50.0%    50.0%    50.0%
+INFO    ParkingLot2_014_overfence3              6     1   31.27   20.91    21.7%    23.3%    25.0%
+INFO    ParkingLot2_014_phonetalk2              6     1  172.94  126.84     3.3%     3.3%     3.3%
+INFO    ParkingLot2_014_pushup2                 6     1    4.95    2.89    66.7%    80.0%    80.0%
+INFO    ParkingLot2_014_takingphotos2           5     1   35.70   23.03    24.0%    34.0%    38.0%
+INFO    ParkingLot2_015_burpeejump2             6     1   11.96   12.42    56.3%    66.7%    68.8%
+INFO    ParkingLot2_015_eating2                 6     1    8.47    5.46    33.3%    53.3%    71.7%
+INFO    ParkingLot2_015_overfence1              6     1    5.31    3.99    61.7%    61.7%    61.7%
+INFO    ParkingLot2_015_pushup1                 6     1    3.99    2.73    56.7%    70.0%    70.0%
+INFO    ParkingLot2_016_burpeejump2             7     1    0.18    0.15    87.1%   100.0%   100.0%
+INFO    ParkingLot2_016_overfence2              7     1    0.19    0.15    91.4%   100.0%   100.0%
+INFO    ParkingLot2_016_pushup1                 7     1    5.16    1.96    35.7%    50.0%    57.1%
+INFO    ParkingLot2_016_pushup2                 7     1    4.36    4.54    30.0%    47.1%    68.6%
+INFO    ParkingLot2_016_stretching1             7     1    0.39    0.36    65.7%    95.7%   100.0%
+INFO    Pavallion_000_phonesiteat               5     1    0.45    0.39    52.0%    90.0%   100.0%
+INFO    Pavallion_000_plankjack                 7     1  174.18  186.66     8.6%    11.4%    15.7%
+INFO    Pavallion_000_sidebalancerun            7     1    0.10    0.09   100.0%   100.0%   100.0%
+INFO    Pavallion_002_phonesiteat               6     1   21.16   15.01    45.0%    53.3%    56.7%
+INFO    Pavallion_002_plankjack                 8     1   14.67    9.05    33.8%    40.0%    47.5%
+INFO    Pavallion_003_018_tossball              6     2   21.69   14.32    38.3%    38.3%    38.3%
+INFO    Pavallion_003_phonesiteat               6     1    0.33    0.27    66.7%    96.7%   100.0%
+INFO    Pavallion_003_plankjack                 8     1    0.34    0.24    85.0%    97.5%    97.5%
+INFO    Pavallion_003_sidebalancerun            8     1    0.05    0.03   100.0%   100.0%   100.0%
+INFO    Pavallion_006_phonesiteat               6     1    0.23    0.20    86.7%   100.0%   100.0%
+INFO    Pavallion_006_plankjack                 8     1    0.76    0.61    88.8%    88.8%    88.8%
+INFO    Pavallion_006_sidebalancerun            8     1    0.08    0.04   100.0%   100.0%   100.0%
+INFO    Pavallion_013_phonesiteat               5     1    0.24    0.21    90.0%   100.0%   100.0%
+INFO    -----------------------------------  ----  ----  ------  ------  -------  -------  -------
+INFO    MEAN                                              16.46   13.74    49.8%    59.3%    65.3%
+INFO  
+INFO    ── Assuming 15 fps  (1 frame = 66.7 ms) ──
+INFO      MAE             1097.3 ms
+INFO      MedAE            916.3 ms
+INFO      Within 33 ms     49.8%   (≤0.5 fr)
+INFO      Within 67 ms      59.3%   (≤1 fr)
+INFO      Within 133 ms      65.3%   (≤2 fr)
+INFO  
+INFO    ── Assuming 30 fps  (1 frame = 33.3 ms) ──
+INFO      MAE              548.6 ms
+INFO      MedAE            458.1 ms
+INFO      Within 17 ms     49.8%   (≤0.5 fr)
+INFO      Within 33 ms      59.3%   (≤1 fr)
+INFO      Within 67 ms      65.3%   (≤2 fr)

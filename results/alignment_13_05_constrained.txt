@@ -1,0 +1,88 @@
+Alignment results on all the rich videos and scenes 13/05/26
+
+Max shift 30, space search [-60, +60], 3 trials per video, all videos
+
+============================================================
+INFO  Scene: Pavallion_013_yoga2
+WARNING    Skipping: need ≥2 cameras, found 0
+INFO  
+============================================================
+INFO  AGGREGATE SUMMARY  (57 scene(s)  ×  3 trials each)
+INFO  
+INFO    All values in frames
+INFO    Scene                                Cams  Pers   Spread     MAE   MedAE    W-0.5      W-1      W-2
+INFO    -----------------------------------  ----  ----  -------  ------  ------  -------  -------  -------
+INFO    BBQ_001_guitar                          8     1     47.3    0.07    0.06   100.0%   100.0%   100.0%
+INFO    BBQ_001_juggle                          8     1     44.0    0.00    0.00   100.0%   100.0%   100.0%
+INFO    LectureHall_018_wipingchairs1           7     1     41.0    0.04    0.03   100.0%   100.0%   100.0%
+INFO    LectureHall_018_wipingspray1            3     1     23.7    0.00    0.00   100.0%   100.0%   100.0%
+INFO    LectureHall_020_wipingtable1            5     1     38.7    0.17    0.17   100.0%   100.0%   100.0%
+INFO    ParkingLot1_002_burpee3                 8     1     38.7    0.01    0.00   100.0%   100.0%   100.0%
+INFO    ParkingLot1_002_overfence2              8     1     45.3    0.14    0.13   100.0%   100.0%   100.0%
+INFO    ParkingLot1_002_pushup1                 8     1     46.0    0.35    0.10    75.0%    83.3%   100.0%
+INFO    ParkingLot1_002_stretching1             8     1     53.3    0.00    0.00   100.0%   100.0%   100.0%
+INFO    ParkingLot1_004_005_greetingchattingeating1     8     2     55.7    0.40    0.26    75.0%    91.7%   100.0%
+INFO    ParkingLot1_004_burpeejump1             8     1     48.3    0.25    0.00    75.0%    87.5%   100.0%
+INFO    ParkingLot1_004_eating1                 8     1     42.7    0.53    0.29    66.7%    83.3%    95.8%
+INFO    ParkingLot1_004_phonetalk1              8     1     35.3    0.76    0.53    37.5%    66.7%   100.0%
+INFO    ParkingLot1_004_pushup2                 8     1     45.0    0.55    0.48    50.0%    83.3%    95.8%
+INFO    ParkingLot1_005_burpeejump2             8     1     47.0    0.01    0.00   100.0%   100.0%   100.0%
+INFO    ParkingLot1_005_overfence1              8     1     36.3    0.28    0.23    79.2%   100.0%   100.0%
+INFO    ParkingLot1_005_pushup2                 8     1     51.3    0.31    0.06    75.0%    79.2%   100.0%
+INFO    ParkingLot1_005_pushup3                 8     1     51.0    0.04    0.03   100.0%   100.0%   100.0%
+INFO    ParkingLot1_007_eating1                 8     1     50.3    0.36    0.37    70.8%   100.0%   100.0%
+INFO    ParkingLot1_007_eating2                 8     1     48.7    0.51    0.26    62.5%    83.3%   100.0%
+INFO    ParkingLot1_007_overfence2              8     1     43.0    0.39    0.15    75.0%    79.2%   100.0%
+INFO    ParkingLot2_008_burpeejump1             7     1     27.0   10.70   10.41     0.0%     0.0%     0.0%
+INFO    ParkingLot2_008_eating1                 7     1     45.7    3.96    0.19    71.4%    85.7%    85.7%
+INFO    ParkingLot2_008_overfence1              7     1     42.7    3.95    1.05    47.6%    52.4%    52.4%
+INFO    ParkingLot2_008_overfence2              7     1     41.7    6.62    5.02    52.4%    57.1%    57.1%
+INFO    ParkingLot2_008_overfence3              7     1     44.0    0.15    0.07    90.5%   100.0%   100.0%
+INFO    ParkingLot2_008_phonetalk1              7     1     42.3   17.53   18.38     0.0%     0.0%     0.0%
+INFO    ParkingLot2_008_pushup1                 7     1     41.3    2.02    1.83    47.6%    61.9%    61.9%
+INFO    ParkingLot2_008_pushup2                 6     1     47.3    0.25    0.11    83.3%   100.0%   100.0%
+INFO    ParkingLot2_014_burpeejump1             6     1     40.7    8.94    7.67    61.1%    61.1%    61.1%
+INFO    ParkingLot2_014_burpeejump2             6     1     45.3    3.83    2.71    55.6%    55.6%    55.6%
+INFO    ParkingLot2_014_overfence3              6     1     44.0    5.02    2.56    27.8%    27.8%    27.8%
+INFO    ParkingLot2_014_phonetalk2              6     1     40.7    4.10    3.13    44.4%    55.6%    55.6%
+INFO    ParkingLot2_014_pushup2                 6     1     36.7    0.10    0.08   100.0%   100.0%   100.0%
+INFO    ParkingLot2_014_takingphotos2           5     1     40.7   11.11   11.06    20.0%    20.0%    33.3%
+INFO    ParkingLot2_015_burpeejump2             6     1     27.3    0.00    0.00   100.0%   100.0%   100.0%
+INFO    ParkingLot2_015_eating2                 6     1     41.0    0.65    0.43    38.9%    66.7%   100.0%
+INFO    ParkingLot2_015_overfence1              6     1     50.0    1.54    0.19    72.2%    83.3%    83.3%
+INFO    ParkingLot2_015_pushup1                 6     1     38.7    2.58    0.51    55.6%    55.6%    83.3%
+INFO    ParkingLot2_016_burpeejump2             7     1     46.3    0.09    0.07   100.0%   100.0%   100.0%
+INFO    ParkingLot2_016_overfence2              7     1     37.7    0.16    0.16    95.2%   100.0%   100.0%
+INFO    ParkingLot2_016_pushup1                 7     1     48.0    1.18    0.29    71.4%    81.0%    85.7%
+INFO    ParkingLot2_016_pushup2                 7     1     42.3    0.27    0.15    81.0%   100.0%   100.0%
+INFO    ParkingLot2_016_stretching1             7     1     43.7    0.36    0.28    81.0%    95.2%   100.0%
+INFO    Pavallion_000_phonesiteat               5     1     45.3    0.34    0.31    66.7%   100.0%   100.0%
+INFO    Pavallion_000_plankjack                 7     1     38.3    0.54    0.48    52.4%    81.0%   100.0%
+INFO    Pavallion_000_sidebalancerun            7     1     38.7    0.04    0.00   100.0%   100.0%   100.0%
+INFO    Pavallion_002_phonesiteat               6     1     48.7    0.63    0.56    44.4%    77.8%   100.0%
+INFO    Pavallion_002_plankjack                 8     1     53.3    0.98    0.96    37.5%    66.7%    79.2%
+INFO    Pavallion_003_018_tossball              6     2     45.3    0.01    0.00   100.0%   100.0%   100.0%
+INFO    Pavallion_003_phonesiteat               6     1     46.0    0.15    0.13   100.0%   100.0%   100.0%
+INFO    Pavallion_003_plankjack                 8     1     38.7    0.14    0.09   100.0%   100.0%   100.0%
+INFO    Pavallion_003_sidebalancerun            8     1     43.0    0.03    0.03   100.0%   100.0%   100.0%
+INFO    Pavallion_006_phonesiteat               6     1     44.7    0.24    0.16    77.8%   100.0%   100.0%
+INFO    Pavallion_006_plankjack                 8     1     36.7    0.05    0.02   100.0%   100.0%   100.0%
+INFO    Pavallion_006_sidebalancerun            8     1     49.7    0.13    0.08    91.7%   100.0%   100.0%
+INFO    Pavallion_013_phonesiteat               5     1     42.3    0.25    0.17    86.7%   100.0%   100.0%
+INFO    -----------------------------------  ----  ----  -------  ------  ------  -------  -------  -------
+INFO    MEAN                                                43.1    1.65    1.27    73.6%    82.8%    88.0%
+INFO  
+INFO    ── Assuming 15 fps  (1 frame = 66.7 ms) ──
+INFO      MAE              109.7 ms
+INFO      MedAE             84.8 ms
+INFO      Within 33 ms     73.6%   (≤0.5 fr)
+INFO      Within 67 ms      82.8%   (≤1 fr)
+INFO      Within 133 ms      88.0%   (≤2 fr)
+INFO  
+INFO    ── Assuming 30 fps  (1 frame = 33.3 ms) ──
+INFO      MAE               54.8 ms
+INFO      MedAE             42.4 ms
+INFO      Within 17 ms     73.6%   (≤0.5 fr)
+INFO      Within 33 ms      82.8%   (≤1 fr)
+INFO      Within 67 ms      88.0%   (≤2 fr)
+tnanni@clariden-ln002:~/ghost> 
