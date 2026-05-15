@@ -21,6 +21,7 @@ class Synchronizer:
         device: str = "cuda",
         q: int = 2,
         min_overlap: int = 100,
+        max_shift: int | None = None,
         verbose: bool = False,
     ):
         self.method = method
@@ -28,6 +29,7 @@ class Synchronizer:
         self.device = device
         self.q = q
         self.min_overlap = min_overlap
+        self.max_shift = max_shift
         self.verbose = verbose
 
     def _compute_cost_matrix(
@@ -134,9 +136,10 @@ class Synchronizer:
         )
         n, m = cost.shape
         # k = j_start - i_start, i.e. cost[i, i+k] for valid i
-        # k ranges from -(n-1) to (m-1)
+        k_lo = -(n - 1) if self.max_shift is None else max(-(n - 1), -2 * self.max_shift)
+        k_hi = m        if self.max_shift is None else min(m,          2 * self.max_shift + 1)
         scores = {}
-        for k in range(-(n - 1), m):
+        for k in range(k_lo, k_hi):
             i0 = max(0, -k)
             i1 = min(n, m - k)
             overlap = i1 - i0
@@ -242,8 +245,10 @@ class Synchronizer:
                     confidences_1[p], confidences_2[p],
                 )
                 n, m = cost.shape
+                k_lo = -(n - 1) if self.max_shift is None else max(-(n - 1), -2 * self.max_shift)
+                k_hi = m        if self.max_shift is None else min(m,          2 * self.max_shift + 1)
                 p_scores: dict[int, float] = {}
-                for k in range(-(n - 1), m):
+                for k in range(k_lo, k_hi):
                     i0 = max(0, -k)
                     i1 = min(n, m - k)
                     if i1 - i0 < self.min_overlap:
@@ -280,7 +285,13 @@ class Synchronizer:
             }
             best_k = min(combined, key=combined.__getitem__)
             if self.verbose:
-                logger.debug(f"    joint offset={best_k:+d}  combined_cost={combined[best_k]:.4f}")
+                sorted_combined = sorted(combined.items(), key=lambda x: x[1])
+                top_n = sorted_combined[:10]
+                top_str = "  ".join(
+                    f"k={k:+d}(cost={c:.4f})" for k, c in top_n
+                )
+                logger.debug(f"    top-10 combined: {top_str}")
+                logger.debug(f"    → chosen k={best_k:+d}  cost={combined[best_k]:.4f}")
             return float(best_k)
 
         per_person_offsets = []

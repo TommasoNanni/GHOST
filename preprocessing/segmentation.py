@@ -844,18 +844,23 @@ class PersonSegmenter:
         if not npy_files:
             return
 
-        # Collect sorted frame indices where each track ID appears.
+        # Use sorted position as frame index to avoid parsing ambiguity from
+        # dataset-specific suffixes (e.g. RICH names masks "mask_00000_01.npy"
+        # where Python's int() treats the underscore as a digit separator and
+        # produces wrong values like int("00000_01") == 1, int("00001_01") == 101).
+        npy_by_pos: dict[int, Path] = {i: p for i, p in enumerate(npy_files)}
+
+        # Collect sorted position indices where each track ID appears.
         frames_by_id: dict[int, list[int]] = {}
-        for p in npy_files:
+        for pos, p in npy_by_pos.items():
             arr = np.load(str(p))
-            frame_idx = int(p.stem.replace("mask_", ""))
             for uid in np.unique(arr):
                 if uid == 0:
                     continue
-                frames_by_id.setdefault(int(uid), []).append(frame_idx)
+                frames_by_id.setdefault(int(uid), []).append(pos)
 
         # For each track, split into consecutive runs and flag short ones.
-        # bad_frames[frame_idx] = set of track IDs to zero out at that frame.
+        # bad_frames[pos] = set of track IDs to zero out at that position.
         bad_frames: dict[int, set[int]] = {}
         total_runs_removed = 0
         for uid, frame_list in frames_by_id.items():
@@ -885,14 +890,13 @@ class PersonSegmenter:
             f"(< {min_frames} frames) across {len({uid for s in bad_frames.values() for uid in s})} track(s)"
         )
 
-        # Build a frame_idx→path map for fast lookup.
-        npy_by_frame: dict[int, Path] = {
-            int(p.stem.replace("mask_", "")): p for p in npy_files
-        }
+        # Build a pos→json_path map aligned with npy_by_pos.
+        json_files = sorted(json_data_dir.glob("*.json"))
+        json_by_pos: dict[int, Path] = {i: p for i, p in enumerate(json_files)}
 
         # Zero out short runs in .npy masks.
-        for fi, uids in bad_frames.items():
-            p = npy_by_frame.get(fi)
+        for pos, uids in bad_frames.items():
+            p = npy_by_pos.get(pos)
             if p is None:
                 continue
             arr = np.load(str(p))
@@ -901,10 +905,9 @@ class PersonSegmenter:
             np.save(str(p), arr)
 
         # Remove short-run entries from JSON metadata.
-        for jp in sorted(json_data_dir.glob("*.json")):
-            frame_idx = int(jp.stem.replace("mask_", ""))
-            uids_to_remove = bad_frames.get(frame_idx)
-            if not uids_to_remove:
+        for pos, uids_to_remove in bad_frames.items():
+            jp = json_by_pos.get(pos)
+            if jp is None:
                 continue
             with open(jp) as f:
                 data = json.load(f)

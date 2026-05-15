@@ -107,6 +107,7 @@ class ParametersExtractor:
         mhr_model_path: str | None = None,
         reid_threshold: float | None = None,
         reid_match_window: int | None = None,
+        rich_data_root: str | None = None,
     ):
         self.sam3d_hf_repo = sam3d_hf_repo
         self.sam3d_step = sam3d_step
@@ -115,18 +116,43 @@ class ParametersExtractor:
         self.mhr_model_path = mhr_model_path
         self.reid_threshold = reid_threshold if reid_threshold is not None else self._REID_THRESHOLD
         self.reid_match_window = reid_match_window if reid_match_window is not None else self._REID_MATCH_WINDOW
+        self.rich_data_root = rich_data_root
 
         self._estimator: object | None = None
         self._converter: object | None = None
 
     @staticmethod
+    def _load_rich_cam_intrinsics(rich_data_root: str, video_dir: str, img_h: int, img_w: int) -> np.ndarray | None:
+        """Load and resize RICH camera intrinsics from scan_calibration XML."""
+        import re, xml.etree.ElementTree as ET
+        video_path = Path(video_dir)
+        scene_name = video_path.parent.name          # e.g. "BBQ_001_guitar"
+        cam_id = video_path.name                     # e.g. "cam_00"
+        location = re.sub(r'_\d{3}.*', '', scene_name)  # "BBQ", "LectureHall", …
+        cam_idx = int(cam_id.split('_')[-1])
+        xml_path = Path(rich_data_root) / "scan_calibration" / location / "calibration" / f"{cam_idx:03d}.xml"
+        if not xml_path.exists():
+            return None
+        tree = ET.parse(xml_path)
+        for child in tree.getroot():
+            if child.tag == "Intrinsics":
+                vals = [float(x) for x in child.find("data").text.split()]
+                K = np.array(vals, dtype=np.float32).reshape(3, 3)
+                scale = img_w / (K[0, 2] * 2)   # cx * 2 ≈ original image width
+                K[0] *= scale
+                K[1] *= scale
+                return K
+        return None
+
+    @staticmethod
     def _is_estimated(video_dir: Path) -> bool:
         """Return True if body estimation has already been run for this video.
 
-        Uses ``appearance_gallery.npz`` as the completion marker because it is
-        written last in ``_process_video_core``.
+        Uses the existence of any person_*.npz file as the completion marker,
+        which is robust to runs that were interrupted before appearance_gallery.npz
+        was written.
         """
-        return (Path(video_dir) / "body_data" / "appearance_gallery.npz").exists()
+        return any((Path(video_dir) / "body_data").glob("person_*.npz"))
 
     def _init_sam3d(self) -> None:
         """Lazy-load the SAM3D Body estimator."""
@@ -206,6 +232,12 @@ class ParametersExtractor:
                 if self._estimator is None:
                     self._init_sam3d()
                     converter = self._create_converter(self.mhr_model_path, self.smplx_model_path)
+                cam_int = None
+                if self.rich_data_root:
+                    h, w = video.frame_resolution
+                    cam_int = ParametersExtractor._load_rich_cam_intrinsics(
+                        self.rich_data_root, str(video_dir), h, w
+                    )
                 ParametersExtractor._process_video_core(
                     self._estimator,
                     video.video_id,
@@ -218,6 +250,7 @@ class ParametersExtractor:
                     reid_match_window=self.reid_match_window,
                     fps=video.fps,
                     converter=converter,
+                    cam_int=cam_int,
                 )
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -245,11 +278,18 @@ class ParametersExtractor:
             if ParametersExtractor._is_estimated(video_dirs[video.video_id]):
                 logging.info(f"  {video.video_id}: body data already exists, skipping")
                 continue
+            cam_int = None
+            if self.rich_data_root:
+                h, w = video.frame_resolution
+                cam_int = ParametersExtractor._load_rich_cam_intrinsics(
+                    self.rich_data_root, str(video_dirs[video.video_id]), h, w
+                )
             task_queue.put((
                 video.video_id,
                 str(video_dirs[video.video_id]),
                 str(video.frames_home) if video.frames_home else None,
                 video.fps,
+                cam_int,
             ))
         # If every video was already estimated, nothing to do
         if task_queue.empty():
@@ -353,7 +393,7 @@ class ParametersExtractor:
                 if task is None:
                     break
 
-                video_id, video_dir, frames_dir, video_fps = task
+                video_id, video_dir, frames_dir, video_fps, cam_int = task
                 logging.info(f"{gpu_label}Processing {video_id}")
                 try:
                     ParametersExtractor._process_video_core(
@@ -369,6 +409,7 @@ class ParametersExtractor:
                         reid_match_window=reid_match_window,
                         fps=video_fps,
                         converter=converter,
+                        cam_int=cam_int,
                     )
                 except Exception as e:
                     logging.error(
@@ -423,6 +464,7 @@ class ParametersExtractor:
         reid_match_window: int = 5,
         fps: float = 15.0,
         converter=None,
+        cam_int: np.ndarray | None = None,
     ) -> None:
         """Process all frames of one video with batched per-frame inference.
 
@@ -490,10 +532,13 @@ class ParametersExtractor:
             if not labels:
                 continue
 
-            frame_path = frame_dir / f"{frame_idx_str}.jpg"
-            if not frame_path.exists():
-                frame_path = frame_dir / f"{frame_idx_str}.png"
-            if not frame_path.exists():
+            frame_path = next(
+                (frame_dir / f"{frame_idx_str}{ext}"
+                 for ext in (".jpg", ".jpeg", ".png", ".bmp")
+                 if (frame_dir / f"{frame_idx_str}{ext}").exists()),
+                None,
+            )
+            if frame_path is None:
                 continue
             frame_bgr = cv2.imread(str(frame_path))
             if frame_bgr is None:
@@ -581,8 +626,12 @@ class ParametersExtractor:
                 _hook_handle = None
 
             try:
+                cam_int_t = (
+                    torch.tensor(cam_int[None], dtype=torch.float32)
+                    if cam_int is not None else None
+                )
                 outputs = estimator.process_one_image(
-                    frame_rgb, bboxes=bboxes_arr
+                    frame_rgb, bboxes=bboxes_arr, cam_int=cam_int_t
                 )
             except Exception as e:
                 logging.error(

@@ -1,15 +1,17 @@
 """
 Naive multi-view mean aggregator baseline.
 
-For every (frame, person):
-  - Joints 1-54 (relative rotations): average the 6D representations across
-    cameras that observed the joint, then re-orthogonalize via Gram-Schmidt.
-  - Joint 0 (global orientation, camera-local): rotate each camera estimate to
-    world frame (R_w2c^T @ R_body_cam), then take the SVD geodesic mean.
-  - Translation: back-project each camera's body_transl_cam_in to world frame,
-    average over cameras where the person was detected.
+Reports RR-MPJPE / RR-MPJRE / Betas-MSE — the same metrics as train_rich_v2.py.
 
-Prints per-joint geodesic error vs RICH GT and MetricCollection scores.
+For every (frame, person):
+  - Joints 1-54 (parent-relative, camera-invariant): visibility-weighted mean
+    of 6D representations across cameras, using joint_mask as weight.
+  - Joint 0 (global orient): taken directly from GT, same as the training
+    metric_fn.  This isolates the quality of relative body joints only,
+    which is what the fusion model predicts.
+  - Betas: visibility-weighted mean over cameras, then mean over valid frames.
+
+No camera calibration required.
 
 Run:
     pixi run python scripts/rich_outputs_mean.py
@@ -23,190 +25,22 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import numpy as np
 import torch
-from pytorch3d.transforms import (
-    quaternion_to_matrix,
-    rotation_6d_to_matrix,
-    matrix_to_rotation_6d,
-)
+from pytorch3d.transforms import rotation_6d_to_matrix
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.metric import (
-    MetricCollection,
-    WMPJPE, GAMPJPE, PAMPJPE,
-    WMPJRE, GAMPJRE, PAMPJRE,
-    TranslationError, ScaledTranslationError,
-    AngleError,
-    RRA, CCA, ScaledCCA,
-)
+from fusion.metrics_v2 import BetasMSE, MetricCollection, RootRelativeMPJPE, RootRelativeMPJRE
 from utilities.smplx_utilities import get_smplx_joints
 
 RICH_OUTPUT_ROOT = Path(
     "/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich11_segmentation_test"
 )
 
-SMPLX_JOINT_NAMES = (
-    [f"body_{i:02d}" for i in range(22)]
-    + ["jaw", "eye_L", "eye_R"]
-    + [f"hand_{i:02d}" for i in range(30)]
-)
-
 METRIC_STRIDE = 8
 
 
-def so3_mean(rotmats: torch.Tensor) -> torch.Tensor:
-    """Geodesic mean of rotation matrices via SVD projection.
-
-    Args:
-        rotmats: (N, 3, 3) — N rotation matrices to average.
-    Returns:
-        (3, 3) — nearest rotation matrix to the element-wise mean.
-    """
-    R_sum = rotmats.sum(0)          # (3, 3)
-    U, _, Vh = torch.linalg.svd(R_sum)
-    d = torch.det(U @ Vh)
-    fix = torch.ones(3, device=rotmats.device)
-    fix[-1] = d.sign()
-    return U @ torch.diag(fix) @ Vh
-
-
-def aggregate_pose(
-    pose_cam: torch.Tensor,       # (T, K, P, J, 6)  joint 0 in cam frame, 1+ are relative
-    cam_quats: torch.Tensor,      # (T, K, 4)  quaternion w2c
-    person_mask: torch.Tensor,    # (T, K, P)  bool — person detected in this cam/frame
-    joint_mask: torch.Tensor,     # (T, K, P, J)  float — joint was observed
-) -> torch.Tensor:
-    """Returns (T, P, J, 6) averaged pose in world frame."""
-    T, K, P, J, _ = pose_cam.shape
-    device = pose_cam.device
-
-    R_w2c = quaternion_to_matrix(cam_quats.reshape(-1, 4)).reshape(T, K, 3, 3)  # (T, K, 3, 3)
-    R_c2w = R_w2c.transpose(-1, -2)                                               # (T, K, 3, 3)
-
-    out_pose = torch.zeros(T, P, J, 6, device=device)
-
-    for t in range(T):
-        for p in range(P):
-            valid_cams = person_mask[t, :, p]  # (K,)
-            if not valid_cams.any():
-                continue
-
-            # ── Joint 0: global orient in cam frame → world frame → SO(3) mean ──
-            r6d_j0 = pose_cam[t, :, p, 0, :]          # (K, 6)
-            R_j0_cam = rotation_6d_to_matrix(r6d_j0)  # (K, 3, 3)
-            R_j0_world = torch.bmm(R_c2w[t], R_j0_cam)  # (K, 3, 3)  R_c2w @ R_body_cam
-            R_j0_mean = so3_mean(R_j0_world[valid_cams])
-            out_pose[t, p, 0, :] = matrix_to_rotation_6d(R_j0_mean.unsqueeze(0)).squeeze(0)
-
-            # ── Joints 1-54: frame-independent relative rotations ──
-            for j in range(1, J):
-                obs = joint_mask[t, :, p, j].bool() & valid_cams  # (K,)
-                src = valid_cams if not obs.any() else obs
-                r6d = pose_cam[t, src, p, j, :]   # (N, 6)
-                out_pose[t, p, j, :] = r6d.mean(0)  # average 6D, GS re-ortho on read
-
-    return out_pose  # (T, P, J, 6)
-
-
-def aggregate_translation(
-    body_transl_cam: torch.Tensor,  # (T, K, P, 3)  in cam-k local frame
-    cam_quats: torch.Tensor,         # (T, K, 4)
-    cam_transl_w2c: torch.Tensor,    # (T, K, 3)
-    person_mask: torch.Tensor,       # (T, K, P)
-) -> torch.Tensor:
-    """Returns (T, P, 3) world-frame translation via mean back-projection."""
-    T, K, P, _ = body_transl_cam.shape
-    device = body_transl_cam.device
-
-    R_w2c = quaternion_to_matrix(cam_quats.reshape(-1, 4)).reshape(T, K, 3, 3)
-    R_c2w = R_w2c.transpose(-1, -2)
-
-    out = torch.zeros(T, P, 3, device=device)
-    for t in range(T):
-        for p in range(P):
-            valid = person_mask[t, :, p]  # (K,)
-            if not valid.any():
-                continue
-            # world = R_c2w @ body_transl_cam + cam_centre_world
-            # cam_centre_world = -R_c2w @ cam_transl_w2c
-            bt_cam = body_transl_cam[t, valid, p, :]          # (N, 3)
-            Rc2w_v = R_c2w[t, valid]                           # (N, 3, 3)
-            cam_t  = cam_transl_w2c[t, valid]                  # (N, 3)
-
-            bt_world = torch.bmm(Rc2w_v, bt_cam.unsqueeze(-1)).squeeze(-1) - \
-                       torch.bmm(Rc2w_v, cam_t.unsqueeze(-1)).squeeze(-1)
-            out[t, p] = bt_world.mean(0)
-    return out  # (T, P, 3)
-
-
-def geodesic_deg(R_pred: torch.Tensor, R_gt: torch.Tensor) -> torch.Tensor:
-    trace = torch.einsum("...ij,...ij->...", R_pred, R_gt).clamp(-1 + 1e-6, 3 - 1e-6)
-    return torch.acos(((trace - 1.0) / 2.0).clamp(-1 + 1e-6, 1 - 1e-6)) * (180.0 / torch.pi)
-
-
-def se3_align(pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
-    """Rigid-align pred trajectory to GT via SVD (no scaling).
-
-    Finds R ∈ SO(3), t ∈ R³ minimising ||R @ pred + t - gt||² and returns
-    the aligned predictions.
-
-    Args:
-        pred: (N, 3)
-        gt:   (N, 3)
-    Returns:
-        (N, 3) aligned predictions
-    """
-    pred_c = pred.mean(0)
-    gt_c   = gt.mean(0)
-    H = (pred - pred_c).T @ (gt - gt_c)          # (3, 3)
-    U, _, Vh = torch.linalg.svd(H)
-    fix = torch.ones(3, device=pred.device)
-    fix[-1] = torch.det(Vh.T @ U.T).sign()
-    R = Vh.T @ torch.diag(fix) @ U.T
-    t = gt_c - R @ pred_c
-    return (R @ pred.T).T + t
-
-
-def compute_rte(
-    pred_trans: torch.Tensor,  # (T, P, 3)
-    gt_trans:   torch.Tensor,  # (T, P, 3)
-    gt_valid:   torch.Tensor,  # (T, P) bool
-) -> list[float]:
-    """SE(3)-aligned root translation error as fraction of GT path length.
-
-    For each person: align predicted root trajectory to GT with a rigid
-    transform, compute mean-L2 residual, divide by GT path length.
-
-    Returns a list with one RTE value per valid person (percentage * 100 for
-    display, stored as a plain ratio internally).
-    """
-    T, P, _ = pred_trans.shape
-    rtes: list[float] = []
-    for p in range(P):
-        valid = gt_valid[:, p]
-        if valid.sum() < 2:
-            continue
-        pred = pred_trans[valid, p]
-        gt   = gt_trans[valid, p]
-        aligned  = se3_align(pred, gt)
-        mean_err = (aligned - gt).norm(dim=-1).mean()
-        path_len = (gt[1:] - gt[:-1]).norm(dim=-1).sum()
-        if path_len > 1e-6:
-            rtes.append((mean_err / path_len).item())
-    return rtes
-
-
-def _process_scene(
-    scene_dir: Path,
-    mc: MetricCollection,
-    joint_err_vals: list,   # list of (T*P, J) tensors, accumulated across scenes
-    transl_err_cm: list,    # list of 1-D tensors of valid translation errors in cm
-    rte_vals: list,         # list of per-person RTE ratios, accumulated across scenes
-    use_gt_cameras: bool = True,
-) -> bool:
-    """Process one scene. Returns True on success, False if scene should be skipped."""
+def _process_scene(scene_dir: Path, mc: MetricCollection) -> bool:
     try:
         dp = RICHFusionDatapoint(
             scene_dir=scene_dir, rich_data_root=CONFIG.data.rich_data_root
@@ -218,232 +52,106 @@ def _process_scene(
         return False
 
     try:
-        pose_cam    = inputs["pose"].float()               # (T, K, P, J, 6)
-        body_t_cam  = inputs["body_transl_cam_in"].float() # (T, K, P, 3)
-        cam_vec     = inputs["camera"].float()             # (T, K, 8)
-        person_mask = inputs["person_mask"].bool()         # (T, K, P)
-        joint_mask  = inputs["joint_mask"].float()         # (T, K, P, J)
+        pose_cam    = inputs["pose"].float()        # (T, K, P, J, 6)
+        person_mask = inputs["person_mask"].bool()  # (T, K, P)
+        joint_mask  = inputs["joint_mask"].float()  # (T, K, P, J)
 
-        gt_pose  = targets["pose"].float()   # (T, P, J, 6)
-        gt_trans = targets["trans"].float()  # (T, P, 3)
-        gt_shape = targets["shape"].float()  # (T, P, 10)
-        gt_valid = targets["gt_valid"]       # (T, P) bool
-        gt_cam   = targets["camera"].float() # (T, K, 8)
+        gt_pose  = targets["pose"].float()          # (T, P, J, 6)
+        gt_shape = targets["shape"].float()         # (T, P, 10)
+        gt_valid = targets["gt_valid"]              # (T, P) bool
 
         T, K, P, J, _ = pose_cam.shape
 
         if P == 0:
-            print(f"  SKIP {scene_dir.name}: no persons (P=0)")
+            print(f"  SKIP {scene_dir.name}: no persons")
             return False
 
-        if use_gt_cameras:
-            agg_quats  = gt_cam[..., :4]
-            agg_transl = gt_cam[..., 4:7]
-        else:
-            agg_quats  = cam_vec[..., :4]
-            agg_transl = cam_vec[..., 4:7]
+        # Joints 1+: visibility-weighted mean across cameras (camera-invariant).
+        jvis = joint_mask * person_mask.float().unsqueeze(-1)  # (T, K, P, J)
+        jvis_1plus = jvis[..., 1:, None]                       # (T, K, P, J-1, 1)
+        jvis_sum   = jvis[..., 1:].sum(dim=1).clamp(min=1e-8) # (T, P, J-1)
+        agg_joints = (pose_cam[..., 1:, :] * jvis_1plus).sum(dim=1) / jvis_sum.unsqueeze(-1)
+        # (T, P, J-1, 6)
 
-        agg_pose  = aggregate_pose(pose_cam, agg_quats, person_mask, joint_mask)
-        agg_trans = aggregate_translation(body_t_cam, agg_quats, agg_transl, person_mask)
+        # Joint 0: use GT global orient, same as training metric_fn.
+        pose_full = torch.cat([gt_pose[..., :1, :], agg_joints], dim=-2)  # (T, P, J, 6)
 
-        # Average predicted shape across views (K) for each (t, p), ignoring cameras
-        # that did not detect the person.  Do NOT average across time.
-        pred_shape_raw = inputs["shape"].float()                        # (T, K, P, 10)
-        view_mask = person_mask.float().unsqueeze(-1)                   # (T, K, P, 1)
-        agg_shape = (pred_shape_raw * view_mask).sum(1) / view_mask.sum(1).clamp(min=1)  # (T, P, 10)
+        # Betas: visibility-weighted mean over cameras, then mean over valid frames.
+        pred_shape_raw = inputs["shape"].float()                              # (T, K, P, 10)
+        vis = person_mask.float().unsqueeze(-1)                               # (T, K, P, 1)
+        agg_shape_frame = (pred_shape_raw * vis).sum(1) / vis.sum(1).clamp(min=1)  # (T, P, 10)
 
-        # ── Per-joint geodesic error ──────────────────────────────────────────
-        shape_4d = agg_pose.shape[:-1]
-        R_agg = rotation_6d_to_matrix(agg_pose.reshape(-1, 6)).reshape(*shape_4d, 3, 3)
-        R_gt  = rotation_6d_to_matrix(gt_pose.reshape(-1, 6)).reshape(*shape_4d, 3, 3)
-        err   = geodesic_deg(R_agg, R_gt)  # (T, P, J)
+        valid_f = gt_valid.float().unsqueeze(-1)                              # (T, P, 1)
+        agg_shape_static = (agg_shape_frame * valid_f).sum(0) / valid_f.sum(0).clamp(min=1)
+        gt_shape_static  = (gt_shape * valid_f).sum(0) / valid_f.sum(0).clamp(min=1)
 
-        valid_mask = gt_valid.unsqueeze(-1).expand_as(err)
-        joint_err_vals.append((err, valid_mask))
-
-        # ── Direct translation error (cm) ─────────────────────────────────────
-        transl_err = (agg_trans - gt_trans).norm(dim=-1)  # (T, P)
-        if gt_valid.any():
-            transl_err_cm.append(transl_err[gt_valid] * 100)
-
-        # ── Root Translation Error (RTE) ───────────────────────────────────────
-        rte_vals.extend(compute_rte(agg_trans, gt_trans, gt_valid))
-
-        # ── MetricCollection update ───────────────────────────────────────────
+        # FK on strided frames.
         t_idx = torch.arange(0, T, METRIC_STRIDE)
+
         with torch.no_grad():
-            pose_sub  = agg_pose[t_idx].unsqueeze(0)
-            pred_shape_sub = agg_shape[t_idx].unsqueeze(0)
-            pred_joints_rel = get_smplx_joints(pose_sub, pred_shape_sub).cpu().numpy()[..., :55, :]
+            pred_joints = get_smplx_joints(
+                pose_full[t_idx].unsqueeze(0),
+                agg_shape_frame[t_idx].unsqueeze(0),
+            ).cpu().numpy()[0, :, :, :55, :]    # (T', P, 55, 3)
 
-            gt_pose_sub  = gt_pose[t_idx].unsqueeze(0)
-            gt_shape_sub = gt_shape[t_idx].unsqueeze(0)
-            gt_joints_rel = get_smplx_joints(gt_pose_sub, gt_shape_sub).cpu().numpy()[..., :55, :]
+            gt_joints = get_smplx_joints(
+                gt_pose[t_idx].unsqueeze(0),
+                gt_shape[t_idx].unsqueeze(0),
+            ).cpu().numpy()[0, :, :, :55, :]    # (T', P, 55, 3)
 
-            pred_transl = agg_trans[t_idx].unsqueeze(0).cpu().numpy()
-            gt_transl   = gt_trans[t_idx].unsqueeze(0).cpu().numpy()
+            rot_pred = rotation_6d_to_matrix(
+                pose_full[t_idx].reshape(-1, 6)
+            ).reshape(len(t_idx), P, J, 3, 3).cpu().numpy()
 
-            pred_joints = pred_joints_rel + pred_transl[:, :, :, None, :]
-            gt_joints   = gt_joints_rel   + gt_transl[:, :, :, None, :]
+            rot_gt = rotation_6d_to_matrix(
+                gt_pose[t_idx].reshape(-1, 6)
+            ).reshape(len(t_idx), P, J, 3, 3).cpu().numpy()
 
-            pred_rotmats = rotation_6d_to_matrix(agg_pose[t_idx].unsqueeze(0)).cpu().numpy()
-            gt_rotmats   = rotation_6d_to_matrix(gt_pose[t_idx].unsqueeze(0)).cpu().numpy()
+        gt_valid_sub = gt_valid[t_idx].cpu().numpy()  # (T', P)
 
-            T_sub = len(t_idx)
-            cam_valid = (gt_cam[t_idx, :, :4].norm(dim=-1) > 0.5).cpu().numpy()
+        for t in range(len(t_idx)):
+            for p in range(P):
+                if not gt_valid_sub[t, p]:
+                    continue
+                mc["RR-MPJPE"].update(pred_joints[t, p], gt_joints[t, p])
+                mc["RR-MPJRE"].update(rot_pred[t, p], rot_gt[t, p])
 
-            gt_R_w2c = quaternion_to_matrix(
-                gt_cam[t_idx, :, :4].reshape(-1, 4)
-            ).reshape(T_sub, K, 3, 3).cpu().numpy()
-            gt_t_w2c = gt_cam[t_idx, :, 4:7].cpu().numpy()
-            gt_cam_centres   = -np.einsum("...ji,...j->...i", gt_R_w2c, gt_t_w2c)
-            pred_cam_centres = gt_cam_centres.copy()  # naive: no camera prediction
-
-            gt_valid_sub = gt_valid[t_idx].cpu().numpy()
-
-        for t in range(T_sub):
-            if not gt_valid_sub[t].any():
-                continue
-            pj = pred_joints[0, t]
-            gj = gt_joints[0, t]
-            pr = pred_rotmats[0, t]
-            gr = gt_rotmats[0, t]
-            ck = cam_valid[t]
-            mc["W-MPJPE"].update(pj, gj, pred_cam_centres[t][ck], gt_cam_centres[t][ck])
-            mc["GA-MPJPE"].update(pj, gj)
-            mc["PA-MPJPE"].update(pj, gj)
-            mc["W-MPJRE"].update(pr, gr, pred_cam_centres[t][ck], gt_cam_centres[t][ck])
-            mc["GA-MPJRE"].update(pr, gr)
-            mc["PA-MPJRE"].update(pr, gr)
+        for p in range(P):
+            mc["Betas-MSE"].update(
+                agg_shape_static[p].cpu().numpy(),
+                gt_shape_static[p].cpu().numpy(),
+            )
 
     except Exception as e:
+        import traceback
         print(f"  SKIP {scene_dir.name} (processing): {e}")
+        traceback.print_exc()
         return False
 
     return True
 
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--use-gt-cameras", action="store_true", default=False,
-        help="Use GT calibration cameras for pose/translation aggregation instead of Kabsch-estimated ones.",
-    )
-    args = parser.parse_args()
-
     scene_dirs = sorted(d for d in RICH_OUTPUT_ROOT.iterdir() if d.is_dir())
-    print(f"Found {len(scene_dirs)} scene directories under {RICH_OUTPUT_ROOT.name}")
-    print(f"Camera mode: {'GT calibration' if args.use_gt_cameras else 'Kabsch-estimated'}")
+    print(f"Found {len(scene_dirs)} scenes under {RICH_OUTPUT_ROOT.name}")
 
-    mc = MetricCollection([
-        WMPJPE(), GAMPJPE(), PAMPJPE(),
-        WMPJRE(), GAMPJRE(), PAMPJRE(),
-        TranslationError(), ScaledTranslationError(),
-        AngleError(),
-        RRA(threshold=15.0), CCA(threshold=15.0), ScaledCCA(threshold=15.0),
-    ])
-
-    joint_err_pairs: list = []   # list of (err, valid_mask) tensors per scene
-    transl_err_cm:   list = []   # list of 1-D tensors per scene
-    rte_vals:        list = []   # list of per-person RTE ratios
+    mc = MetricCollection([RootRelativeMPJPE(), RootRelativeMPJRE(), BetasMSE()])
 
     n_ok = 0
-    for scene_dir in scene_dirs:
-        print(f"\n[{n_ok+1}/{len(scene_dirs)}] {scene_dir.name}")
-        ok = _process_scene(scene_dir, mc, joint_err_pairs, transl_err_cm, rte_vals, use_gt_cameras=args.use_gt_cameras)
-        if ok:
+    for i, scene_dir in enumerate(scene_dirs):
+        print(f"[{i+1}/{len(scene_dirs)}] {scene_dir.name}")
+        if _process_scene(scene_dir, mc):
             n_ok += 1
 
-    print(f"\n\nProcessed {n_ok}/{len(scene_dirs)} scenes successfully.")
+    print(f"\nProcessed {n_ok}/{len(scene_dirs)} scenes successfully.")
 
-    if n_ok == 0:
-        print("No scenes loaded — nothing to report.")
-        return
-
-    # ── Per-joint geodesic error (aggregated across all scenes) ──────────────
-    # joint_err_pairs stores (err (T,P,J), valid_mask (T,P,J)) per scene
-    J = joint_err_pairs[0][0].shape[-1]
-    per_joint = []
-    for j in range(J):
-        vals = torch.cat([e[:, :, j][m[:, :, j]] for e, m in joint_err_pairs])
-        per_joint.append(vals.mean().item() if vals.numel() > 0 else float("nan"))
-
-    print("\n--- Per-joint error vs GT (geodesic°, all scenes) ---")
-    print(f"{'Joint':>12}  {'mean_deg':>10}")
-    print("-" * 28)
-    for j, mean_e in enumerate(per_joint):
-        name = SMPLX_JOINT_NAMES[j] if j < len(SMPLX_JOINT_NAMES) else f"j{j:02d}"
-        print(f"{name:>12}  {mean_e:>10.1f}")
-    print("-" * 28)
-    print(f"{'Overall mean':>12}  {np.nanmean(per_joint):>10.1f}")
-
-    groups = [
-        ("body  (0-21)",    range(0, 22)),
-        ("jaw+eyes(22-24)", range(22, 25)),
-        ("hands (25-54)",   range(25, 55)),
-    ]
-    print()
-    for label, idx_range in groups:
-        print(f"  {label}: {np.nanmean([per_joint[i] for i in idx_range]):.1f}°")
-
-    # ── Rotation error by group ───────────────────────────────────────────────
-    def joint_mean(lo, hi):
-        vals = torch.cat([e[:, :, lo:hi][m[:, :, lo:hi]] for e, m in joint_err_pairs])
-        return float(vals.mean().item()) if vals.numel() > 0 else float("nan")
-
-    print("\n" + "=" * 50)
-    print("ROTATION ERROR (degrees, all scenes, valid GT frames only)")
-    print("=" * 50)
-    print(f"  Root orient (joint 0)  : {joint_mean(0, 1):.2f}°")
-    print(f"  Body joints  (1-21)    : {joint_mean(1, 22):.2f}°")
-    print(f"  Hand joints (22-54)    : {joint_mean(22, J):.2f}°")
-    print(f"  All {J} joints          : {joint_mean(0, J):.2f}°")
-
-    # ── Direct translation error (cm) ─────────────────────────────────────────
-    print("\n" + "=" * 50)
-    print("TRANSLATION ERROR (cm, all scenes, valid GT frames only, no alignment)")
-    print("=" * 50)
-    if transl_err_cm:
-        all_cm = torch.cat(transl_err_cm)
-        print(f"  Mean   : {all_cm.mean():.1f} cm")
-        print(f"  Median : {all_cm.median():.1f} cm")
-        print(f"  Max    : {all_cm.max():.1f} cm")
-    else:
-        print("  No valid GT frames found.")
-
-    # ── Root Translation Error (RTE) ───────────────────────────────────────────
-    print("\n" + "=" * 50)
-    print("ROOT TRANSLATION ERROR (RTE, SE(3)-aligned, % of GT path length)")
-    print("=" * 50)
-    if rte_vals:
-        arr = np.array(rte_vals) * 100  # convert to percentage
-        print(f"  Mean   : {arr.mean():.1f} %")
-        print(f"  Median : {np.median(arr):.1f} %")
-        print(f"  Max    : {arr.max():.1f} %")
-    else:
-        print("  No valid person trajectories found.")
-
-    # ── MetricCollection results ──────────────────────────────────────────────
-    print("\n--- MetricCollection results (all scenes) ---")
     results = mc.compute()
-    for name, val_dict in results.items():
-        vals = "  ".join(f"{k}={v:.4f}" for k, v in val_dict.items())
-        print(f"  {name:<12}: {vals}")
-
-    # ── Paper table summary ───────────────────────────────────────────────────
     print("\n" + "=" * 50)
-    print("PAPER TABLE SUMMARY (mean only)")
+    print("MEAN-POOL BASELINE  (same metrics as train_rich_v2)")
     print("=" * 50)
-    print("  Body metrics — relative (use these for paper comparison):")
-    for name in ["GA-MPJPE", "PA-MPJPE", "GA-MPJRE", "PA-MPJRE"]:
-        unit = "m" if "MPJPE" in name else "°"
-        print(f"    {name:<12}: {results[name]['mean']:.4f} {unit}")
-    print("  Body metrics — world frame (= raw error, no alignment):")
-    for name in ["W-MPJPE", "W-MPJRE"]:
-        unit = "m" if "MPJPE" in name else "°"
-        print(f"    {name:<12}: {results[name]['mean']:.4f} {unit}")
-    print("  Camera metrics: N/A (baseline uses GT cameras)")
+    for name, d in results.items():
+        unit = " m" if "MPJPE" in name else ("°" if "MPJRE" in name else "")
+        print(f"  {name:<12}: mean={d['mean']:.4f}{unit}  median={d['median']:.4f}{unit}  count={d['count']:.0f}")
 
 
 if __name__ == "__main__":
