@@ -1,14 +1,13 @@
 """Geometric post-ReID using 3D world-space proximity.
 
-After temporal sync and camera alignment, background persons that are
-spatially close at the same physical time across cameras are merged into
-the same global ID.  This is a second-pass correction on top of the
-appearance-based cross-view ReID.
+After temporal sync, background persons that are spatially close at the same
+physical time across cameras are merged into the same global ID.  This is a
+second-pass correction on top of the appearance-based cross-view ReID.
 
 Prerequisites (all produced by earlier pipeline stages):
     - ``cross_view_reid.json``   — foreground set + remaps
     - ``temporal_offsets.json``  — per-camera global start frame
-    - ``camera_alignment.npz``   — pairwise (R, t) transforms
+    - ``vggt_cameras.npz``       — per-frame extrinsics (T, K, 3, 4) from VGGT
 """
 
 from __future__ import annotations
@@ -129,13 +128,13 @@ class GeometricReidentifier:
 
         reid_path      = scene_dir / "cross_view_reid.json"
         offsets_path   = scene_dir / "temporal_offsets.json"
-        alignment_path = scene_dir / "camera_alignment.npz"
+        vggt_cam_path  = scene_dir / "vggt_cameras.npz"
 
         if not reid_path.exists():
             logging.warning(f"Geometric ReID [{scene_id}]: cross_view_reid.json missing — skipping")
             return
-        if not alignment_path.exists():
-            logging.warning(f"Geometric ReID [{scene_id}]: camera_alignment.npz missing — skipping")
+        if not vggt_cam_path.exists():
+            logging.warning(f"Geometric ReID [{scene_id}]: vggt_cameras.npz missing — skipping")
             return
 
         # ── Load prerequisites ────────────────────────────────────────────────
@@ -156,8 +155,20 @@ class GeometricReidentifier:
                 f"— assuming all cameras are synchronised"
             )
 
-        from preprocessing.camera_alignment import CameraAlignment
-        alignment = CameraAlignment.load(alignment_path)
+        vggt_data  = np.load(str(vggt_cam_path), allow_pickle=False)
+        vggt_ext   = vggt_data["extrinsics"]   # (T_vggt, K, 3, 4) cam-from-world
+        vggt_valid = vggt_data["valid"]        # (T_vggt, K)
+        cam_names  = [n.decode() for n in vggt_data["camera_names"]]
+        cam_to_k   = {name: k for k, name in enumerate(cam_names)}
+        T_vggt     = vggt_ext.shape[0]
+
+        vid_ids = list(video_dirs.keys())
+        pairs = [
+            (vid_a, vid_b)
+            for i, vid_a in enumerate(vid_ids)
+            for vid_b in vid_ids[i + 1:]
+            if vid_a in cam_to_k and vid_b in cam_to_k
+        ]
 
         # ── Load background persons ───────────────────────────────────────────
         # background_data[vid_id][pid] = {"pred_cam_t": (T,3), "frame_indices": (T,)}
@@ -209,8 +220,10 @@ class GeometricReidentifier:
                 rx, ry = ry, rx
             parent[ry] = rx
 
-        # ── Proximity check for each aligned camera pair ──────────────────────
-        for (vid_a, vid_b), (R_arr, t_arr) in alignment.items():
+        # ── Proximity check for each VGGT camera pair ────────────────────────
+        for vid_a, vid_b in pairs:
+            k_a = cam_to_k[vid_a]
+            k_b = cam_to_k[vid_b]
             bg_a = background_data.get(vid_a, {})
             bg_b = background_data.get(vid_b, {})
             if not bg_a or not bg_b:
@@ -221,6 +234,11 @@ class GeometricReidentifier:
                 continue
 
             delta = offsets.get(vid_a, 0) - offsets.get(vid_b, 0)
+            if delta != 0:
+                logging.warning(
+                    f"Geometric ReID [{scene_id}]: pair {vid_a}↔{vid_b} has temporal offset "
+                    f"delta={delta} — VGGT frame lookup uses cam_a frame index for both cameras"
+                )
             logging.info(
                 f"Geometric ReID [{scene_id}]: checking pair {vid_a}↔{vid_b} "
                 f"— delta={delta} frames, bg_a={sorted(bg_a)}, bg_b={sorted(bg_b)}"
@@ -231,11 +249,15 @@ class GeometricReidentifier:
                 for pid_b, data_b in bg_b.items():
                     frames_b = {int(fi): idx for idx, fi in enumerate(data_b["frame_indices"])}
 
-                    # Keep only frames that have a body detection in both cameras.
+                    # Keep only frames where both cameras have a body detection and
+                    # VGGT has valid extrinsics for both.
                     common = [
-                        (frames_a[fi], frames_b[fi + delta])
+                        (fi, frames_a[fi], frames_b[fi + delta])
                         for fi in frames_a
                         if (fi + delta) in frames_b
+                        and fi < T_vggt
+                        and vggt_valid[fi, k_a]
+                        and vggt_valid[fi, k_b]
                     ]
                     if len(common) < self.min_overlap_frames:
                         logging.info(
@@ -244,13 +266,23 @@ class GeometricReidentifier:
                         )
                         continue
 
-                    rows_a = [c[0] for c in common]
-                    rows_b = [c[1] for c in common]
+                    abs_frames = [c[0] for c in common]
+                    rows_a     = [c[1] for c in common]
+                    rows_b     = [c[2] for c in common]
                     pos_a = data_a["pred_cam_t"][rows_a]  # (N, 3)
                     pos_b = data_b["pred_cam_t"][rows_b]  # (N, 3)
 
-                    # Single static transform: X_b = R @ X_a + t
-                    pos_a_in_b = pos_a @ R_arr.T + t_arr[None, :]  # (N, 3)
+                    # Per-frame transform: project pos_a (in cam_a space) into cam_b space.
+                    # VGGT extrinsics: x_cam = R @ x_world + t  (cam-from-world).
+                    # So: x_b = R_b @ R_a^T @ x_a + (t_b - R_b @ R_a^T @ t_a)
+                    pos_a_in_b = np.empty_like(pos_a)
+                    for n, fi in enumerate(abs_frames):
+                        R_a  = vggt_ext[fi, k_a, :3, :3]
+                        t_a  = vggt_ext[fi, k_a, :3,  3]
+                        R_b  = vggt_ext[fi, k_b, :3, :3]
+                        t_b  = vggt_ext[fi, k_b, :3,  3]
+                        R_ab = R_b @ R_a.T
+                        pos_a_in_b[n] = R_ab @ pos_a[n] + (t_b - R_ab @ t_a)
                     dists = np.linalg.norm(pos_a_in_b - pos_b, axis=-1)
                     median_dist = float(np.median(dists))
                     mean_dist   = float(np.mean(dists))
