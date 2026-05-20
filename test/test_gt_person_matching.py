@@ -1,4 +1,4 @@
-"""Test: verify GT person matching for a RICH scene.
+"""Test: verify GT person matching for a RICH scene (or all scenes in a root dir).
 
 Loads a RICHFusionDatapoint for a given scene directory and reports:
   - which ghost person ID was matched to which RICH GT person ID
@@ -7,10 +7,12 @@ Loads a RICHFusionDatapoint for a given scene directory and reports:
 
 Usage:
     pixi run python -m test.test_gt_person_matching
+    pixi run python -m test.test_gt_person_matching --root /path/to/rich_test
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 from pathlib import Path
@@ -32,7 +34,7 @@ SCENE_DIR = Path(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def run(scene_dir: Path) -> None:
+def run(scene_dir: Path) -> dict:
     print(f"\n{'='*60}")
     print(f"Scene: {scene_dir.name}")
     print(f"{'='*60}")
@@ -45,6 +47,7 @@ def run(scene_dir: Path) -> None:
     dp = RICHFusionDatapoint(
         scene_dir=scene_dir,
         rich_data_root=CONFIG.data.rich_data_root,
+        body_split=args.body_split,
     )
 
     # ── Ghost persons ──────────────────────────────────────────────────────
@@ -116,8 +119,73 @@ def run(scene_dir: Path) -> None:
         n_valid = int(gt_valid[:, p].sum())
         print(f"  person slot {p}: {n_valid}/{T} frames have GT annotation")
 
+    rich_to_ghost = getattr(dp, "_rich_to_ghost", {})
+    print(f"\nRICH GT pid → ghost pid mapping: {rich_to_ghost}")
     print()
+    return {
+        "scene": scene_dir.name,
+        "ghost_pids": ghost_pids,
+        "matched": matched_ghost_pids,
+        "unmatched": unmatched,
+        "rich_to_ghost": rich_to_ghost,
+    }
 
 
 if __name__ == "__main__":
-    run(SCENE_DIR)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help="Root directory containing one sub-folder per scene. "
+             "If omitted, runs on the single SCENE_DIR defined at the top.",
+    )
+    parser.add_argument(
+        "--rich-root",
+        type=Path,
+        default=None,
+        help="Override rich_data_root (must contain scan_calibration/ and body split dir).",
+    )
+    parser.add_argument(
+        "--body-split",
+        default="train_body",
+        help="Which body split to use for GT (default: train_body; use test_body for test set).",
+    )
+    args = parser.parse_args()
+    if args.rich_root is not None:
+        CONFIG.data.rich_data_root = str(args.rich_root)
+
+    if args.root is not None:
+        scene_dirs = sorted(p for p in args.root.iterdir() if p.is_dir())
+        print(f"Found {len(scene_dirs)} scenes under {args.root}\n")
+        summaries = []
+        for sd in scene_dirs:
+            try:
+                summary = run(sd)
+                summaries.append(summary)
+            except Exception as e:
+                print(f"  ERROR in {sd.name}: {e}\n")
+                summaries.append({"scene": sd.name, "error": str(e)})
+
+        print("\n" + "="*60)
+        print("SUMMARY")
+        print("="*60)
+        for s in summaries:
+            if "error" in s:
+                print(f"  {s['scene']:<50}  ERROR: {s['error']}")
+            else:
+                n_ghost   = len(s["ghost_pids"])
+                n_matched = len(s["matched"])
+                n_drop    = len(s["unmatched"])
+                mapping   = ", ".join(
+                    f"GT{rpid}→g{gpid}"
+                    for rpid, gpid in sorted(s.get("rich_to_ghost", {}).items())
+                )
+                flag = "  <-- FP ghosts" if n_drop > 0 else ""
+                print(
+                    f"  {s['scene']:<50}  "
+                    f"ghost={n_ghost}  matched={n_matched}  dropped={n_drop}"
+                    f"  [{mapping}]{flag}"
+                )
+    else:
+        run(SCENE_DIR)
