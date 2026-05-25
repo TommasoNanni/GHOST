@@ -31,31 +31,39 @@ import tyro
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.fusion_module import SSTNetwork, WindowedTemporalAttention
+from fusion.fusion_module_v2 import BetasAggregator, FusionWithBetas, PoseFusionModule
+from fusion.placer import BodyPlacer
+
+# Import PnP placement helpers from inference.py (same scripts/ dir)
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from inference import _run_placer, _build_vggt_cameras
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _build_model() -> SSTNetwork:
+def _R_to_6d(R: np.ndarray) -> np.ndarray:
+    """Convert (..., 3, 3) rotation matrices to 6D (first two rows)."""
+    return np.concatenate([R[..., 0, :], R[..., 1, :]], axis=-1)
+
+
+def _build_model() -> FusionWithBetas:
     arch = CONFIG.fusion.architecture
-    model = SSTNetwork(
+    pose_module = PoseFusionModule(
         embedding_dim    = arch.embedding_dimension,
         num_heads        = arch.num_heads,
         num_layers       = arch.num_layers,
         max_temporal_len = arch.max_temporal_len,
         dropout          = arch.dropout,
         temporal_window  = arch.temporal_window,
-        max_cameras      = arch.max_cameras,
     )
-    # Match the compile applied in train_rich.py so checkpoint weights load cleanly.
-    for module in model.modules():
-        if isinstance(module, WindowedTemporalAttention):
-            module.forward = torch.compile(module.forward, dynamic=True)
-    return model
+    betas_aggregator = BetasAggregator(n_betas=10, hidden_dim=64, dropout=0.1)
+    return FusionWithBetas(pose_module, betas_aggregator)
 
 
-def _load_checkpoint(model: SSTNetwork, checkpoint: Path) -> None:
+def _load_checkpoint(model: FusionWithBetas, checkpoint: Path) -> None:
     logger.info(f"Loading checkpoint: {checkpoint}")
     state = torch.load(str(checkpoint), map_location="cpu")
     model.load_state_dict(state["model"])
@@ -64,85 +72,68 @@ def _load_checkpoint(model: SSTNetwork, checkpoint: Path) -> None:
 
 
 def _run_forward(
-    model:   SSTNetwork,
+    model:   FusionWithBetas,
     dp:      RICHFusionDatapoint,
     device:  torch.device,
 ) -> dict[str, np.ndarray]:
-    """Run a full-sequence forward pass and return a visualizer-ready dict."""
+    """Run a full-sequence forward pass and return model predictions + GT arrays.
+
+    Returns pred_pose_54 (root excluded) so that main() can prepend the
+    PnP-estimated global_orient to build the full 55-joint pose.
+    """
     ds     = RICHFusionDataset([dp])
-    # Dataset returns the full sequence as a single item (no windowing for full-pass).
-    # Use batch_size=1 and no shuffling.
     loader = torch.utils.data.DataLoader(ds, batch_size=1, shuffle=False)
 
     model.eval()
     model.to(device)
 
-    all_pose, all_shape, all_camera, all_transl = [], [], [], []
-    gt_pose_list, gt_shape_list, gt_camera_list, gt_transl_list = [], [], [], []
-    has_gt = False
+    def _s(t: torch.Tensor) -> np.ndarray:
+        return t.squeeze(0).float().cpu().numpy().astype(np.float32)
 
     with torch.no_grad():
         for batch in loader:
             inputs, targets = batch
 
-            # Move inputs to device
-            inputs = {k: v.to(device) if isinstance(v, torch.Tensor) else v
-                      for k, v in inputs.items()}
+            inp = {k: v.to(device) if isinstance(v, torch.Tensor) else v
+                   for k, v in inputs.items()}
 
             with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
-                preds = model(
-                    pose               = inputs["pose"],
-                    shape              = inputs["shape"],
-                    camera             = inputs["camera"],
-                    joint_mask         = inputs["joint_mask"],
-                    person_mask        = inputs["person_mask"],
-                    body_transl_cam_in = inputs["body_transl_cam_in"],
+                pose_aggr, betas_out = model(
+                    pose        = inp["pose"],          # (B, T, K, P, 55, 6)
+                    person_mask = inp["person_mask"],   # (B, T, K, P)
+                    joint_mask  = inp["joint_mask"],    # (B, T, K, P, 55)
+                    shape       = inp["shape"],         # (B, T, K, P, 10)
                 )
 
-            pose_aggr, shape_aggr, camera_pred, body_transl_world = preds[:4]
+            # pose_aggr: (B, T, P, 54, 6) — root excluded by model
+            # betas_out: (B, P, 10)
+            pred_pose_54 = _s(pose_aggr)   # (T, P, 54, 6)
+            pred_shape   = _s(betas_out)   # (P, 10)
 
-            # squeeze batch dim, move to CPU float32
-            def _s(t):
-                return t.squeeze(0).float().cpu().numpy().astype(np.float32)
+            # GT arrays (cam-0 = world frame)
+            gt_pose  = _s(targets["pose"])   # (T, P, 55, 6)
+            gt_shape = _s(targets["shape"])  # (T, P, 10)
+            gt_trans = _s(targets["trans"])  # (T, P, 3)
+            gt_valid = _s(targets["gt_valid"])  # (T, P)
 
-            all_pose.append(_s(pose_aggr))          # (T, P, J, 6)
-            all_shape.append(_s(shape_aggr))         # (P, 10)
-            all_camera.append(_s(camera_pred))       # (T, K, 8)
-            all_transl.append(_s(body_transl_world)) # (T, P, 3)
+            # GT camera is static (K, 8); tile to (T, K, 8) for the visualizer.
+            gt_cam_static = _s(targets["camera"])               # (K, 8)
+            T_local = pred_pose_54.shape[0]
+            gt_cam_tiled = np.broadcast_to(
+                gt_cam_static[None], (T_local,) + gt_cam_static.shape
+            ).copy()  # (T, K, 8)
 
-            # GT — targets["pose"] is (B, T, K, P, J, 6); cam-0 slice is world frame
-            if isinstance(targets, dict):
-                if "pose" in targets:
-                    has_gt = True
-                    gt_pose   = _s(targets["pose"])    # (T, K, P, J, 6)
-                    gt_pose_list.append(gt_pose[:, 0])  # (T, P, J, 6) — cam-0 = world
-                if "shape" in targets:
-                    gt_shape  = _s(targets["shape"])   # (T, K, P, 10)
-                    gt_shape_list.append(gt_shape[:, 0])  # (T, P, 10)
-                if "camera" in targets:
-                    gt_camera_list.append(_s(targets["camera"]))  # (T, K, 8)
-                if "trans" in targets:
-                    gt_transl_list.append(_s(targets["trans"]))   # (T, P, 3)
+            break  # single scene, single batch
 
-    # Concatenate along time axis (there is only one batch here, but keep it general)
-    out: dict[str, np.ndarray] = {
-        "pose":             np.concatenate(all_pose,   axis=0),  # (T, P, J, 6)
-        "shape":            all_shape[0],                         # (P, 10) — time-invariant
-        "camera":           np.concatenate(all_camera, axis=0),  # (T, K, 8)
-        "body_transl_world": np.concatenate(all_transl, axis=0), # (T, P, 3)
+    return {
+        "pred_pose_54":      pred_pose_54,    # (T, P, 54, 6) — root excluded
+        "pred_shape":        pred_shape,      # (P, 10)
+        "gt_body_pose":      gt_pose,         # (T, P, 55, 6)
+        "gt_body_shape":     gt_shape[0],     # (P, 10) — first frame
+        "gt_camera":         gt_cam_tiled,    # (T, K, 8)
+        "gt_body_transl_world": gt_trans,     # (T, P, 3)
+        "gt_valid":          gt_valid,        # (T, P)
     }
-
-    if has_gt:
-        if gt_pose_list:
-            out["gt_body_pose"]         = np.concatenate(gt_pose_list,   axis=0)  # (T, P, J, 6)
-        if gt_shape_list:
-            out["gt_body_shape"]        = gt_shape_list[0][0]  # (P, 10) — first frame, cam-0
-        if gt_camera_list:
-            out["gt_camera"]            = np.concatenate(gt_camera_list, axis=0)  # (T, K, 8)
-        if gt_transl_list:
-            out["gt_body_transl_world"] = np.concatenate(gt_transl_list, axis=0)  # (T, P, 3)
-
-    return out
 
 
 def main(
@@ -187,6 +178,7 @@ def main(
     dp = RICHFusionDatapoint(
         scene_dir      = scene_dir,
         rich_data_root = CONFIG.data.rich_data_root,
+        rich_gt_dir    = CONFIG.data.rich_gt_dir,
     )
     T = dp._frame_end - dp._frame_start
     logger.info(f"  {T} frames, {dp.num_cameras} cameras, {dp.max_persons} persons")
@@ -198,7 +190,74 @@ def main(
     # ── forward pass ──────────────────────────────────────────────────────────
     dev = torch.device(device)
     logger.info(f"Running forward pass on {dev} …")
-    arrays = _run_forward(model, dp, dev)
+    raw_arrays = _run_forward(model, dp, dev)
+
+    pred_pose_54 = raw_arrays["pred_pose_54"]   # (T, P, 54, 6)
+    pred_shape   = raw_arrays["pred_shape"]      # (P, 10)
+    T_scene = pred_pose_54.shape[0]
+    P       = pred_pose_54.shape[1]
+
+    # ── BodyPlacer: PnP translation + orientation + VGGT cameras ─────────────
+    cam_dirs = sorted(
+        d for d in scene_dir.iterdir()
+        if d.is_dir() and (d / "body_data").is_dir()
+    )
+    # pid ordering must match dataset slot ordering (same sorted ghost pids)
+    all_pids_ordered = sorted(
+        set(pid for pids_k in dp._pid_order for pid in pids_k)
+    )
+    # raw dict for _run_placer (it needs frame_indices from body data)
+    raw_body: list[dict[int, dict]] = []
+    for cam_dir in cam_dirs:
+        cam_persons: dict[int, dict] = {}
+        for npz_path in sorted((cam_dir / "body_data").glob("person_*.npz")):
+            pid_num = int(npz_path.stem.split("_")[1])
+            if pid_num not in all_pids_ordered:
+                continue
+            d = np.load(npz_path, allow_pickle=False)
+            cam_persons[pid_num] = {k: d[k] for k in d.files}
+        raw_body.append(cam_persons)
+
+    logger.info("Running BodyPlacer (Procrustes DLT) …")
+    root_translation, orient_R, vggt_cameras = _run_placer(
+        scene_dir      = scene_dir,
+        cam_dirs       = cam_dirs,
+        raw            = raw_body,
+        all_pids       = all_pids_ordered,
+        frame_start    = dp._frame_start,
+        T              = T_scene,
+        smplx_model_path = Path(CONFIG.data.smplx_model_path),
+        fused_betas    = pred_shape,     # (P, 10) fused betas for FK
+        fused_pose     = pred_pose_54,   # (T, P, 54, 6) fused pose for Procrustes FK
+    )
+    # orient_R: (T, P, 3, 3) — NaN where Procrustes DLT failed
+
+    # ── Build full 55-joint pose: Procrustes root + fusion non-root ──────────
+    # Convert Procrustes rotation matrices to 6D; fall back to GT root where NaN.
+    gt_root_6d = raw_arrays["gt_body_pose"][:, :, 0, :]   # (T, P, 6)
+    proc_root_6d = np.where(
+        np.isnan(orient_R[:, :, 0, 0])[..., np.newaxis],   # (T, P, 1) mask
+        gt_root_6d,
+        _R_to_6d(orient_R),                                 # (T, P, 6)
+    )  # (T, P, 6)
+    pred_pose_55 = np.concatenate(
+        [proc_root_6d[:, :, np.newaxis, :], pred_pose_54], axis=2
+    )  # (T, P, 55, 6)
+
+    # ── Assemble visualizer-ready dict ────────────────────────────────────────
+    arrays: dict[str, np.ndarray] = {
+        # Predicted
+        "pose":              pred_pose_55,             # (T, P, 55, 6)
+        "shape":             pred_shape,               # (P, 10)
+        "camera":            vggt_cameras,             # (T, K, 8) — VGGT cameras
+        "body_transl_world": root_translation,         # (T, P, 3) — PnP translation
+        # GT reference (for visualizer comparison)
+        "gt_body_pose":          raw_arrays["gt_body_pose"],
+        "gt_body_shape":         raw_arrays["gt_body_shape"],
+        "gt_camera":             raw_arrays["gt_camera"],
+        "gt_body_transl_world":  raw_arrays["gt_body_transl_world"],
+        "gt_valid":              raw_arrays["gt_valid"],
+    }
 
     # ── save predictions ──────────────────────────────────────────────────────
     out_dir = Path(out_dir)

@@ -5,19 +5,60 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import torch
 from scipy.ndimage import map_coordinates
+from scipy.spatial.transform import Rotation as SciR
+
+
+def _6d_to_aa_batch(sixd: np.ndarray) -> np.ndarray:
+    """Convert 6D rotation representation (..., 6) to axis-angle (..., 3).
+
+    Interprets the 6 values as the first two rows of R — matches the training
+    convention in fusion_dataset.py.
+    """
+    shape = sixd.shape[:-1]
+    s = sixd.reshape(-1, 6)
+    r0, r1 = s[:, :3], s[:, 3:]
+    b1 = r0 / (np.linalg.norm(r0, axis=1, keepdims=True) + 1e-8)
+    b2 = r1 - (b1 * r1).sum(axis=1, keepdims=True) * b1
+    b2 = b2 / (np.linalg.norm(b2, axis=1, keepdims=True) + 1e-8)
+    b3 = np.cross(b1, b2)
+    R = np.stack([b1, b2, b3], axis=1)  # (N, 3, 3) — rows are b1, b2, b3
+    aa = SciR.from_matrix(R).as_rotvec()
+    return aa.reshape(shape + (3,)).astype(np.float32)
 
 
 # SMPL-X 55-joint kinematic tree: (proximal, distal) pairs for long bones.
 # Using large bones that have consistent metric lengths and clear depth separation.
 _LONG_BONES = [
-    (16, 18),  # left humerus:  left shoulder → left elbow
-    (17, 19),  # right humerus: right shoulder → right elbow
-    (1,  4),   # left femur:    left hip → left knee
-    (2,  5),   # right femur:   right hip → right knee
-    (4,  7),   # left tibia:    left knee → left ankle
-    (5,  8),   # right tibia:   right knee → right ankle
+    (16, 20),  # left arm:   left shoulder → left wrist   (~9% RMS vs ~19% for humerus alone)
+    (17, 21),  # right arm:  right shoulder → right wrist
+    (1,  7),   # left leg:   left hip → left ankle        (~5% RMS vs ~17% for femur/tibia)
+    (2,  8),   # right leg:  right hip → right ankle
 ]
+
+# Maps SMPL-X joint index → MHR70 joint index.
+# pred_keypoints_2d from SAM3D uses MHR70 ordering (70 joints).
+# FK joints use SMPL-X ordering (55 joints).
+_SMPLX_TO_MHR70 = {
+    1: 9,   2: 10,   # left/right hip
+    4: 11,  5: 12,   # left/right knee
+    7: 13,  8: 14,   # left/right ankle
+    12: 69,          # neck
+    16: 5,  17: 6,   # left/right shoulder
+    18: 7,  19: 8,   # left/right elbow
+    20: 62, 21: 41,  # left/right wrist
+}
+
+# Subset used for PnP and Procrustes DLT — joints with lowest skeleton-definition
+# mismatch between SMPL-X and MHR70 (mean error ≤ 4cm, std ≤ 0.9cm from empirical
+# analysis on BBQ_001_juggle + BBQ_001_guitar).  Knees (~7cm, pose-dependent z-bias),
+# neck (~4cm, std 2cm), elbows and wrists (~3-5cm, std 1.3cm) are excluded.
+_SMPLX_TO_MHR70_ALIGN = {
+    1: 9,   2: 10,   # left/right hip      (~2cm, std 0.4cm)
+    7: 13,  8: 14,   # left/right ankle    (~3cm, std 0.7cm)
+    16: 5,  17: 6,   # left/right shoulder (~3.5cm, std 0.7cm)
+}
 
 
 class BodyPlacer:
@@ -26,8 +67,8 @@ class BodyPlacer:
     VGGT depth is accurate up to an unknown global scale.  This class recovers
     that scale by comparing, for each long bone visible in a camera:
 
-        Δz_smplx  — depth difference of the two endpoints from SMPL-X 3D
-                    keypoints (metric, metres, translation-independent).
+        Δz_smplx  — depth difference of the two endpoints from SMPL-X FK joints
+                    in camera-oriented space (metric, metres, translation-independent).
         Δz_vggt   — depth difference of the same endpoints sampled from the
                     VGGT depth map at the projected 2D positions.
 
@@ -43,13 +84,31 @@ class BodyPlacer:
               depth_valid bool)
             - Camera subdirectories with a ``body_data/`` folder, sorted in the
               same order as the K dimension in the VGGT arrays.
+        smplx_model_path: Path to SMPLX_NEUTRAL.pkl.  Required for FK-based
+            scale estimation and root translation.
     """
 
-    def __init__(self, scene_output_dir: str | Path) -> None:
+    def __init__(self, scene_output_dir: str | Path, smplx_model_path: str | Path) -> None:
         self.scene_dir = Path(scene_output_dir)
 
+        import smplx as smplx_lib
+        smplx_path = Path(smplx_model_path)
+        create_kwargs: dict = {"model_type": "smplx"}
+        if smplx_path.is_file():
+            create_kwargs["ext"] = smplx_path.suffix.lstrip(".")
+        self._smplx_model = smplx_lib.create(
+            str(smplx_model_path),
+            **create_kwargs,
+            use_pca=False,
+            flat_hand_mean=True,
+            batch_size=1,
+        ).eval()
+        self._smplx_device = torch.device("cpu")
+
         cam_npz = np.load(self.scene_dir / "vggt_cameras.npz")
-        depth_npz = np.load(self.scene_dir / "vggt_depth.npz")
+        # Depth maps can be large (T*K*518*518 ~ GB); memory-map so only accessed
+        # slices are paged in rather than loading the full array at construction time.
+        depth_npz = np.load(self.scene_dir / "vggt_depth.npz", mmap_mode="r")
 
         # (T, K, 3, 4) float32 — camera-from-world, OpenCV convention
         self.extrinsics = cam_npz["extrinsics"]
@@ -64,9 +123,9 @@ class BodyPlacer:
         # (K,) bytes
         self.camera_names = cam_npz["camera_names"]
 
-        # (T, K, 518, 518) uint16 mm
+        # (T, K, 518, 518) uint16 mm — memory-mapped
         self.depth_mm = depth_npz["depth"]
-        # (T, K, 518, 518) float16
+        # (T, K, 518, 518) float16 — memory-mapped
         self.depth_conf = depth_npz["depth_conf"]
         # (T, K) bool
         self.depth_valid = depth_npz["depth_valid"]
@@ -83,264 +142,447 @@ class BodyPlacer:
     # Public API
     # ------------------------------------------------------------------
 
-    def estimate_scale(
+    def estimate_scale_per_frame(
         self,
         conf_threshold: float = 0.5,
         min_delta_z: float = 0.05,
-        joint_conf_threshold: float = 0.3,
-    ) -> float:
-        """Return the median VGGT depth scale factor (metres per VGGT unit).
+        fused_betas_map: dict[Path, np.ndarray] | None = None,
+    ) -> np.ndarray:
+        """Return per-frame VGGT depth scale ``(T,)`` in metres per VGGT unit.
 
-        Args:
-            conf_threshold: Minimum VGGT depth confidence to accept a sample.
-            min_delta_z: Minimum |Δz_smplx| in metres required to use a bone.
-            joint_conf_threshold: Minimum ``pred_joint_confidence`` for both
-                endpoints of a bone to be considered visible in that frame.
-                Ignored if the body npz has no ``pred_joint_confidence`` array.
+        For each global frame, all bone scale samples visible across cameras
+        and persons are collected and their median is taken.  Frames with no
+        samples receive the global median as a fallback.
 
         Returns:
-            Scalar ``s`` such that ``depth_metric_m = s * depth_vggt``.
+            ``(T,)`` float32 — one scale per global frame index.
 
         Raises:
-            RuntimeError: If no valid bone samples were found.
+            RuntimeError: If no valid bone samples were found anywhere.
         """
-        samples: list[float] = []
+        from collections import defaultdict
+        frame_samples: dict[int, list[float]] = defaultdict(list)
 
         for k, cam_dir in enumerate(self._cam_dirs):
             for body_file in sorted((cam_dir / "body_data").glob("person_*.npz")):
-                samples.extend(
-                    self._collect_scale_samples(
-                        k, body_file, conf_threshold, min_delta_z, joint_conf_threshold
-                    )
+                fused_betas = (
+                    fused_betas_map.get(body_file) if fused_betas_map is not None else None
                 )
+                tagged = self._collect_scale_samples_tagged(
+                    k, body_file, conf_threshold, min_delta_z, fused_betas,
+                )
+                for global_t, slist in tagged.items():
+                    frame_samples[global_t].extend(slist)
 
-        if not samples:
+        all_samples = [s for sl in frame_samples.values() for s in sl]
+        if not all_samples:
             raise RuntimeError(
                 "No valid bone depth samples found. "
                 "Check that body_data/ and vggt_depth.npz exist and overlap in frame indices."
             )
 
-        scale = float(np.median(samples))
-        return scale
+        global_scale = float(np.median(all_samples))
+        result = np.full(self.T, global_scale, dtype=np.float32)
+        for global_t, slist in frame_samples.items():
+            if 0 <= global_t < self.T and slist:
+                result[global_t] = float(np.median(slist))
 
-    def estimate_root_translation(
+        return result
+
+    def estimate_scale_triangulated(
         self,
-        k: int,
-        body_file: Path,
-        scale: float,
-        conf_threshold: float = 0.5,
-        joint_conf_threshold: float = 0.3,
+        min_cams: int = 2,
+        fused_betas_map: dict[Path, np.ndarray] | None = None,
+        fused_pose_by_pid: dict[int, np.ndarray],
+        frame_start: int = 0,
     ) -> np.ndarray:
-        """Estimate the body root translation in camera space for every frame.
+        """Return per-frame VGGT depth scale using multi-view triangulation (metres / VGGT unit).
 
-        For each visible joint j, back-projects its 2D position through the
-        (already scaled) VGGT depth map to get its metric 3D camera-space
-        position P_j, then recovers the root translation as:
+        For each (frame, person, bone), all cameras that observe both endpoints
+        with sufficient confidence are used to triangulate the 3D joint positions
+        via DLT — no depth map lookup.  Scale is then ``L_fk / L_vggt_3d``.
 
-            t_root_j = P_j − kp3d[j]
-
-        where ``kp3d[j]`` is the body-centric 3D keypoint (pred_keypoints_3d).
-        The coordinate-wise median over all valid per-joint estimates is
-        returned for each frame.
+        This is robust to foreshortening: a bone viewed edge-on from one camera
+        is correctly recovered by other cameras viewing it from a different angle.
 
         Args:
-            k: Camera index (0-based, matching the K axis of VGGT arrays).
-            body_file: Path to a ``person_*.npz`` file.
-            scale: Metric scale factor obtained from :meth:`estimate_scale`.
-            conf_threshold: Minimum VGGT depth confidence.
-            joint_conf_threshold: Minimum ``pred_joint_confidence`` for a
-                joint to be used.  Ignored if the key is absent.
+            min_cams: Minimum number of cameras that must observe both endpoints
+                for the triangulation to be attempted.
+            fused_betas_map: Optional ``{body_file: betas (10,)}`` mapping used
+                to compute FK bone lengths (same semantics as in
+                :meth:`estimate_scale`).
+            fused_pose_by_pid: ``{pid: (T_scene, 54, 6)}`` fused body pose from
+                the fusion model (6D, joints 1-54, indexed from ``frame_start``).
+                Used for FK — never use raw per-camera SAM3D body_pose here.
+            frame_start: Global frame index corresponding to index 0 of the
+                ``fused_pose_by_pid`` arrays.
 
         Returns:
-            ``(T_local, 3)`` float32 root translations in world space (cam0
-            frame after VGGT re-rooting).  Frames with no valid joints
-            contain NaN.
+            ``(T,)`` float32 array — one scale per global frame index.
+            Frames with no bone observations fall back to the global median.
+
+        Raises:
+            RuntimeError: If no valid triangulated bone samples were found.
         """
-        data = np.load(body_file, allow_pickle=False)
+        from collections import defaultdict
 
-        required = {"pred_keypoints_3d", "pred_keypoints_2d", "frame_indices"}
-        if not required.issubset(data.files):
-            raise KeyError(f"Missing required keys in {body_file}")
-
-        kp3d = data["pred_keypoints_3d"]   # (T_local, J, 3) body-centric camera space
-        kp2d = data["pred_keypoints_2d"]   # (T_local, J, 2+) original image pixels
-        frame_indices = data["frame_indices"]
-        joint_conf = (
-            data["pred_joint_confidence"]
-            if "pred_joint_confidence" in data.files
-            else None
-        )
-
-        T_local = len(frame_indices)
-        J = kp3d.shape[1]
-        root_translations = np.full((T_local, 3), np.nan, dtype=np.float32)
-
-        for local_t, global_t in enumerate(frame_indices):
-            if global_t >= self.T:
-                continue
-            if not self.cam_valid[global_t, k]:
-                continue
-            if not self.depth_valid[global_t, k]:
-                continue
-
-            depth_frame = self.depth_mm[global_t, k].astype(np.float32) / 1000.0 * scale
-            conf_frame  = self.depth_conf[global_t, k].astype(np.float32)
-
-            intr = self.intrinsics[global_t, k]   # (3, 3) VGGT 518-space intrinsics
-            fx, fy = float(intr[0, 0]), float(intr[1, 1])
-            cx, cy = float(intr[0, 2]), float(intr[1, 2])
-
-            oc = self.original_coords[global_t, k]
-            os = self.original_size[global_t, k]
-            W_orig, H_orig = float(os[0]), float(os[1])
-
-            per_joint: list[np.ndarray] = []
-
-            for j in range(J):
-                if joint_conf is not None and joint_conf[local_t, j] < joint_conf_threshold:
+        # ── Load body data per (cam_idx, pid) ─────────────────────────────────
+        # cam_data[k][pid] = {gt_map, fk, kp2d}
+        cam_data: dict[int, dict[int, dict]] = {}
+        for k, cam_dir in enumerate(self._cam_dirs):
+            cam_data[k] = {}
+            for body_file in sorted((cam_dir / "body_data").glob("person_*.npz")):
+                pid = int(body_file.stem.split("_")[1])
+                d = np.load(body_file, allow_pickle=False)
+                required = {"smplx_betas", "smplx_body_pose", "pred_keypoints_2d", "frame_indices"}
+                if not required.issubset(d.files):
                     continue
 
-                u_518, v_518 = self._orig_to_518(kp2d[local_t, j], oc, W_orig, H_orig)
-                if not self._in_bounds(u_518, v_518):
-                    continue
-
-                d = float(map_coordinates(depth_frame, [[v_518], [u_518]], order=1)[0])
-                c = float(map_coordinates(conf_frame,  [[v_518], [u_518]], order=1)[0])
-
-                if c < conf_threshold or d <= 0.0:
-                    continue
-
-                # Back-project to metric 3D camera space
-                P_j = np.array(
-                    [(u_518 - cx) / fx * d, (v_518 - cy) / fy * d, d],
-                    dtype=np.float32,
+                fi = d["frame_indices"]
+                betas = (
+                    np.tile(fused_betas_map[body_file][np.newaxis], (len(fi), 1))
+                    if fused_betas_map is not None and body_file in fused_betas_map
+                    else d["smplx_betas"]
                 )
-                per_joint.append(P_j - kp3d[local_t, j].astype(np.float32))
+                if pid not in fused_pose_by_pid:
+                    continue
+                fused_arr = fused_pose_by_pid[pid]   # (T_scene, 54, 6)
+                t_fused = fi.astype(int) - frame_start
+                body_pose_arr = np.zeros((len(fi), 63), dtype=np.float32)
+                valid = np.where((t_fused >= 0) & (t_fused < len(fused_arr)))[0]
+                if len(valid):
+                    body_pose_arr[valid] = _6d_to_aa_batch(
+                        fused_arr[t_fused[valid], :21]
+                    ).reshape(len(valid), 63)
+                fk = self._smplx_fk(betas, body_pose_arr,
+                                    np.zeros((len(betas), 3), dtype=np.float32))
 
-            if per_joint:
-                t_root_camk = np.median(np.stack(per_joint, axis=0), axis=0)
-                # Transform from camera-k space to world (cam0) space using
-                # VGGT extrinsics: p_world = R_k^T @ (p_camk - t_k)
-                R_k = self.extrinsics[global_t, k, :3, :3].astype(np.float32)
-                t_k = self.extrinsics[global_t, k, :3, 3].astype(np.float32)
-                root_translations[local_t] = R_k.T @ (t_root_camk - t_k)
+                gt_map = {int(gt): lt for lt, gt in enumerate(d["frame_indices"])}
+                cam_data[k][pid] = {
+                    "gt_map": gt_map,
+                    "fk":     fk,
+                    "kp2d":   d["pred_keypoints_2d"],
+                }
 
-        return root_translations
+        # ── Collect all (global_t, pid) pairs ─────────────────────────────────
+        all_pids: set[int] = set()
+        for k in cam_data:
+            all_pids.update(cam_data[k].keys())
 
-    def estimate_global_orient(
-        self,
-        body_files_per_cam: dict[int, Path],
-        joint_conf_threshold: float = 0.3,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Estimate body orientation in world (cam0) space via triangulation.
+        global_ts_by_pid: dict[int, set[int]] = defaultdict(set)
+        for k in cam_data:
+            for pid, bd in cam_data[k].items():
+                global_ts_by_pid[pid].update(bd["gt_map"].keys())
 
-        For each frame, the 2D projections of the root, hips and shoulders are
-        triangulated across all cameras that observe the person.  A coordinate
-        frame is then built from the resulting 3D hip/shoulder positions,
-        giving the body orientation without relying on SAM3D's predicted
-        global_orient.
+        frame_samples: dict[int, list[float]] = defaultdict(list)
 
-        Joints used (SMPL-X indices):
-            0  — root/pelvis
-            1  — left hip,   2  — right hip
-            16 — left shoulder, 17 — right shoulder
+        for pid in sorted(all_pids):
+            for global_t in sorted(global_ts_by_pid[pid]):
+                if global_t >= self.T:
+                    continue
 
-        Args:
-            body_files_per_cam: ``{camera_index: path_to_person_npz}`` for the
-                same person across cameras.
-            joint_conf_threshold: Minimum ``pred_joint_confidence`` for a joint
-                to contribute its 2D observation to triangulation.
-
-        Returns:
-            ``(frame_indices, R)`` where:
-            - ``frame_indices`` is ``(N,)`` int32 — global frame indices where
-              an orientation was successfully estimated.
-            - ``R`` is ``(N, 3, 3)`` float32 — rotation matrices in cam0 space.
-              Columns are the body's right / up / forward axes in world space.
-        """
-        # TODO: make joint selection dynamic — pick joints with highest
-        # pred_joint_confidence across cameras rather than a fixed list.
-        _ORIENT_JOINTS = [0, 1, 2, 16, 17]
-
-        # Load per-camera data and build global_t → local_t lookup
-        cam_data: dict[int, dict] = {}
-        all_global_ts: set[int] = set()
-
-        for k, path in body_files_per_cam.items():
-            data = np.load(path, allow_pickle=False)
-            if "pred_keypoints_2d" not in data.files:
-                continue
-            fi = data["frame_indices"]
-            cam_data[k] = {
-                "local_t_map": {int(gt): lt for lt, gt in enumerate(fi)},
-                "kp2d": data["pred_keypoints_2d"],
-                "joint_conf": (
-                    data["pred_joint_confidence"]
-                    if "pred_joint_confidence" in data.files
-                    else None
-                ),
-            }
-            all_global_ts.update(fi.tolist())
-
-        frame_indices_out: list[int] = []
-        R_out: list[np.ndarray] = []
-
-        for global_t in sorted(all_global_ts):
-            if global_t >= self.T:
-                continue
-
-            # Triangulate each orientation joint from all cameras that see it
-            joint_3d: dict[int, np.ndarray] = {}
-            for j in _ORIENT_JOINTS:
-                observations: list[tuple[float, float]] = []
-                proj_mats: list[np.ndarray] = []
-
-                for k, cd in cam_data.items():
-                    if global_t not in cd["local_t_map"]:
-                        continue
-                    if not self.cam_valid[global_t, k]:
+                for (j_a, j_b) in _LONG_BONES:
+                    mhr_a = _SMPLX_TO_MHR70.get(j_a)
+                    mhr_b = _SMPLX_TO_MHR70.get(j_b)
+                    if mhr_a is None or mhr_b is None:
                         continue
 
-                    local_t = cd["local_t_map"][global_t]
+                    pts_a: list[tuple[float, float]] = []
+                    pts_b: list[tuple[float, float]] = []
+                    Pmats: list[np.ndarray] = []
+                    fk_lengths: list[float] = []
 
-                    if cd["joint_conf"] is not None:
-                        if cd["joint_conf"][local_t, j] < joint_conf_threshold:
+                    for k in range(self.K):
+                        if not self.cam_valid[global_t, k]:
+                            continue
+                        if pid not in cam_data.get(k, {}):
+                            continue
+                        bd = cam_data[k][pid]
+                        if global_t not in bd["gt_map"]:
+                            continue
+                        local_t = bd["gt_map"][global_t]
+
+                        kp2d = bd["kp2d"]
+                        if mhr_a >= kp2d.shape[1] or mhr_b >= kp2d.shape[1]:
                             continue
 
-                    kp2d_j = cd["kp2d"][local_t, j]
-                    oc = self.original_coords[global_t, k]
-                    os = self.original_size[global_t, k]
-                    u_518, v_518 = self._orig_to_518(
-                        kp2d_j, oc, float(os[0]), float(os[1])
-                    )
-                    if not self._in_bounds(u_518, v_518):
+                        oc = self.original_coords[global_t, k]
+                        os_ = self.original_size[global_t, k]
+                        W_orig, H_orig = float(os_[0]), float(os_[1])
+
+                        u_a, v_a = self._orig_to_vggt(kp2d[local_t, mhr_a], oc, W_orig, H_orig)
+                        u_b, v_b = self._orig_to_vggt(kp2d[local_t, mhr_b], oc, W_orig, H_orig)
+                        x1, y1, x2, y2 = oc
+                        if not (x1 <= u_a < x2 and y1 <= v_a < y2
+                                and x1 <= u_b < x2 and y1 <= v_b < y2):
+                            continue
+
+                        K_mat = self.intrinsics[global_t, k].astype(np.float64)
+                        E_mat = self.extrinsics[global_t, k].astype(np.float64)
+                        P = K_mat @ E_mat
+
+                        pts_a.append((u_a, v_a))
+                        pts_b.append((u_b, v_b))
+                        Pmats.append(P)
+                        fk_lengths.append(float(np.linalg.norm(
+                            bd["fk"][local_t, j_b] - bd["fk"][local_t, j_a]
+                        )))
+
+                    if len(pts_a) < min_cams:
                         continue
 
-                    observations.append((u_518, v_518))
-                    proj_mats.append(
-                        self.intrinsics[global_t, k] @ self.extrinsics[global_t, k]
-                    )
+                    try:
+                        X_a = self._triangulate_dlt(pts_a, Pmats)
+                        X_b = self._triangulate_dlt(pts_b, Pmats)
+                    except Exception:
+                        continue
 
-                if len(observations) >= 2:
-                    joint_3d[j] = self._triangulate_dlt(observations, proj_mats)
+                    L_vggt = float(np.linalg.norm(X_b - X_a))
+                    if L_vggt < 1e-4:
+                        continue
 
-            # Need at least the hips or the shoulders to build a frame
-            has_hips = (1 in joint_3d and 2 in joint_3d)
-            has_shoulders = (16 in joint_3d and 17 in joint_3d)
-            if not (has_hips or has_shoulders):
-                continue
+                    L_fk = float(np.median(fk_lengths))
+                    if L_fk < 0.05:
+                        continue
 
-            R = self._build_orient_matrix(joint_3d)
-            frame_indices_out.append(global_t)
-            R_out.append(R)
+                    s = L_fk / L_vggt
+                    if 0.1 < s < 100.0:
+                        frame_samples[global_t].append(s)
 
-        if not frame_indices_out:
-            return np.empty(0, dtype=np.int32), np.empty((0, 3, 3), dtype=np.float32)
+        all_samples = [s for sl in frame_samples.values() for s in sl]
+        if not all_samples:
+            raise RuntimeError(
+                "No valid triangulated bone samples found. "
+                "Check that body_data/ files exist and at least two cameras share valid frames."
+            )
 
-        return (
-            np.array(frame_indices_out, dtype=np.int32),
-            np.stack(R_out, axis=0),
-        )
+        global_scale = float(np.median(all_samples))
+        result = np.full(self.T, global_scale, dtype=np.float32)
+        for global_t, slist in frame_samples.items():
+            if slist:
+                result[global_t] = float(np.median(slist))
+        return result
+
+    def estimate_procrustes_dlt(
+        self,
+        scale: float | np.ndarray,
+        all_pids: set[int],
+        pred_betas_by_pid: dict[int, np.ndarray],
+        fused_pose_by_pid: dict[int, np.ndarray] | None = None,
+        frame_start: int = 0,
+        min_cams: int = 2,
+        min_joints: int = 4,
+    ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
+        """Estimate root translation + global orient via multi-camera DLT + Procrustes.
+
+        For each (person, frame):
+          1. DLT-triangulate each SMPL-X joint across all cameras that observe it
+             → world-frame 3D positions J_world[j] at metric scale.
+          2. Run SMPL-X FK with the fused body_pose (if provided, else raw SAM3D
+             per-camera body_pose) + pred betas, zero global_orient
+             → canonical-frame joints J_can[j] rooted at the origin.
+          3. Procrustes: find R, t minimising ||R @ J_can + t − J_world||²
+             → global_orient matrix R and pelvis world translation t.
+
+        Args:
+            scale: Metric scale (metres per VGGT unit). Either a scalar or a
+                   ``(T,)`` float32 array of per-frame scales from
+                   :meth:`estimate_scale_per_frame`.
+            all_pids: Ghost person IDs to process.
+            pred_betas_by_pid: ``{pid: (10,)}`` shape coefficients for FK.
+            fused_pose_by_pid: ``{pid: (T_scene, 54, 6)}`` fused body pose from
+                the fusion model (6D, joints 1-54, indexed from ``frame_start``).
+                When provided, used for FK instead of the raw per-camera SAM3D
+                body_pose, giving a better canonical skeleton for Procrustes.
+            frame_start: Global frame index corresponding to index 0 of the
+                ``fused_pose_by_pid`` arrays. Must match the frame_start returned
+                by :func:`build_fusion_tensors`.
+            min_cams: Minimum cameras needed to DLT-triangulate a joint.
+            min_joints: Minimum triangulated joints needed to run Procrustes.
+
+        Returns:
+            translations : ``{pid: {global_frame_idx: pelvis_world (3,)}}``
+            orientations : ``{pid: {global_frame_idx: R (3,3)}}``
+        """
+        _JOINTS = sorted(_SMPLX_TO_MHR70_ALIGN.keys())
+
+        # Pre-load body data once per (cam, pid) to avoid repeated file reads.
+        cam_data_all: list[dict[int, dict]] = []
+        for cam_dir in self._cam_dirs:
+            cam_map: dict[int, dict] = {}
+            for pid in sorted(all_pids):
+                bf = cam_dir / "body_data" / f"person_{pid}.npz"
+                if not bf.exists():
+                    continue
+                d = np.load(bf, allow_pickle=False)
+                if not {"pred_keypoints_2d", "frame_indices", "smplx_body_pose"}.issubset(d.files):
+                    continue
+                fi = d["frame_indices"].astype(int)
+                cam_map[pid] = {
+                    "local_t": {int(g): int(l) for l, g in enumerate(fi)},
+                    "kp2d":      d["pred_keypoints_2d"],
+                    "body_pose": d["smplx_body_pose"],
+                }
+            cam_data_all.append(cam_map)
+
+        translations: dict[int, dict[int, np.ndarray]] = {}
+        orientations: dict[int, dict[int, np.ndarray]] = {}
+
+        for pid in sorted(all_pids):
+            betas = pred_betas_by_pid.get(pid, np.zeros(10, dtype=np.float32))
+
+            all_frames: set[int] = set()
+            for cm in cam_data_all:
+                if pid in cm:
+                    all_frames.update(cm[pid]["local_t"].keys())
+
+            trans_out: dict[int, np.ndarray] = {}
+            orient_out: dict[int, np.ndarray] = {}
+
+            for global_t in sorted(all_frames):
+                if global_t >= self.T:
+                    continue
+
+                s = float(scale[global_t]) if isinstance(scale, np.ndarray) else float(scale)
+
+                # ── Step 1: DLT-triangulate each joint across cameras ──────────
+                joint_world: dict[int, np.ndarray] = {}
+                for smplx_j in _JOINTS:
+                    mhr70_j = _SMPLX_TO_MHR70[smplx_j]
+                    obs:   list[tuple[float, float]] = []
+                    pmats: list[np.ndarray] = []
+
+                    for k, cm in enumerate(cam_data_all):
+                        if pid not in cm:
+                            continue
+                        if global_t not in cm[pid]["local_t"]:
+                            continue
+                        if not self.cam_valid[global_t, k]:
+                            continue
+
+                        local_t = cm[pid]["local_t"][global_t]
+                        kp2d  = cm[pid]["kp2d"]
+
+                        if mhr70_j >= kp2d.shape[1]:
+                            continue
+
+                        oc  = self.original_coords[global_t, k]
+                        os_ = self.original_size[global_t, k]
+                        W_orig, H_orig = float(os_[0]), float(os_[1])
+
+                        u, v = self._orig_to_vggt(kp2d[local_t, mhr70_j], oc, W_orig, H_orig)
+                        if not self._in_bounds(u, v, oc[2], oc[3]):
+                            continue
+
+                        intr = self.intrinsics[global_t, k].astype(np.float64)
+                        ext  = self.extrinsics[global_t, k].astype(np.float64).copy()
+                        ext[:3, 3] *= s
+                        pmats.append(intr @ ext)
+                        obs.append((u, v))
+
+                    if len(obs) >= min_cams:
+                        joint_world[smplx_j] = self._triangulate_dlt(obs, pmats)
+
+                if len(joint_world) < min_joints:
+                    continue
+
+                # ── Step 2: FK canonical joint positions ──────────────────────
+                # Use fused body_pose when available (better than per-camera raw).
+                # fused_pose_by_pid[pid] is (T_scene, 54, 6); joints 0-20 = body.
+                if fused_pose_by_pid is not None and pid in fused_pose_by_pid:
+                    t_local = global_t - frame_start
+                    fused_arr = fused_pose_by_pid[pid]
+                    if not (0 <= t_local < len(fused_arr)):
+                        continue
+                    body_pose_frame = _6d_to_aa_batch(
+                        fused_arr[t_local, :21]   # (21, 6) body joints 1-21
+                    ).reshape(63)
+                else:
+                    body_pose_frame = None
+                    for cm in cam_data_all:
+                        if pid in cm and global_t in cm[pid]["local_t"]:
+                            lt = cm[pid]["local_t"][global_t]
+                            body_pose_frame = cm[pid]["body_pose"][lt]
+                            break
+                if body_pose_frame is None:
+                    continue
+
+                fk = self._smplx_fk(
+                    betas[np.newaxis],
+                    body_pose_frame[np.newaxis],
+                    np.zeros((1, 3), dtype=np.float32),
+                )
+                J_can = fk[0]  # (55, 3) in metres
+
+                # ── Step 3: Procrustes — R, t s.t. R @ J_can + t ≈ J_world ──
+                vis = sorted(joint_world.keys())
+                A = np.stack([joint_world[j] for j in vis], axis=0).astype(np.float64)
+                B = np.stack([J_can[j]       for j in vis], axis=0).astype(np.float64)
+
+                A_mean = A.mean(0)
+                B_mean = B.mean(0)
+                H = (B - B_mean).T @ (A - A_mean)
+                U, _, Vt = np.linalg.svd(H)
+                d_sign = np.linalg.det(Vt.T @ U.T)
+                R = (Vt.T @ np.diag([1.0, 1.0, d_sign]) @ U.T).astype(np.float32)
+                t = (A_mean - R.astype(np.float64) @ B_mean).astype(np.float32)
+
+                # SMPL-X global_orient rotates around joint[0] (pelvis), so
+                # pelvis world = R @ J_can[0] + t
+                pelvis_world = (
+                    R.astype(np.float64) @ J_can[0].astype(np.float64)
+                    + t.astype(np.float64)
+                ).astype(np.float32)
+
+                trans_out[global_t] = pelvis_world
+                orient_out[global_t] = R
+
+            translations[pid] = trans_out
+            orientations[pid] = orient_out
+
+        return translations, orientations
+
+    # ------------------------------------------------------------------
+    # SMPL-X FK helper
+    # ------------------------------------------------------------------
+
+    def _smplx_fk(
+        self,
+        betas: np.ndarray,                          # (T_local, 10)
+        body_pose: np.ndarray,                      # (T_local, 63)
+        global_orient: np.ndarray,                  # (T_local, 3)
+        left_hand_pose: np.ndarray | None = None,   # (T_local, 45) optional
+        right_hand_pose: np.ndarray | None = None,  # (T_local, 45) optional
+    ) -> np.ndarray:
+        """Run SMPL-X FK and return joints in camera-oriented space.
+
+        Uses zero translation so all positions are body-centric (origin at root).
+        The global_orient rotation IS applied, so the z-axis matches camera depth.
+
+        Returns:
+            (T_local, 55, 3) float32 — first 55 SMPL-X joints in metres.
+        """
+        T = betas.shape[0]
+        num_expr = self._smplx_model.num_expression_coeffs
+        lhp = (torch.tensor(left_hand_pose,  dtype=torch.float32)
+               if left_hand_pose  is not None else torch.zeros(T, 45, dtype=torch.float32))
+        rhp = (torch.tensor(right_hand_pose, dtype=torch.float32)
+               if right_hand_pose is not None else torch.zeros(T, 45, dtype=torch.float32))
+        with torch.no_grad():
+            out = self._smplx_model(
+                betas=torch.tensor(betas, dtype=torch.float32),
+                body_pose=torch.tensor(body_pose, dtype=torch.float32),
+                global_orient=torch.tensor(global_orient, dtype=torch.float32),
+                transl=torch.zeros(T, 3, dtype=torch.float32),
+                jaw_pose=torch.zeros(T, 3, dtype=torch.float32),
+                leye_pose=torch.zeros(T, 3, dtype=torch.float32),
+                reye_pose=torch.zeros(T, 3, dtype=torch.float32),
+                left_hand_pose=lhp,
+                right_hand_pose=rhp,
+                expression=torch.zeros(T, num_expr, dtype=torch.float32),
+                return_verts=False,
+            )
+        return out.joints[:, :55].cpu().numpy().astype(np.float32)
 
     # ------------------------------------------------------------------
     # Geometry helpers
@@ -373,45 +615,6 @@ class BodyPlacer:
         X = Vt[-1]                           # smallest singular vector
         return (X[:3] / X[3]).astype(np.float32)
 
-    @staticmethod
-    def _build_orient_matrix(joint_3d: dict[int, np.ndarray]) -> np.ndarray:
-        """Build a 3×3 rotation matrix from triangulated hip/shoulder positions.
-
-        Convention — columns are body axes in world space:
-            col 0 (x): right  (left hip → right hip)
-            col 1 (y): up     (mid-hips → mid-shoulders)
-            col 2 (z): forward (right-hand rule, x × y)
-
-        The three vectors are orthonormalised via Gram-Schmidt.
-        """
-        right_dir = np.zeros(3, dtype=np.float32)
-        up_dir    = np.zeros(3, dtype=np.float32)
-
-        if 1 in joint_3d and 2 in joint_3d:
-            mid_hips = (joint_3d[1] + joint_3d[2]) / 2.0
-            right_dir += joint_3d[2] - joint_3d[1]   # left_hip → right_hip
-        else:
-            mid_hips = joint_3d.get(0, np.zeros(3, dtype=np.float32))
-
-        if 16 in joint_3d and 17 in joint_3d:
-            mid_shoulders = (joint_3d[16] + joint_3d[17]) / 2.0
-            right_dir += joint_3d[17] - joint_3d[16]  # left_shoulder → right_shoulder
-        else:
-            mid_shoulders = None
-
-        if mid_shoulders is not None:
-            up_dir = mid_shoulders - mid_hips
-        else:
-            up_dir = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-
-        # Gram-Schmidt orthonormalisation: fix x first, then orthogonalise y, derive z
-        x = right_dir / (np.linalg.norm(right_dir) + 1e-8)
-        y = up_dir - np.dot(up_dir, x) * x
-        y = y / (np.linalg.norm(y) + 1e-8)
-        z = np.cross(x, y)
-
-        return np.stack([x, y, z], axis=1).astype(np.float32)  # (3, 3)
-
     def apply_scale(
         self,
         scale: float,
@@ -421,11 +624,12 @@ class BodyPlacer:
 
         The extrinsic translation column (t in [R|t]) is multiplied by ``scale``
         so that it is expressed in metres.  The depth maps are similarly rescaled.
-        Files are written as ``vggt_cameras.npz`` and ``vggt_depth.npz`` in
-        ``output_dir`` (defaults to ``scene_output_dir``).
+        Files are written as ``vggt_cameras_rescaled.npz`` and
+        ``vggt_depth_rescaled.npz`` in ``output_dir`` (defaults to
+        ``scene_output_dir``).
 
         Args:
-            scale: Value returned by :meth:`estimate_scale`.
+            scale: Value returned by :meth:`estimate_scale_triangulated`.
             output_dir: Destination directory.  Defaults to ``scene_output_dir``.
         """
         out = Path(output_dir) if output_dir is not None else self.scene_dir
@@ -434,7 +638,7 @@ class BodyPlacer:
         extrinsics_scaled[..., 3] *= scale  # column 3 is the translation vector
 
         np.savez_compressed(
-            out / "vggt_cameras.npz",
+            out / "vggt_cameras_rescaled.npz",
             extrinsics=extrinsics_scaled,
             intrinsics=self.intrinsics,
             original_coords=self.original_coords,
@@ -447,7 +651,7 @@ class BodyPlacer:
         depth_mm_scaled = np.clip(depth_m * 1000.0, 0, 65535).astype(np.uint16)
 
         np.savez_compressed(
-            out / "vggt_depth.npz",
+            out / "vggt_depth_rescaled.npz",
             depth=depth_mm_scaled,
             depth_conf=self.depth_conf,
             depth_valid=self.depth_valid,
@@ -457,28 +661,41 @@ class BodyPlacer:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _collect_scale_samples(
+    def _collect_scale_samples_tagged(
         self,
         k: int,
         body_file: Path,
         conf_threshold: float,
         min_delta_z: float,
-        joint_conf_threshold: float,
-    ) -> list[float]:
-        """Yield s=Δz_smplx/Δz_vggt samples for one camera and one person."""
+        fused_betas: np.ndarray | None = None,
+    ) -> dict[int, list[float]]:
+        """Collect scale samples s = L_FK / L_VGGT, tagged by global frame index.
+
+        Returns ``{global_t: [scale_samples]}`` — may be empty if no valid data.
+        """
+        from collections import defaultdict
         data = np.load(body_file, allow_pickle=False)
 
-        required = {"pred_keypoints_3d", "pred_keypoints_2d", "frame_indices"}
+        required = {"smplx_betas", "smplx_body_pose",
+                    "pred_keypoints_2d", "frame_indices"}
         if not required.issubset(data.files):
-            return []
+            return {}
 
-        kp3d = data["pred_keypoints_3d"]   # (T_local, J, 3) metres
-        kp2d = data["pred_keypoints_2d"]   # (T_local, J, 2) or (T_local, J, 3) pixels
-        frame_indices = data["frame_indices"]  # (T_local,) maps local row → global frame
-        # (T_local, J) float32 in [0,1]; None if not present in this npz
-        joint_conf = data["pred_joint_confidence"] if "pred_joint_confidence" in data.files else None
+        betas         = data["smplx_betas"]        # (T_local, 10)
+        body_pose     = data["smplx_body_pose"]    # (T_local, 63)
+        kp2d          = data["pred_keypoints_2d"]  # (T_local, J, 2+) original pixels
+        frame_indices = data["frame_indices"]
 
-        samples: list[float] = []
+        T_local = len(frame_indices)
+        go_zero = np.zeros((T_local, 3), dtype=np.float32)
+
+        if fused_betas is not None:
+            betas_arr = np.tile(fused_betas[np.newaxis], (T_local, 1))
+        else:
+            betas_arr = betas
+        fk_joints = self._smplx_fk(betas_arr, body_pose, go_zero)  # (T_local, 55, 3)
+
+        result: dict[int, list[float]] = defaultdict(list)
 
         for local_t, global_t in enumerate(frame_indices):
             if global_t >= self.T:
@@ -491,29 +708,26 @@ class BodyPlacer:
             depth_frame = self.depth_mm[global_t, k].astype(np.float32) / 1000.0
             conf_frame  = self.depth_conf[global_t, k].astype(np.float32)
 
-            oc = self.original_coords[global_t, k]   # [x1,y1,x2,y2] in 518-space
-            os = self.original_size[global_t, k]     # [W_orig, H_orig]
+            intr = self.intrinsics[global_t, k]
+            fx, fy = float(intr[0, 0]), float(intr[1, 1])
+            cx, cy = float(intr[0, 2]), float(intr[1, 2])
+
+            oc = self.original_coords[global_t, k]
+            os = self.original_size[global_t, k]
             W_orig, H_orig = float(os[0]), float(os[1])
 
             for j_a, j_b in _LONG_BONES:
-                if j_a >= kp3d.shape[1] or j_b >= kp3d.shape[1]:
+                mhr_a = _SMPLX_TO_MHR70.get(j_a)
+                mhr_b = _SMPLX_TO_MHR70.get(j_b)
+                if mhr_a is None or mhr_b is None:
+                    continue
+                if mhr_a >= kp2d.shape[1] or mhr_b >= kp2d.shape[1]:
                     continue
 
-                # Skip if either joint is occluded / low-confidence in this frame
-                if joint_conf is not None:
-                    if (joint_conf[local_t, j_a] < joint_conf_threshold or
-                            joint_conf[local_t, j_b] < joint_conf_threshold):
-                        continue
+                u_a, v_a = self._orig_to_vggt(kp2d[local_t, mhr_a], oc, W_orig, H_orig)
+                u_b, v_b = self._orig_to_vggt(kp2d[local_t, mhr_b], oc, W_orig, H_orig)
 
-                dz_smplx = float(kp3d[local_t, j_b, 2] - kp3d[local_t, j_a, 2])
-
-                if abs(dz_smplx) < min_delta_z:
-                    continue
-
-                u_a, v_a = self._orig_to_518(kp2d[local_t, j_a], oc, W_orig, H_orig)
-                u_b, v_b = self._orig_to_518(kp2d[local_t, j_b], oc, W_orig, H_orig)
-
-                if not (self._in_bounds(u_a, v_a) and self._in_bounds(u_b, v_b)):
+                if not (self._in_bounds(u_a, v_a, oc[2], oc[3]) and self._in_bounds(u_b, v_b, oc[2], oc[3])):
                     continue
 
                 d_a = float(map_coordinates(depth_frame, [[v_a], [u_a]], order=1)[0])
@@ -526,42 +740,59 @@ class BodyPlacer:
                 if d_a <= 0.0 or d_b <= 0.0:
                     continue
 
-                dz_vggt = d_b - d_a
+                P_a = np.array([(u_a - cx) / fx * d_a, (v_a - cy) / fy * d_a, d_a], dtype=np.float32)
+                P_b = np.array([(u_b - cx) / fx * d_b, (v_b - cy) / fy * d_b, d_b], dtype=np.float32)
+                L_vggt = float(np.linalg.norm(P_b - P_a))
 
-                # Reject if near-zero depth difference or opposite sign to SMPL-X
-                if abs(dz_vggt) < 1e-4 or (dz_smplx * dz_vggt) <= 0:
+                if L_vggt < 1e-4:
                     continue
 
-                s = dz_smplx / dz_vggt
-                # Sanity check: physically plausible scale factors
-                if 0.01 < s < 100.0:
-                    samples.append(s)
+                L_fk = float(np.linalg.norm(fk_joints[local_t, j_b] - fk_joints[local_t, j_a]))
+                if L_fk < min_delta_z:
+                    continue
 
-        return samples
+                s = L_fk / L_vggt
+                if 0.01 < s < 100.0:
+                    result[int(global_t)].append(s)
+
+        return result
+
+    def _collect_scale_samples(
+        self,
+        k: int,
+        body_file: Path,
+        conf_threshold: float,
+        min_delta_z: float,
+        fused_betas: np.ndarray | None = None,
+    ) -> list[float]:
+        """Flat list of scale samples; delegates to :meth:`_collect_scale_samples_tagged`."""
+        tagged = self._collect_scale_samples_tagged(
+            k, body_file, conf_threshold, min_delta_z, fused_betas,
+        )
+        return [s for sl in tagged.values() for s in sl]
 
     @staticmethod
-    def _orig_to_518(
+    def _orig_to_vggt(
         kp: np.ndarray,
         oc: np.ndarray,
         W_orig: float,
         H_orig: float,
     ) -> tuple[float, float]:
-        """Map a 2D keypoint from original-image pixels to VGGT 518-space.
+        """Map a 2D keypoint from original-image pixels to VGGT output space.
 
         Args:
             kp: Keypoint [u, v, ...] in original image pixels.
-            oc: [x1, y1, x2, y2] bounding box in 518-space that the original
-                image was padded/resized into.
+            oc: [0, 0, W_vggt, H_vggt] from vggt_cameras.npz.
             W_orig, H_orig: Original image dimensions in pixels.
 
         Returns:
-            (u_518, v_518) in VGGT 518×518 pixel coordinates.
+            (u_vggt, v_vggt) in VGGT output pixel coordinates.
         """
         x1, y1, x2, y2 = oc
-        u_518 = x1 + float(kp[0]) * (x2 - x1) / W_orig
-        v_518 = y1 + float(kp[1]) * (y2 - y1) / H_orig
-        return u_518, v_518
+        u_vggt = x1 + float(kp[0]) * (x2 - x1) / W_orig
+        v_vggt = y1 + float(kp[1]) * (y2 - y1) / H_orig
+        return u_vggt, v_vggt
 
     @staticmethod
-    def _in_bounds(u: float, v: float, size: int = 518) -> bool:
-        return 0.0 <= u < size and 0.0 <= v < size
+    def _in_bounds(u: float, v: float, w_max: float, h_max: float) -> bool:
+        return 0.0 <= u < w_max and 0.0 <= v < h_max

@@ -60,13 +60,14 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Axis-angle → 6D rotation  (column-major, matches convert_pose in dataset)
+# Axis-angle → 6D rotation  (row-major, matches fusion_dataset.py training convention)
 # ---------------------------------------------------------------------------
 
 def _aa_to_6d(aa: np.ndarray) -> np.ndarray:
     """Convert axis-angle ``(..., 3)`` to 6-D rotation ``(..., 6)``.
 
-    Uses the first two columns of the rotation matrix (continuous representation).
+    Uses the first two rows of the rotation matrix — matches the convention in
+    fusion_dataset.py used when training the fusion model.
     Falls back to identity on failure.
     """
     from scipy.spatial.transform import Rotation as SciR
@@ -75,7 +76,7 @@ def _aa_to_6d(aa: np.ndarray) -> np.ndarray:
         mats = SciR.from_rotvec(aa.reshape(-1, 3)).as_matrix()  # (N, 3, 3)
     except Exception:
         return np.zeros(shape + (6,), dtype=np.float32)
-    sixd = np.concatenate([mats[:, :, 0], mats[:, :, 1]], axis=1)  # (N, 6)
+    sixd = np.concatenate([mats[:, 0, :], mats[:, 1, :]], axis=1)  # rows → (N, 6)
     return sixd.reshape(shape + (6,)).astype(np.float32)
 
 
@@ -220,19 +221,21 @@ def _load_model(checkpoint: Path, device: torch.device) -> FusionWithBetas:
     Hyper-parameters are inferred from the checkpoint; defaults match training.
     """
     ckpt = torch.load(checkpoint, map_location=device)
-    state = ckpt.get("model_state_dict", ckpt)
+    state = ckpt.get("model_state_dict", ckpt.get("model", ckpt))
 
     # Infer embedding_dim from joint_id_embedding weight shape.
-    embedding_dim = state["pose_module.joint_id_embedding.weight"].shape[1]
-    num_joints    = state["pose_module.joint_id_embedding.weight"].shape[0]
-    num_layers    = sum(1 for k in state if k.startswith("pose_module.layers.") and k.endswith(".ff.norm.weight"))
+    embedding_dim    = state["pose_module.joint_id_embedding.weight"].shape[1]
+    num_joints       = state["pose_module.joint_id_embedding.weight"].shape[0]
+    num_layers       = sum(1 for k in state if k.startswith("pose_module.layers.") and k.endswith(".ff.norm.weight"))
+    max_temporal_len = state["pose_module.temporal_pe.pe"].shape[0]
 
     pose_module = PoseFusionModule(
         embedding_dim=embedding_dim,
         num_layers=num_layers,
         num_joints=num_joints,
+        max_temporal_len=max_temporal_len,
     )
-    betas_agg = BetasAggregator()
+    betas_agg = BetasAggregator(n_betas=10, hidden_dim=64, dropout=0.1)
     model = FusionWithBetas(pose_module, betas_agg).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
@@ -245,8 +248,54 @@ def _load_model(checkpoint: Path, device: torch.device) -> FusionWithBetas:
 
 
 # ---------------------------------------------------------------------------
-# Placement
+# Placement via PnP
 # ---------------------------------------------------------------------------
+
+def _build_vggt_cameras(
+    placer: BodyPlacer,
+    scale_per_frame: np.ndarray,
+) -> np.ndarray:
+    """Convert VGGT per-frame extrinsics to visualizer camera format ``(T, K, 8)``.
+
+    Format matches the GT camera encoding in fusion_dataset.py:
+        [quat_wxyz (4), t_w2c (3), focal (1)]
+    where ``quat_wxyz`` encodes R_w2c (world-to-camera) and ``t_w2c`` is the
+    raw world-to-camera translation column, in metres after per-frame scaling.
+
+    Uses raw per-frame VGGT extrinsics (not median-stabilized) so the camera
+    array is temporally consistent with the per-frame scale used in PnP.
+
+    Args:
+        scale_per_frame: ``(T,)`` float32 — metres per VGGT unit, one per frame.
+    """
+    from scipy.spatial.transform import Rotation as SciR_local
+
+    T, K = placer.extrinsics.shape[:2]
+    out = np.zeros((T, K, 8), dtype=np.float32)
+    out[:, :, 0] = 1.0  # default identity quaternion w=1
+
+    for t in range(T):
+        s = float(scale_per_frame[t])
+        for k in range(K):
+            if not placer.cam_valid[t, k]:
+                continue
+            R_w2c = placer.extrinsics[t, k, :3, :3].astype(np.float64)
+            t_w2c = placer.extrinsics[t, k, :3, 3].astype(np.float32) * s
+            focal  = float(placer.intrinsics[t, k, 0, 0])
+
+            # Re-orthogonalise (VGGT R may drift slightly from SO(3))
+            U, _, Vt = np.linalg.svd(R_w2c)
+            R_w2c_ortho = (U @ Vt).astype(np.float32)
+
+            quat_xyzw = SciR_local.from_matrix(R_w2c_ortho).as_quat()  # xyzw
+            quat_wxyz = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])
+
+            out[t, k, :4]  = quat_wxyz
+            out[t, k, 4:7] = t_w2c
+            out[t, k, 7]   = focal
+
+    return out
+
 
 def _run_placer(
     scene_dir: Path,
@@ -255,84 +304,100 @@ def _run_placer(
     all_pids: list[int],
     frame_start: int,
     T: int,
+    smplx_model_path: Path,
+    fused_betas: np.ndarray | None = None,
+    fused_pose: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run BodyPlacer to get world-space root translations and orientations.
+    """Estimate world-space root translation + orientation via Procrustes DLT.
+
+    For each (person, frame): DLT-triangulates SMPL-X joints from 2D keypoints
+    across all cameras, then Procrustes-aligns the canonical FK skeleton to
+    recover global_orient and pelvis translation jointly.
+
+    Args:
+        fused_betas: (P, 10) refined betas from the fusion model; used for FK.
+                     If None, falls back to zeros per person.
+        fused_pose:  (T, P, 54, 6) fused body pose from the fusion model (6D).
+                     Used for the Procrustes FK step; falls back to raw SAM3D
+                     per-camera body_pose if None.
 
     Returns
     -------
-    root_translation  : (T, P, 3) float32, NaN where not visible
-    orient_R          : (N_frames, P, 3, 3) float32
-    orient_frames     : (N_frames, P) int32
+    root_translation  : (T, P, 3) float32, NaN where invisible
+    orient_R          : (T, P, 3, 3) float32, NaN where invisible
+    vggt_cameras      : (T, K, 8) float32, visualizer camera format
     """
-    placer = BodyPlacer(scene_dir)
-
+    placer = BodyPlacer(scene_dir, smplx_model_path)
     P = len(all_pids)
     pid_to_slot = {pid: i for i, pid in enumerate(all_pids)}
 
-    logger.info("Estimating VGGT depth scale ...")
-    scale = placer.estimate_scale()
-    logger.info(f"  scale = {scale:.4f} m / VGGT unit")
+    # Betas: prefer fused, fall back to zeros
+    betas_by_pid: dict[int, np.ndarray] = {}
+    for i, pid in enumerate(all_pids):
+        if fused_betas is not None:
+            betas_by_pid[pid] = fused_betas[i].astype(np.float32)
+        else:
+            betas_by_pid[pid] = np.zeros(10, dtype=np.float32)
 
-    root_translation = np.full((T, P, 3), np.nan, dtype=np.float32)
+    # Build fused_betas_map for scale estimation
+    fused_betas_map = {
+        cam_dir / "body_data" / f"person_{pid}.npz": betas_by_pid[pid]
+        for cam_dir in cam_dirs
+        for pid in all_pids
+        if (cam_dir / "body_data" / f"person_{pid}.npz").exists()
+    }
 
-    for k, (cam_dir, cam) in enumerate(zip(cam_dirs, raw)):
-        for pid, pdata in cam.items():
-            p = pid_to_slot[pid]
-            body_file = cam_dir / "body_data" / f"person_{pid}.npz"
-            logger.info(f"  root translation: {cam_dir.name} / person {pid} ...")
-            t_cam = placer.estimate_root_translation(k, body_file, scale)
-            # t_cam is (T_local, 3); map back to global timeline
-            fi = pdata["frame_indices"].astype(int)
-            for local_t, global_t in enumerate(fi):
-                t = global_t - frame_start
-                if 0 <= t < T:
-                    root_translation[t, p] = t_cam[local_t]
+    # Build per-pid fused pose arrays (used for FK in both scale estimation and Procrustes).
+    fused_pose_by_pid: dict[int, np.ndarray] = {
+        pid: fused_pose[:, pid_to_slot[pid]]   # (T, 54, 6)
+        for pid in all_pids
+    }
 
-    # Global orientation: triangulate across cameras per person.
-    # collect union of frame indices covered by any camera for each person.
-    all_orient_frames: list[np.ndarray] = []
-    all_orient_R: list[np.ndarray] = []
+    logger.info("Estimating VGGT depth scale (triangulation) ...")
+    scale_per_frame = placer.estimate_scale_triangulated(
+        fused_betas_map=fused_betas_map,
+        fused_pose_by_pid=fused_pose_by_pid,
+        frame_start=frame_start,
+    )
+    logger.info(f"  scale: median={float(np.median(scale_per_frame)):.4f} m/VGGT-unit")
+    # Depth arrays (~3 GB) are only needed for depth-based methods; free them
+    # before the DLT loop to avoid running out of memory on long sequences.
+    del placer.depth_mm, placer.depth_conf
+    placer.depth_mm = placer.depth_conf = None
 
-    # We store per-slot results in lists, then align to a common frame set.
-    slot_fi: list[np.ndarray | None] = [None] * P
-    slot_R:  list[np.ndarray | None] = [None] * P
+    logger.info("Running Procrustes DLT translation + orientation ...")
+    trans_dict, orient_dict = placer.estimate_procrustes_dlt(
+        scale=scale_per_frame,
+        all_pids=set(all_pids),
+        pred_betas_by_pid=betas_by_pid,
+        fused_pose_by_pid=fused_pose_by_pid,
+        frame_start=frame_start,
+    )
 
-    for pid in all_pids:
-        p = pid_to_slot[pid]
-        body_files_per_cam: dict[int, Path] = {}
-        for k, (cam_dir, cam) in enumerate(zip(cam_dirs, raw)):
-            if pid in cam:
-                body_files_per_cam[k] = cam_dir / "body_data" / f"person_{pid}.npz"
+    root_translation = np.full((T, P, 3),    np.nan, dtype=np.float32)
+    orient_R         = np.full((T, P, 3, 3), np.nan, dtype=np.float32)
 
-        if not body_files_per_cam:
+    for pid, frames in trans_dict.items():
+        p = pid_to_slot.get(pid)
+        if p is None:
             continue
+        for global_t, t_vec in frames.items():
+            t_rel = int(global_t) - frame_start
+            if 0 <= t_rel < T:
+                root_translation[t_rel, p] = t_vec
 
-        logger.info(f"  global orient: person {pid} ({len(body_files_per_cam)} cams) ...")
-        fi_out, R_out = placer.estimate_global_orient(body_files_per_cam)
-        slot_fi[p] = fi_out  # (N,) global frame indices
-        slot_R[p]  = R_out   # (N, 3, 3)
-
-    # Find the union of all frame indices across all slots.
-    all_fi_sets = [set(fi.tolist()) for fi in slot_fi if fi is not None]
-    if all_fi_sets:
-        union_frames = sorted(set.union(*all_fi_sets))
-    else:
-        union_frames = []
-
-    N_frames = len(union_frames)
-    orient_R      = np.full((N_frames, P, 3, 3), np.nan, dtype=np.float32)
-    orient_frames = np.array(union_frames, dtype=np.int32)  # (N_frames,)
-
-    frame_to_row = {f: i for i, f in enumerate(union_frames)}
-    for p in range(P):
-        if slot_fi[p] is None:
+    for pid, frames in orient_dict.items():
+        p = pid_to_slot.get(pid)
+        if p is None:
             continue
-        for local_i, global_f in enumerate(slot_fi[p]):
-            row = frame_to_row.get(int(global_f))
-            if row is not None:
-                orient_R[row, p] = slot_R[p][local_i]
+        for global_t, R_mat in frames.items():
+            t_rel = int(global_t) - frame_start
+            if 0 <= t_rel < T:
+                orient_R[t_rel, p] = R_mat
 
-    return root_translation, orient_R, orient_frames
+    vggt_cameras = _build_vggt_cameras(placer, scale_per_frame)
+
+    return root_translation, orient_R, vggt_cameras
 
 
 # ---------------------------------------------------------------------------
@@ -341,10 +406,11 @@ def _run_placer(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ghost inference: fuse poses and place bodies.")
-    parser.add_argument("--scene_dir",  required=True, type=Path, help="Scene output directory.")
-    parser.add_argument("--checkpoint", required=True, type=Path, help="FusionWithBetas checkpoint (.pt).")
-    parser.add_argument("--output",     type=Path, default=None,  help="Output .npz path (default: scene_dir/inference_result.npz).")
-    parser.add_argument("--device",     default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--scene_dir",       required=True, type=Path, help="Scene output directory.")
+    parser.add_argument("--checkpoint",      required=True, type=Path, help="FusionWithBetas checkpoint (.pt).")
+    parser.add_argument("--smplx_model",     required=True, type=Path, help="Path to SMPLX_NEUTRAL.pkl.")
+    parser.add_argument("--output",          type=Path, default=None,  help="Output .npz path (default: scene_dir/inference_result.npz).")
+    parser.add_argument("--device",          default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
     scene_dir = args.scene_dir.resolve()
@@ -382,22 +448,26 @@ def main() -> None:
     fused_pose  = pose_aggr[0].cpu().numpy()              # (T, P, J, 6)
     fused_betas = betas_out[0].cpu().numpy() if betas_out is not None else None  # (P, 10)
 
-    # ── 4. BodyPlacer ────────────────────────────────────────────────────────
-    logger.info("Running BodyPlacer ...")
-    root_translation, orient_R, orient_frames = _run_placer(
-        scene_dir, cam_dirs, raw, all_pids, frame_start, T
+    # ── 4. BodyPlacer (Procrustes DLT) ──────────────────────────────────────
+    logger.info("Running BodyPlacer (Procrustes DLT) ...")
+    root_translation, orient_R, vggt_cameras = _run_placer(
+        scene_dir, cam_dirs, raw, all_pids, frame_start, T,
+        smplx_model_path=args.smplx_model,
+        fused_betas=fused_betas,
+        fused_pose=fused_pose,
     )
+    # orient_R: (T, P, 3, 3) — NaN where not estimated
 
     # ── 5. Save ──────────────────────────────────────────────────────────────
     logger.info(f"Saving results to {output} ...")
     save_dict: dict[str, np.ndarray] = {
-        "fused_pose":           fused_pose,          # (T, P, J, 6)
-        "root_translation":     root_translation,    # (T, P, 3)
-        "global_orient_R":      orient_R,            # (N_frames, P, 3, 3)
-        "global_orient_frames": orient_frames,       # (N_frames,)
-        "person_ids":           np.array(all_pids, dtype=np.int32),
-        "camera_names":         np.array([d.name for d in cam_dirs]),
-        "frame_start":          np.array(frame_start, dtype=np.int32),
+        "fused_pose":       fused_pose,       # (T, P, J, 6)
+        "root_translation": root_translation, # (T, P, 3)
+        "global_orient_R":  orient_R,         # (T, P, 3, 3) — NaN where missing
+        "vggt_cameras":     vggt_cameras,     # (T, K, 8) — VGGT predicted cameras
+        "person_ids":       np.array(all_pids, dtype=np.int32),
+        "camera_names":     np.array([d.name for d in cam_dirs]),
+        "frame_start":      np.array(frame_start, dtype=np.int32),
     }
     if fused_betas is not None:
         save_dict["fused_betas"] = fused_betas       # (P, 10)
