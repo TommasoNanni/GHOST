@@ -21,7 +21,7 @@ INFO    ParkingLot1_002_burpee3                 8     1     38.7    0.01    0.00
 INFO    ParkingLot1_002_overfence2              8     1     45.3    0.14    0.13   100.0%   100.0%   100.0%
 INFO    ParkingLot1_002_pushup1                 8     1     46.0    0.35    0.10    75.0%    83.3%   100.0%
 INFO    ParkingLot1_002_stretching1             8     1     53.3    0.00    0.00   100.0%   100.0%   100.0%
-INFO    ParkingLot1_004_005_greetingchattingeating1     8     2     55.7    0.40    0.26    75.0%    91.7%   100.0%
+INFO    ParkingLot1_004_005_greetingeating1     8     2     55.7    0.40    0.26    75.0%    91.7%   100.0%
 INFO    ParkingLot1_004_burpeejump1             8     1     48.3    0.25    0.00    75.0%    87.5%   100.0%
 INFO    ParkingLot1_004_eating1                 8     1     42.7    0.53    0.29    66.7%    83.3%    95.8%
 INFO    ParkingLot1_004_phonetalk1              8     1     35.3    0.76    0.53    37.5%    66.7%   100.0%

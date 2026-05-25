@@ -1,0 +1,1356 @@
+ WARN The package `fsspec==2026.2.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.3.0` does not have an extra named `http`
+/users/tnanni/ghost/scripts/eval_placer_trans.py:32: UserWarning: A NumPy version >=1.26.4 and <2.7.0 is required for this version of SciPy (detected version 1.26.1)
+  from scipy.spatial.transform import Rotation as SciR
+  [fusion] loaded checkpoint: embedding_dim=128 num_layers=4 num_joints=54
+
+=================================================================
+Scene: BBQ_001_guitar
+=================================================================
+  [Hip midpoint]
+    pid 1: N= 373  median=0.481m  mean=0.500m  <0.5m= 55.8%
+    TOTAL: N= 373  median=0.481m  mean=0.500m  <0.5m= 55.8%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.306m  y=-0.084m  z=+0.255m
+
+  [PnP]
+    pid 1: N= 373  median=0.344m  mean=0.389m  <0.5m= 70.0%
+    TOTAL: N= 373  median=0.344m  mean=0.389m  <0.5m= 70.0%  <1.0m= 96.2%
+    Axis bias (pred−GT):  x=-0.113m  y=-0.091m  z=+0.112m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 373  median=0.268m  mean=0.293m  <0.5m= 90.1%
+    TOTAL: N= 373  median=0.268m  mean=0.293m  <0.5m= 90.1%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.068m  y=-0.066m  z=+0.132m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 373  median=0.265m  mean=0.293m  <0.5m= 89.0%
+    TOTAL: N= 373  median=0.265m  mean=0.293m  <0.5m= 89.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.068m  y=-0.059m  z=+0.134m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 373  median=0.167m  mean=0.235m  <0.5m= 89.8%
+    TOTAL: N= 373  median=0.167m  mean=0.235m  <0.5m= 89.8%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.075m  y=-0.076m  z=-0.028m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 373  median=0.159m  mean=0.232m  <0.5m= 89.5%
+    TOTAL: N= 373  median=0.159m  mean=0.232m  <0.5m= 89.5%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.075m  y=-0.069m  z=-0.026m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 373  median=0.254m  mean=0.277m  <0.5m= 90.6%
+    TOTAL: N= 373  median=0.254m  mean=0.277m  <0.5m= 90.6%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.057m  y=-0.028m  z=+0.126m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 373  median=0.149m  mean=0.214m  <0.5m= 89.8%
+    TOTAL: N= 373  median=0.149m  mean=0.214m  <0.5m= 89.8%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.064m  y=-0.040m  z=-0.034m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 373  median=0.026m  mean=0.029m  <0.5m=100.0%
+    TOTAL: N= 373  median=0.026m  mean=0.029m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.011m  y=-0.011m  z=+0.006m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 373  median=0.026m  mean=0.029m  <0.5m=100.0%
+    TOTAL: N= 373  median=0.026m  mean=0.029m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.011m  y=-0.011m  z=+0.006m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 373  median=0.021m  mean=0.020m  <0.5m=100.0%
+    TOTAL: N= 373  median=0.021m  mean=0.020m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.012m  y=-0.004m  z=+0.008m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 373  median=0.021m  mean=0.020m  <0.5m=100.0%
+    TOTAL: N= 373  median=0.021m  mean=0.020m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.012m  y=-0.004m  z=+0.008m
+
+  [Orient — PnP]
+    pid 1: N= 373  median=10.6°  mean=11.3°  <30°=100.0%
+    TOTAL: N= 373  median=10.6°  mean=11.3°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 373  median=10.6°  mean=10.0°  <30°=100.0%
+    TOTAL: N= 373  median=10.6°  mean=10.0°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 373  median=3.4°  mean=3.3°  <30°=100.0%
+    TOTAL: N= 373  median=3.4°  mean=3.3°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 373  median=10.6°  mean=10.0°  <30°=100.0%
+    TOTAL: N= 373  median=10.6°  mean=10.0°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 373  median=3.4°  mean=3.3°  <30°=100.0%
+    TOTAL: N= 373  median=3.4°  mean=3.3°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 373  median=10.4°  mean=9.9°  <30°=100.0%
+    TOTAL: N= 373  median=10.4°  mean=9.9°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 373  median=10.4°  mean=9.9°  <30°=100.0%
+    TOTAL: N= 373  median=10.4°  mean=9.9°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 373  median=9.9°  mean=9.6°  <30°=100.0%
+    TOTAL: N= 373  median=9.9°  mean=9.6°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 373  median=9.9°  mean=9.6°  <30°=100.0%
+    TOTAL: N= 373  median=9.9°  mean=9.6°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 373  median=2.3°  mean=2.3°  <30°=100.0%
+    TOTAL: N= 373  median=2.3°  mean=2.3°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 373  median=2.3°  mean=2.3°  <30°=100.0%
+    TOTAL: N= 373  median=2.3°  mean=2.3°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2741     0.2685     +2.1%
+  R humerus        0.2820     0.2759     +2.2%
+  L femur          0.3861     0.3843     +0.5%
+  R femur          0.3684     0.3668     +0.4%
+  L tibia          0.4115     0.4084     +0.8%
+  R tibia          0.4164     0.4133     +0.7%
+  ALL                                    +1.1%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      +1.4%        +39        +11
+  cam_01        1.56         1.59    0.2516     0.2674      -0.7%         -4        +32
+  cam_02        0.87         0.90    0.2621     0.2913      -1.0%        +23        +14
+  cam_03        1.37         1.41    0.3963     0.4313      +0.2%         +9        +64
+  cam_04        1.74         1.73    0.4350     0.4720      +0.3%        -26        +16
+  cam_05        1.55         1.65    0.3922     0.4595      -0.4%        +30         +9
+  cam_06        2.04         1.96    0.3363     0.4360      -1.5%        -29         +5
+  cam_07        1.07         1.35    0.3175     0.4069      -1.0%        +23         +5
+
+
+=================================================================
+Scene: BBQ_001_juggle
+=================================================================
+  [Hip midpoint]
+    pid 1: N= 293  median=0.200m  mean=0.282m  <0.5m= 88.1%
+    TOTAL: N= 293  median=0.200m  mean=0.282m  <0.5m= 88.1%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.157m  y=-0.017m  z=+0.058m
+
+  [PnP]
+    pid 1: N= 293  median=0.188m  mean=0.317m  <0.5m= 82.9%
+    TOTAL: N= 293  median=0.188m  mean=0.317m  <0.5m= 82.9%  <1.0m= 91.5%
+    Axis bias (pred−GT):  x=-0.056m  y=-0.065m  z=-0.047m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 293  median=0.135m  mean=0.220m  <0.5m= 88.4%
+    TOTAL: N= 293  median=0.135m  mean=0.220m  <0.5m= 88.4%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.015m  y=-0.056m  z=-0.035m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 293  median=0.147m  mean=0.234m  <0.5m= 88.4%
+    TOTAL: N= 293  median=0.147m  mean=0.234m  <0.5m= 88.4%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.061m  y=-0.052m  z=-0.029m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 293  median=0.132m  mean=0.216m  <0.5m= 88.7%
+    TOTAL: N= 293  median=0.132m  mean=0.216m  <0.5m= 88.7%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.018m  y=-0.056m  z=+0.020m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 293  median=0.147m  mean=0.233m  <0.5m= 88.4%
+    TOTAL: N= 293  median=0.147m  mean=0.233m  <0.5m= 88.4%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.064m  y=-0.052m  z=+0.026m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 293  median=0.128m  mean=0.210m  <0.5m= 88.4%
+    TOTAL: N= 293  median=0.128m  mean=0.210m  <0.5m= 88.4%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.012m  y=-0.023m  z=-0.038m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 293  median=0.125m  mean=0.204m  <0.5m= 88.7%
+    TOTAL: N= 293  median=0.125m  mean=0.204m  <0.5m= 88.7%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.015m  y=-0.022m  z=+0.017m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 293  median=0.050m  mean=0.047m  <0.5m=100.0%
+    TOTAL: N= 293  median=0.050m  mean=0.047m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=+0.042m  y=-0.001m  z=-0.007m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 293  median=0.050m  mean=0.047m  <0.5m=100.0%
+    TOTAL: N= 293  median=0.050m  mean=0.047m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=+0.042m  y=-0.001m  z=-0.007m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 293  median=0.008m  mean=0.010m  <0.5m=100.0%
+    TOTAL: N= 293  median=0.008m  mean=0.010m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.004m  y=+0.002m  z=-0.000m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 293  median=0.008m  mean=0.010m  <0.5m=100.0%
+    TOTAL: N= 293  median=0.008m  mean=0.010m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.004m  y=+0.002m  z=-0.000m
+
+  [Orient — PnP]
+    pid 1: N= 293  median=12.7°  mean=12.9°  <30°=100.0%
+    TOTAL: N= 293  median=12.7°  mean=12.9°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 293  median=9.4°  mean=9.9°  <30°=100.0%
+    TOTAL: N= 293  median=9.4°  mean=9.9°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 293  median=1.4°  mean=1.6°  <30°=100.0%
+    TOTAL: N= 293  median=1.4°  mean=1.6°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 293  median=9.4°  mean=9.9°  <30°=100.0%
+    TOTAL: N= 293  median=9.4°  mean=9.9°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 293  median=1.4°  mean=1.6°  <30°=100.0%
+    TOTAL: N= 293  median=1.4°  mean=1.6°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 293  median=9.1°  mean=9.8°  <30°=100.0%
+    TOTAL: N= 293  median=9.1°  mean=9.8°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 293  median=9.1°  mean=9.8°  <30°=100.0%
+    TOTAL: N= 293  median=9.1°  mean=9.8°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 293  median=9.0°  mean=9.5°  <30°=100.0%
+    TOTAL: N= 293  median=9.0°  mean=9.5°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 293  median=9.0°  mean=9.5°  <30°=100.0%
+    TOTAL: N= 293  median=9.0°  mean=9.5°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 293  median=1.9°  mean=1.9°  <30°=100.0%
+    TOTAL: N= 293  median=1.9°  mean=1.9°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 293  median=1.9°  mean=1.9°  <30°=100.0%
+    TOTAL: N= 293  median=1.9°  mean=1.9°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2759     0.2685     +2.8%
+  R humerus        0.2840     0.2759     +2.9%
+  L femur          0.3984     0.3843     +3.7%
+  R femur          0.3800     0.3668     +3.6%
+  L tibia          0.4202     0.4084     +2.9%
+  R tibia          0.4258     0.4133     +3.0%
+  ALL                                    +3.1%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      +2.2%        +39        +11
+  cam_01        1.69         1.69    0.1172     0.1941      -0.7%         -4        +32
+  cam_02        0.85         0.92    0.1355     0.2264      -1.0%        +23        +14
+  cam_03        1.26         1.32    0.2021     0.3380      +0.1%         +9        +64
+  cam_04        1.44         1.45    0.2132     0.3571      +0.9%        -26        +16
+  cam_05        1.63         1.70    0.2764     0.4277      +0.3%        +30         +9
+  cam_06        1.79         1.78    0.3037     0.4595      -1.9%        -29         +5
+  cam_07        1.07         1.42    0.3132     0.4524      -1.4%        +23         +5
+
+
+=================================================================
+Scene: LectureHall_018_wipingchairs1
+=================================================================
+  [Hip midpoint]
+    pid 1: N=1150  median=0.110m  mean=0.120m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.110m  mean=0.120m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.070m  y=+0.038m  z=-0.068m
+
+  [PnP]
+    pid 1: N=1150  median=0.212m  mean=0.219m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.212m  mean=0.219m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.168m  y=+0.051m  z=-0.123m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N=1150  median=0.161m  mean=0.163m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.161m  mean=0.163m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.114m  y=+0.013m  z=-0.111m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N=1150  median=0.153m  mean=0.160m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.153m  mean=0.160m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.114m  y=+0.036m  z=-0.101m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N=1150  median=0.126m  mean=0.129m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.126m  mean=0.129m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.110m  y=+0.009m  z=-0.058m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N=1150  median=0.124m  mean=0.128m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.124m  mean=0.128m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.110m  y=+0.032m  z=-0.047m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N=1150  median=0.162m  mean=0.163m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.162m  mean=0.163m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.080m  y=+0.074m  z=-0.118m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N=1150  median=0.123m  mean=0.127m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.123m  mean=0.127m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.075m  y=+0.071m  z=-0.065m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N=1150  median=0.036m  mean=0.037m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.036m  mean=0.037m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.002m  y=+0.030m  z=-0.014m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N=1150  median=0.036m  mean=0.037m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.036m  mean=0.037m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.002m  y=+0.030m  z=-0.014m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N=1150  median=0.056m  mean=0.055m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.056m  mean=0.055m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.002m  y=+0.053m  z=-0.003m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N=1150  median=0.056m  mean=0.055m  <0.5m=100.0%
+    TOTAL: N=1150  median=0.056m  mean=0.055m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.002m  y=+0.053m  z=-0.003m
+
+  [Orient — PnP]
+    pid 1: N=1150  median=6.9°  mean=7.6°  <30°= 99.1%
+    TOTAL: N=1150  median=6.9°  mean=7.6°  <30°= 99.1%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N=1150  median=6.3°  mean=6.4°  <30°=100.0%
+    TOTAL: N=1150  median=6.3°  mean=6.4°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N=1150  median=1.5°  mean=1.9°  <30°=100.0%
+    TOTAL: N=1150  median=1.5°  mean=1.9°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N=1150  median=6.3°  mean=6.4°  <30°=100.0%
+    TOTAL: N=1150  median=6.3°  mean=6.4°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N=1150  median=1.5°  mean=1.9°  <30°=100.0%
+    TOTAL: N=1150  median=1.5°  mean=1.9°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N=1150  median=6.6°  mean=6.6°  <30°=100.0%
+    TOTAL: N=1150  median=6.6°  mean=6.6°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N=1150  median=6.6°  mean=6.6°  <30°=100.0%
+    TOTAL: N=1150  median=6.6°  mean=6.6°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N=1150  median=6.8°  mean=6.8°  <30°=100.0%
+    TOTAL: N=1150  median=6.8°  mean=6.8°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N=1150  median=6.8°  mean=6.8°  <30°=100.0%
+    TOTAL: N=1150  median=6.8°  mean=6.8°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N=1150  median=1.8°  mean=2.2°  <30°=100.0%
+    TOTAL: N=1150  median=1.8°  mean=2.2°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N=1150  median=1.8°  mean=2.2°  <30°=100.0%
+    TOTAL: N=1150  median=1.8°  mean=2.2°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2665     0.2496     +6.8%
+  R humerus        0.2735     0.2556     +7.0%
+  L femur          0.3737     0.3443     +8.5%
+  R femur          0.3570     0.3270     +9.2%
+  L tibia          0.3996     0.3696     +8.1%
+  R tibia          0.4039     0.3725     +8.4%
+  ALL                                    +8.0%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      -0.2%        +24         +6
+  cam_01        0.50         0.50    0.0523     0.0500      +1.1%        +40         +6
+  cam_02        0.79         0.79    0.1254     0.1262      +2.7%        +32        +14
+  cam_03        0.96         0.97    0.0869     0.0892      +2.0%         +9         +8
+  cam_04        1.75         1.75    0.1846     0.1838      +0.6%        -23         +9
+  cam_05        1.40         1.40    0.2341     0.2332      +2.3%        +16         +9
+  cam_06        1.78         1.78    0.1756     0.1812      +0.2%        -15        +25
+
+
+=================================================================
+Scene: LectureHall_018_wipingspray1
+=================================================================
+  NOTE: first cam is cam_02 — re-expressing GT in its frame
+  [Hip midpoint]
+    pid 1: N= 882  median=0.162m  mean=0.157m  <0.5m=100.0%
+    TOTAL: N= 882  median=0.162m  mean=0.157m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.128m  y=+0.040m  z=-0.033m
+
+  [PnP]
+    pid 1: N= 899  median=0.793m  mean=0.687m  <0.5m= 26.5%
+    TOTAL: N= 899  median=0.793m  mean=0.687m  <0.5m= 26.5%  <1.0m= 99.2%
+    Axis bias (pred−GT):  x=-0.422m  y=-0.044m  z=+0.537m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 899  median=0.201m  mean=0.214m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.201m  mean=0.214m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.180m  y=-0.018m  z=+0.038m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 899  median=0.185m  mean=0.205m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.185m  mean=0.205m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.169m  y=+0.004m  z=+0.041m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 899  median=0.204m  mean=0.222m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.204m  mean=0.222m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.184m  y=-0.019m  z=+0.072m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 899  median=0.188m  mean=0.213m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.188m  mean=0.213m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.173m  y=+0.003m  z=+0.075m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 899  median=0.237m  mean=0.236m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.237m  mean=0.236m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.152m  y=-0.004m  z=+0.174m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 899  median=0.264m  mean=0.265m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.264m  mean=0.265m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.155m  y=-0.005m  z=+0.209m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 899  median=0.060m  mean=0.059m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.060m  mean=0.059m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.040m  y=+0.034m  z=+0.015m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 899  median=0.060m  mean=0.059m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.060m  mean=0.059m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.040m  y=+0.034m  z=+0.015m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 899  median=0.065m  mean=0.067m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.065m  mean=0.067m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.029m  y=+0.056m  z=+0.017m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 899  median=0.065m  mean=0.067m  <0.5m=100.0%
+    TOTAL: N= 899  median=0.065m  mean=0.067m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.029m  y=+0.056m  z=+0.017m
+
+  [Orient — PnP]
+    pid 1: N= 899  median=9.2°  mean=9.5°  <30°= 99.8%
+    TOTAL: N= 899  median=9.2°  mean=9.5°  <30°= 99.8%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 899  median=6.7°  mean=7.1°  <30°=100.0%
+    TOTAL: N= 899  median=6.7°  mean=7.1°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 899  median=2.4°  mean=3.1°  <30°=100.0%
+    TOTAL: N= 899  median=2.4°  mean=3.1°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 899  median=6.7°  mean=7.1°  <30°=100.0%
+    TOTAL: N= 899  median=6.7°  mean=7.1°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 899  median=2.4°  mean=3.1°  <30°=100.0%
+    TOTAL: N= 899  median=2.4°  mean=3.1°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 899  median=7.5°  mean=8.7°  <30°=100.0%
+    TOTAL: N= 899  median=7.5°  mean=8.7°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 899  median=7.5°  mean=8.7°  <30°=100.0%
+    TOTAL: N= 899  median=7.5°  mean=8.7°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 899  median=7.3°  mean=7.7°  <30°=100.0%
+    TOTAL: N= 899  median=7.3°  mean=7.7°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 899  median=7.3°  mean=7.7°  <30°=100.0%
+    TOTAL: N= 899  median=7.3°  mean=7.7°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 899  median=2.0°  mean=2.6°  <30°=100.0%
+    TOTAL: N= 899  median=2.0°  mean=2.6°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 899  median=2.0°  mean=2.6°  <30°=100.0%
+    TOTAL: N= 899  median=2.0°  mean=2.6°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2667     0.2496     +6.8%
+  R humerus        0.2737     0.2556     +7.1%
+  L femur          0.3739     0.3443     +8.6%
+  R femur          0.3572     0.3270     +9.2%
+  L tibia          0.3997     0.3696     +8.1%
+  R tibia          0.4040     0.3725     +8.4%
+  ALL                                    +8.1%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_02        0.00         0.00    0.0000     0.0000      +5.0%        +32        +14
+  cam_03        1.01         1.02    0.0443     0.0411      +3.9%         +9         +8
+  cam_04        1.72         1.75    0.0865     0.1047      +2.8%        -23         +9
+
+
+=================================================================
+Scene: LectureHall_020_wipingtable1
+=================================================================
+  [Hip midpoint]
+    pid 1: N= 856  median=0.105m  mean=0.124m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.105m  mean=0.124m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.086m  y=-0.007m  z=-0.052m
+
+  [PnP]
+    pid 1: N= 856  median=0.267m  mean=0.267m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.267m  mean=0.267m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.071m  y=+0.031m  z=-0.252m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 856  median=0.144m  mean=0.179m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.144m  mean=0.179m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.079m  y=-0.031m  z=-0.147m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 856  median=0.130m  mean=0.173m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.130m  mean=0.173m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.075m  y=-0.033m  z=-0.144m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 856  median=0.090m  mean=0.100m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.090m  mean=0.100m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.081m  y=-0.027m  z=-0.026m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 856  median=0.080m  mean=0.094m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.080m  mean=0.094m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.077m  y=-0.029m  z=-0.023m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 856  median=0.117m  mean=0.153m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.117m  mean=0.153m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.045m  y=+0.000m  z=-0.135m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 856  median=0.060m  mean=0.067m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.060m  mean=0.067m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.046m  y=+0.006m  z=-0.014m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 856  median=0.030m  mean=0.031m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.030m  mean=0.031m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.008m  y=-0.014m  z=-0.006m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 856  median=0.030m  mean=0.031m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.030m  mean=0.031m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.008m  y=-0.014m  z=-0.006m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 856  median=0.020m  mean=0.021m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.020m  mean=0.021m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.003m  y=-0.016m  z=-0.003m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 856  median=0.020m  mean=0.021m  <0.5m=100.0%
+    TOTAL: N= 856  median=0.020m  mean=0.021m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.003m  y=-0.016m  z=-0.003m
+
+  [Orient — PnP]
+    pid 1: N= 856  median=5.3°  mean=6.5°  <30°= 99.6%
+    TOTAL: N= 856  median=5.3°  mean=6.5°  <30°= 99.6%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 856  median=4.9°  mean=5.2°  <30°=100.0%
+    TOTAL: N= 856  median=4.9°  mean=5.2°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 856  median=1.7°  mean=1.9°  <30°=100.0%
+    TOTAL: N= 856  median=1.7°  mean=1.9°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 856  median=4.9°  mean=5.2°  <30°=100.0%
+    TOTAL: N= 856  median=4.9°  mean=5.2°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 856  median=1.7°  mean=1.9°  <30°=100.0%
+    TOTAL: N= 856  median=1.7°  mean=1.9°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 856  median=4.9°  mean=5.3°  <30°=100.0%
+    TOTAL: N= 856  median=4.9°  mean=5.3°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 856  median=4.9°  mean=5.3°  <30°=100.0%
+    TOTAL: N= 856  median=4.9°  mean=5.3°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 856  median=5.2°  mean=5.6°  <30°=100.0%
+    TOTAL: N= 856  median=5.2°  mean=5.6°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 856  median=5.2°  mean=5.6°  <30°=100.0%
+    TOTAL: N= 856  median=5.2°  mean=5.6°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 856  median=1.7°  mean=2.1°  <30°=100.0%
+    TOTAL: N= 856  median=1.7°  mean=2.1°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 856  median=1.7°  mean=2.1°  <30°=100.0%
+    TOTAL: N= 856  median=1.7°  mean=2.1°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2788     0.2709     +2.9%
+  R humerus        0.2871     0.2791     +2.9%
+  L femur          0.4049     0.3938     +2.8%
+  R femur          0.3859     0.3767     +2.4%
+  L tibia          0.4258     0.4097     +4.0%
+  R tibia          0.4319     0.4156     +3.9%
+  ALL                                    +3.2%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      +0.5%        +24         +6
+  cam_02        0.69         0.69    0.2368     0.2554      +2.8%        +32        +14
+  cam_04        1.60         1.60    0.4217     0.4580      +0.9%        -23         +9
+  cam_05        1.44         1.44    0.3858     0.4152      +2.6%        +16         +9
+  cam_06        1.81         1.82    0.3668     0.3962      +0.2%        -15        +25
+
+
+=================================================================
+Scene: ParkingLot1_002_burpee3
+=================================================================
+  [Hip midpoint]
+    pid 1: N= 300  median=0.193m  mean=0.194m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.193m  mean=0.194m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.081m  y=-0.016m  z=-0.162m
+
+  [PnP]
+    pid 1: N= 300  median=0.239m  mean=0.235m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.239m  mean=0.235m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.129m  y=-0.035m  z=-0.183m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 300  median=0.229m  mean=0.223m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.229m  mean=0.223m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.142m  y=-0.037m  z=-0.165m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 300  median=0.222m  mean=0.219m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.222m  mean=0.219m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.140m  y=-0.028m  z=-0.165m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 300  median=0.151m  mean=0.151m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.151m  mean=0.151m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.139m  y=-0.039m  z=+0.026m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 300  median=0.145m  mean=0.145m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.145m  mean=0.145m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.137m  y=-0.030m  z=+0.027m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 300  median=0.202m  mean=0.193m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.202m  mean=0.193m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.028m  y=+0.011m  z=-0.189m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 300  median=0.032m  mean=0.041m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.032m  mean=0.041m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.020m  y=+0.011m  z=+0.002m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 300  median=0.023m  mean=0.026m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.023m  mean=0.026m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.003m  y=-0.005m  z=+0.003m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 300  median=0.023m  mean=0.026m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.023m  mean=0.026m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.003m  y=-0.005m  z=+0.003m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 300  median=0.009m  mean=0.012m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.009m  mean=0.012m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.001m  y=+0.004m  z=+0.004m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 300  median=0.009m  mean=0.012m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.009m  mean=0.012m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.001m  y=+0.004m  z=+0.004m
+
+  [Orient — PnP]
+    pid 1: N= 300  median=5.1°  mean=6.5°  <30°=100.0%
+    TOTAL: N= 300  median=5.1°  mean=6.5°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 300  median=3.4°  mean=4.0°  <30°=100.0%
+    TOTAL: N= 300  median=3.4°  mean=4.0°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 300  median=2.5°  mean=2.5°  <30°=100.0%
+    TOTAL: N= 300  median=2.5°  mean=2.5°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 300  median=3.4°  mean=4.0°  <30°=100.0%
+    TOTAL: N= 300  median=3.4°  mean=4.0°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 300  median=2.5°  mean=2.5°  <30°=100.0%
+    TOTAL: N= 300  median=2.5°  mean=2.5°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 300  median=3.7°  mean=4.1°  <30°=100.0%
+    TOTAL: N= 300  median=3.7°  mean=4.1°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 300  median=3.7°  mean=4.1°  <30°=100.0%
+    TOTAL: N= 300  median=3.7°  mean=4.1°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 300  median=3.7°  mean=4.1°  <30°=100.0%
+    TOTAL: N= 300  median=3.7°  mean=4.1°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 300  median=3.7°  mean=4.1°  <30°=100.0%
+    TOTAL: N= 300  median=3.7°  mean=4.1°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 300  median=1.1°  mean=1.4°  <30°=100.0%
+    TOTAL: N= 300  median=1.1°  mean=1.4°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 300  median=1.1°  mean=1.4°  <30°=100.0%
+    TOTAL: N= 300  median=1.1°  mean=1.4°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2782     0.2677     +3.9%
+  R humerus        0.2865     0.2752     +4.1%
+  L femur          0.4018     0.3881     +3.5%
+  R femur          0.3830     0.3701     +3.5%
+  L tibia          0.4229     0.4040     +4.7%
+  R tibia          0.4287     0.4094     +4.7%
+  ALL                                    +4.1%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      -0.9%        +35        +12
+  cam_01        2.54         2.56    0.3291     0.3308      +0.9%        -30        +10
+  cam_02        2.44         2.44    0.3011     0.2998      -1.2%        -32        +14
+  cam_03        1.23         1.24    0.3027     0.3003      +0.4%        +21        +16
+  cam_04        1.47         1.48    0.3113     0.3089      -1.1%        +28         +7
+  cam_05        0.80         0.79    0.1709     0.1696      -0.5%        +12        +10
+  cam_06        2.67         2.66    0.2767     0.2733      +0.6%         +1         +1
+  cam_07        1.25         1.26    0.2470     0.2454      -0.9%        +23        +18
+
+
+=================================================================
+Scene: ParkingLot1_002_overfence1
+=================================================================
+  [Hip midpoint]
+    pid 1: N= 250  median=0.079m  mean=0.084m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.079m  mean=0.084m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.019m  y=+0.012m  z=-0.072m
+
+  [PnP]
+    pid 1: N= 250  median=0.171m  mean=0.172m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.171m  mean=0.172m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.094m  y=-0.047m  z=-0.133m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 250  median=0.184m  mean=0.177m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.184m  mean=0.177m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.130m  y=-0.042m  z=-0.112m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 250  median=0.174m  mean=0.163m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.174m  mean=0.163m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.123m  y=-0.025m  z=-0.104m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 250  median=0.144m  mean=0.140m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.144m  mean=0.140m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.131m  y=-0.046m  z=+0.003m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 250  median=0.137m  mean=0.129m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.137m  mean=0.129m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.124m  y=-0.029m  z=+0.012m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 250  median=0.139m  mean=0.132m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.139m  mean=0.132m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.014m  y=+0.001m  z=-0.130m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 250  median=0.026m  mean=0.027m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.026m  mean=0.027m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.012m  y=-0.002m  z=-0.015m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 250  median=0.017m  mean=0.025m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.017m  mean=0.025m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.008m  y=-0.018m  z=-0.009m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 250  median=0.017m  mean=0.025m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.017m  mean=0.025m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.008m  y=-0.018m  z=-0.009m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 250  median=0.007m  mean=0.008m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.007m  mean=0.008m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.000m  y=-0.001m  z=-0.001m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 250  median=0.007m  mean=0.008m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.007m  mean=0.008m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.000m  y=-0.001m  z=-0.001m
+
+  [Orient — PnP]
+    pid 1: N= 250  median=5.9°  mean=7.4°  <30°=100.0%
+    TOTAL: N= 250  median=5.9°  mean=7.4°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 250  median=3.6°  mean=6.3°  <30°= 99.2%
+    TOTAL: N= 250  median=3.6°  mean=6.3°  <30°= 99.2%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 250  median=2.8°  mean=2.7°  <30°=100.0%
+    TOTAL: N= 250  median=2.8°  mean=2.7°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 250  median=3.6°  mean=6.3°  <30°= 99.2%
+    TOTAL: N= 250  median=3.6°  mean=6.3°  <30°= 99.2%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 250  median=2.8°  mean=2.7°  <30°=100.0%
+    TOTAL: N= 250  median=2.8°  mean=2.7°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 250  median=3.3°  mean=6.9°  <30°= 99.6%
+    TOTAL: N= 250  median=3.3°  mean=6.9°  <30°= 99.6%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 250  median=3.3°  mean=6.9°  <30°= 99.6%
+    TOTAL: N= 250  median=3.3°  mean=6.9°  <30°= 99.6%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 250  median=3.2°  mean=6.8°  <30°= 99.6%
+    TOTAL: N= 250  median=3.2°  mean=6.8°  <30°= 99.6%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 250  median=3.2°  mean=6.8°  <30°= 99.6%
+    TOTAL: N= 250  median=3.2°  mean=6.8°  <30°= 99.6%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 250  median=1.0°  mean=1.2°  <30°=100.0%
+    TOTAL: N= 250  median=1.0°  mean=1.2°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 250  median=1.0°  mean=1.2°  <30°=100.0%
+    TOTAL: N= 250  median=1.0°  mean=1.2°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2787     0.2677     +4.1%
+  R humerus        0.2871     0.2752     +4.3%
+  L femur          0.4035     0.3881     +4.0%
+  R femur          0.3846     0.3701     +3.9%
+  L tibia          0.4242     0.4040     +5.0%
+  R tibia          0.4301     0.4094     +5.1%
+  ALL                                    +4.4%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      -1.0%        +35        +12
+  cam_01        2.54         2.54    0.2417     0.2387      +0.2%        -30        +10
+  cam_02        2.43         2.42    0.2333     0.2296      -1.0%        -32        +14
+  cam_03        1.24         1.24    0.2241     0.2145      +0.1%        +21        +16
+  cam_04        1.48         1.45    0.2187     0.2161      -0.7%        +28         +7
+  cam_05        0.80         0.80    0.1232     0.1184      -0.5%        +12        +10
+  cam_06        2.66         2.66    0.1432     0.1446      +0.7%         +1         +1
+  cam_07        1.24         1.24    0.1871     0.1824      -0.9%        +23        +18
+
+
+=================================================================
+Scene: ParkingLot1_002_overfence2
+=================================================================
+  [Hip midpoint]
+    pid 1: N= 250  median=0.182m  mean=0.179m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.182m  mean=0.179m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.048m  y=+0.018m  z=-0.168m
+
+  [PnP]
+    pid 1: N= 250  median=0.255m  mean=0.246m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.255m  mean=0.246m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.129m  y=-0.033m  z=-0.205m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 250  median=0.240m  mean=0.227m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.240m  mean=0.227m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.127m  y=-0.038m  z=-0.183m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 250  median=0.227m  mean=0.217m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.227m  mean=0.217m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.120m  y=-0.022m  z=-0.180m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 250  median=0.144m  mean=0.138m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.144m  mean=0.138m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.128m  y=-0.045m  z=+0.009m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 250  median=0.132m  mean=0.126m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.132m  mean=0.126m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.121m  y=-0.029m  z=+0.012m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 250  median=0.216m  mean=0.206m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.216m  mean=0.206m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.026m  y=+0.003m  z=-0.204m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 250  median=0.030m  mean=0.033m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.030m  mean=0.033m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.022m  y=-0.002m  z=-0.013m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 250  median=0.023m  mean=0.025m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.023m  mean=0.025m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.008m  y=-0.016m  z=-0.005m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 250  median=0.023m  mean=0.025m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.023m  mean=0.025m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.008m  y=-0.016m  z=-0.005m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 250  median=0.009m  mean=0.009m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.009m  mean=0.009m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.001m  y=+0.000m  z=-0.001m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 250  median=0.009m  mean=0.009m  <0.5m=100.0%
+    TOTAL: N= 250  median=0.009m  mean=0.009m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.001m  y=+0.000m  z=-0.001m
+
+  [Orient — PnP]
+    pid 1: N= 250  median=5.2°  mean=5.7°  <30°=100.0%
+    TOTAL: N= 250  median=5.2°  mean=5.7°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 250  median=3.3°  mean=3.5°  <30°=100.0%
+    TOTAL: N= 250  median=3.3°  mean=3.5°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 250  median=2.2°  mean=2.3°  <30°=100.0%
+    TOTAL: N= 250  median=2.2°  mean=2.3°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 250  median=3.3°  mean=3.5°  <30°=100.0%
+    TOTAL: N= 250  median=3.3°  mean=3.5°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 250  median=2.2°  mean=2.3°  <30°=100.0%
+    TOTAL: N= 250  median=2.2°  mean=2.3°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 250  median=3.3°  mean=3.9°  <30°=100.0%
+    TOTAL: N= 250  median=3.3°  mean=3.9°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 250  median=3.3°  mean=3.9°  <30°=100.0%
+    TOTAL: N= 250  median=3.3°  mean=3.9°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 250  median=3.3°  mean=3.9°  <30°=100.0%
+    TOTAL: N= 250  median=3.3°  mean=3.9°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 250  median=3.3°  mean=3.9°  <30°=100.0%
+    TOTAL: N= 250  median=3.3°  mean=3.9°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 250  median=1.0°  mean=1.1°  <30°=100.0%
+    TOTAL: N= 250  median=1.0°  mean=1.1°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 250  median=1.0°  mean=1.1°  <30°=100.0%
+    TOTAL: N= 250  median=1.0°  mean=1.1°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2788     0.2677     +4.1%
+  R humerus        0.2872     0.2752     +4.4%
+  L femur          0.4047     0.3881     +4.3%
+  R femur          0.3857     0.3701     +4.2%
+  L tibia          0.4251     0.4040     +5.2%
+  R tibia          0.4311     0.4094     +5.3%
+  ALL                                    +4.6%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      -1.0%        +35        +12
+  cam_01        2.54         2.55    0.3521     0.3576      -0.1%        -30        +10
+  cam_02        2.43         2.43    0.3300     0.3260      -1.1%        -32        +14
+  cam_03        1.19         1.20    0.3352     0.3291      -0.2%        +21        +16
+  cam_04        1.45         1.43    0.3497     0.3410      -1.2%        +28         +7
+  cam_05        0.81         0.81    0.1887     0.1838      -0.4%        +12        +10
+  cam_06        2.66         2.65    0.3288     0.3215      -0.1%         +1         +1
+  cam_07        1.24         1.24    0.2773     0.2702      -0.9%        +23        +18
+
+
+=================================================================
+Scene: ParkingLot1_002_pushup1
+=================================================================
+  [Hip midpoint]
+    pid 1: N= 200  median=0.387m  mean=0.370m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.387m  mean=0.370m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.096m  y=-0.039m  z=-0.348m
+
+  [PnP]
+    pid 1: N= 200  median=0.449m  mean=0.453m  <0.5m= 79.0%
+    TOTAL: N= 200  median=0.449m  mean=0.453m  <0.5m= 79.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.260m  y=+0.016m  z=-0.363m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 200  median=0.372m  mean=0.375m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.372m  mean=0.375m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.141m  y=-0.042m  z=-0.344m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 200  median=0.373m  mean=0.377m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.373m  mean=0.377m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.143m  y=-0.033m  z=-0.346m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 200  median=0.144m  mean=0.142m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.144m  mean=0.142m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.132m  y=-0.033m  z=+0.028m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 200  median=0.141m  mean=0.140m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.141m  mean=0.140m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.134m  y=-0.024m  z=+0.025m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 200  median=0.367m  mean=0.368m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.367m  mean=0.368m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.034m  y=+0.004m  z=-0.366m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 200  median=0.033m  mean=0.038m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.033m  mean=0.038m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.015m  y=+0.017m  z=+0.003m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 200  median=0.024m  mean=0.026m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.024m  mean=0.026m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=+0.000m  y=-0.001m  z=+0.007m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 200  median=0.024m  mean=0.026m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.024m  mean=0.026m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=+0.000m  y=-0.001m  z=+0.007m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 200  median=0.013m  mean=0.015m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.013m  mean=0.015m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.002m  y=+0.008m  z=+0.005m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 200  median=0.013m  mean=0.015m  <0.5m=100.0%
+    TOTAL: N= 200  median=0.013m  mean=0.015m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.002m  y=+0.008m  z=+0.005m
+
+  [Orient — PnP]
+    pid 1: N= 200  median=7.5°  mean=8.2°  <30°=100.0%
+    TOTAL: N= 200  median=7.5°  mean=8.2°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 200  median=5.2°  mean=5.3°  <30°=100.0%
+    TOTAL: N= 200  median=5.2°  mean=5.3°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 200  median=2.3°  mean=2.3°  <30°=100.0%
+    TOTAL: N= 200  median=2.3°  mean=2.3°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 200  median=5.2°  mean=5.3°  <30°=100.0%
+    TOTAL: N= 200  median=5.2°  mean=5.3°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 200  median=2.3°  mean=2.3°  <30°=100.0%
+    TOTAL: N= 200  median=2.3°  mean=2.3°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 200  median=5.0°  mean=5.1°  <30°=100.0%
+    TOTAL: N= 200  median=5.0°  mean=5.1°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 200  median=5.0°  mean=5.1°  <30°=100.0%
+    TOTAL: N= 200  median=5.0°  mean=5.1°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 200  median=4.9°  mean=5.2°  <30°=100.0%
+    TOTAL: N= 200  median=4.9°  mean=5.2°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 200  median=4.9°  mean=5.2°  <30°=100.0%
+    TOTAL: N= 200  median=4.9°  mean=5.2°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 200  median=1.1°  mean=1.5°  <30°=100.0%
+    TOTAL: N= 200  median=1.1°  mean=1.5°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 200  median=1.1°  mean=1.5°  <30°=100.0%
+    TOTAL: N= 200  median=1.1°  mean=1.5°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2779     0.2677     +3.8%
+  R humerus        0.2862     0.2752     +4.0%
+  L femur          0.3999     0.3881     +3.0%
+  R femur          0.3812     0.3701     +3.0%
+  L tibia          0.4214     0.4040     +4.3%
+  R tibia          0.4271     0.4094     +4.3%
+  ALL                                    +3.8%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      -1.1%        +35        +12
+  cam_01        2.59         2.60    0.6533     0.6594      +1.3%        -30        +10
+  cam_02        2.45         2.45    0.5148     0.5156      -1.1%        -32        +14
+  cam_03        1.25         1.25    0.5744     0.5743      +0.2%        +21        +16
+  cam_04        1.47         1.46    0.5941     0.5957      -1.1%        +28         +7
+  cam_05        0.81         0.80    0.3075     0.3077      -0.5%        +12        +10
+  cam_06        2.66         2.66    0.6701     0.6679      +0.9%         +1         +1
+  cam_07        1.27         1.27    0.4449     0.4452      -0.9%        +23        +18
+
+
+=================================================================
+Scene: ParkingLot1_002_stretching1
+=================================================================
+  [Hip midpoint]
+    pid 1: N= 300  median=0.086m  mean=0.086m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.086m  mean=0.086m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.061m  y=+0.010m  z=-0.044m
+
+  [PnP]
+    pid 1: N= 300  median=0.139m  mean=0.137m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.139m  mean=0.137m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.093m  y=-0.055m  z=-0.076m
+
+  [Proc DLT | pred scale | pred pose]
+    pid 1: N= 300  median=0.160m  mean=0.160m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.160m  mean=0.160m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.138m  y=-0.043m  z=-0.067m
+
+  [Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 300  median=0.154m  mean=0.155m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.154m  mean=0.155m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.137m  y=-0.033m  z=-0.062m
+
+  [Proc DLT | GT scale  | pred pose]
+    pid 1: N= 300  median=0.148m  mean=0.148m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.148m  mean=0.148m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.138m  y=-0.047m  z=+0.014m
+
+  [Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 300  median=0.143m  mean=0.144m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.143m  mean=0.144m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.137m  y=-0.038m  z=+0.019m
+
+  [Proc DLT | pred scale | GT rot]
+    pid 1: N= 300  median=0.096m  mean=0.095m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.096m  mean=0.095m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.022m  y=+0.004m  z=-0.092m
+
+  [Proc DLT | GT scale  | GT rot]
+    pid 1: N= 300  median=0.025m  mean=0.026m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.025m  mean=0.026m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.019m  y=+0.000m  z=-0.011m
+
+  [GT cams | pred pose | pred scale]
+    pid 1: N= 300  median=0.018m  mean=0.018m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.018m  mean=0.018m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.001m  y=-0.011m  z=-0.007m
+
+  [GT cams | pred pose | GT scale]
+    pid 1: N= 300  median=0.018m  mean=0.018m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.018m  mean=0.018m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.001m  y=-0.011m  z=-0.007m
+
+  [GT cams | GT pose+betas | pred scale]
+    pid 1: N= 300  median=0.005m  mean=0.007m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.005m  mean=0.007m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.000m  y=-0.001m  z=-0.002m
+
+  [GT cams | GT pose+betas | GT scale]
+    pid 1: N= 300  median=0.005m  mean=0.007m  <0.5m=100.0%
+    TOTAL: N= 300  median=0.005m  mean=0.007m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.000m  y=-0.001m  z=-0.002m
+
+  [Orient — PnP]
+    pid 1: N= 300  median=7.8°  mean=8.0°  <30°=100.0%
+    TOTAL: N= 300  median=7.8°  mean=8.0°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | pred pose]
+    pid 1: N= 300  median=6.0°  mean=6.9°  <30°=100.0%
+    TOTAL: N= 300  median=6.0°  mean=6.9°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT pose+betas]
+    pid 1: N= 300  median=2.5°  mean=2.6°  <30°=100.0%
+    TOTAL: N= 300  median=2.5°  mean=2.6°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | pred pose]
+    pid 1: N= 300  median=6.0°  mean=6.9°  <30°=100.0%
+    TOTAL: N= 300  median=6.0°  mean=6.9°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT pose+betas]
+    pid 1: N= 300  median=2.5°  mean=2.6°  <30°=100.0%
+    TOTAL: N= 300  median=2.5°  mean=2.6°  <30°=100.0%
+
+  [Orient — Proc DLT | pred scale | GT rot]
+    pid 1: N= 300  median=6.5°  mean=7.2°  <30°=100.0%
+    TOTAL: N= 300  median=6.5°  mean=7.2°  <30°=100.0%
+
+  [Orient — Proc DLT | GT scale  | GT rot]
+    pid 1: N= 300  median=6.5°  mean=7.2°  <30°=100.0%
+    TOTAL: N= 300  median=6.5°  mean=7.2°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | pred scale]
+    pid 1: N= 300  median=6.8°  mean=7.2°  <30°=100.0%
+    TOTAL: N= 300  median=6.8°  mean=7.2°  <30°=100.0%
+
+  [Orient — GT cams | pred pose | GT scale]
+    pid 1: N= 300  median=6.8°  mean=7.2°  <30°=100.0%
+    TOTAL: N= 300  median=6.8°  mean=7.2°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | pred scale]
+    pid 1: N= 300  median=1.1°  mean=1.5°  <30°=100.0%
+    TOTAL: N= 300  median=1.1°  mean=1.5°  <30°=100.0%
+
+  [Orient — GT cams | GT pose+betas | GT scale]
+    pid 1: N= 300  median=1.1°  mean=1.5°  <30°=100.0%
+    TOTAL: N= 300  median=1.1°  mean=1.5°  <30°=100.0%
+
+  [Bone length error: pred betas vs GT betas]
+  bone          L_pred(m)    L_gt(m)     err%
+  ──────────────────────────────────────────
+  L humerus        0.2781     0.2677     +3.9%
+  R humerus        0.2864     0.2752     +4.1%
+  L femur          0.4021     0.3881     +3.6%
+  R femur          0.3833     0.3701     +3.6%
+  L tibia          0.4231     0.4040     +4.7%
+  R tibia          0.4289     0.4094     +4.8%
+  ALL                                    +4.1%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam  rot_med(°)  rot_mean(°)  t_med(m)  t_mean(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ──────────────────────────────────────────────────────────────────────────────────
+  cam_00        0.00         0.00    0.0000     0.0000      -1.2%        +35        +12
+  cam_01        2.50         2.52    0.1705     0.1699      +1.8%        -30        +10
+  cam_02        2.50         2.50    0.1856     0.1855      -1.2%        -32        +14
+  cam_03        1.16         1.16    0.1746     0.1734      +0.0%        +21        +16
+  cam_04        1.50         1.49    0.1572     0.1618      -1.0%        +28         +7
+  cam_05        0.79         0.79    0.0908     0.0908      -0.6%        +12        +10
+  cam_06        2.67         2.68    0.0682     0.0719      +0.5%         +1         +1
+  cam_07        1.25         1.26    0.1466     0.1476      -1.2%        +23        +18
+
+
+=================================================================
+AGGREGATE over 10 scenes
+=================================================================
+  Method                                                N   median     mean   <0.5m
+  ------------------------------------------------  -----  -------  -------  ------
+  Hip midpoint                                       4854    0.151m    0.181m   95.9%
+  PnP                                                4871    0.256m    0.337m   82.2%
+  Proc DLT | pred scale | pred pose                  4871    0.185m    0.205m   98.5%
+  Proc DLT | pred scale | GT pose+betas              4871    0.178m    0.200m   98.5%
+  Proc DLT | GT scale  | pred pose                   4871    0.145m    0.158m   98.5%
+  Proc DLT | GT scale  | GT pose+betas               4871    0.141m    0.155m   98.5%
+  Proc DLT | pred scale | GT rot                     4871    0.177m    0.193m   98.6%
+  Proc DLT | GT scale  | GT rot                      4871    0.096m    0.128m   98.5%
+  GT cams | pred pose | pred scale                   4871    0.034m    0.036m  100.0%
+  GT cams | pred pose | GT scale                     4871    0.034m    0.036m  100.0%
+  GT cams | GT pose+betas | pred scale               4871    0.024m    0.034m  100.0%
+  GT cams | GT pose+betas | GT scale                 4871    0.024m    0.034m  100.0%
+
+  Method                                                N   median    <30°
+  ------------------------------------------------  -----  -------  ------
+  Orient — PnP                                       4871     7.4°   99.7%
+  Orient — Proc DLT | pred scale | pred pose         4871     5.9°  100.0%
+  Orient — Proc DLT | pred scale | GT pose+betas     4871     2.0°  100.0%
+  Orient — Proc DLT | GT scale  | pred pose          4871     5.9°  100.0%
+  Orient — Proc DLT | GT scale  | GT pose+betas      4871     2.0°  100.0%
+  Orient — Proc DLT | pred scale | GT rot            4871     6.2°  100.0%
+  Orient — Proc DLT | GT scale  | GT rot             4871     6.2°  100.0%
+  Orient — GT cams | pred pose | pred scale          4871     6.3°  100.0%
+  Orient — GT cams | pred pose | GT scale            4871     6.3°  100.0%
+  Orient — GT cams | GT pose+betas | pred scale      4871     1.6°  100.0%
+  Orient — GT cams | GT pose+betas | GT scale        4871     1.6°  100.0%
+
+  Scene                                         raw    fused    gt_b   gt_cam   err_raw  err_fused   err_gtb
+  ----------------------------------------  -------  -------  ------  -------  --------  ---------  --------
+  BBQ_001_guitar                             4.2931   4.4476  4.3965   4.2217     +1.7%      +5.4%     +4.1%
+  BBQ_001_juggle                             4.6884   4.8052  4.6412   4.8890     -4.1%      -1.7%     -5.1%
+  LectureHall_018_wipingchairs1              5.2552   5.5743  5.1602   5.6281     -6.6%      -1.0%     -8.3%
+  LectureHall_018_wipingspray1               6.8852   7.2324  6.7192   7.2671     -5.3%      -0.5%     -7.5%
+  LectureHall_020_wipingtable1               4.8091   5.0474  4.9168   5.2372     -8.2%      -3.6%     -6.1%
+  ParkingLot1_002_burpee3                    4.0610   4.1964  4.0426   4.3810     -7.3%      -4.2%     -7.7%
+  ParkingLot1_002_overfence1                 4.1177   4.2492  4.0688   4.3723     -5.8%      -2.8%     -6.9%
+  ParkingLot1_002_overfence2                 4.0311   4.1590  3.9981   4.3676     -7.7%      -4.8%     -8.5%
+  ParkingLot1_002_pushup1                    3.9039   4.0097  3.8878   4.3761    -10.8%      -8.4%    -11.2%
+  ParkingLot1_002_stretching1                4.1694   4.3096  4.1538   4.3895     -5.0%      -1.8%     -5.4%
+
+  AGGREGATE raw   : median=-6.2%  mean=-5.9%
+  AGGREGATE fused : median=-2.3%  mean=-2.3%
+  AGGREGATE gt_b  : median=-7.2%  mean=-6.3%

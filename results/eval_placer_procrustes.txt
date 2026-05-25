@@ -1,0 +1,85 @@
+ WARN The package `fsspec==2026.2.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.3.0` does not have an extra named `http`
+/users/tnanni/ghost/scripts/eval_placer_trans.py:32: UserWarning: A NumPy version >=1.26.4 and <2.7.0 is required for this version of SciPy (detected version 1.26.1)
+  from scipy.spatial.transform import Rotation as SciR
+
+=================================================================
+Scene: BBQ_001_guitar
+=================================================================
+  Scale (pred betas): 4.2931 m/VGGT-unit
+
+  [Hip midpoint (baseline)]
+    pid 1: N= 373  median=0.424m  mean=0.449m  <0.5m= 75.1%
+    TOTAL: N= 373  median=0.424m  mean=0.449m  <0.5m= 75.1%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.307m  y=-0.093m  z=+0.141m
+
+  [PnP (main)]
+    pid 1: N= 373  median=0.290m  mean=0.370m  <0.5m= 79.4%
+    TOTAL: N= 373  median=0.290m  mean=0.370m  <0.5m= 79.4%  <1.0m= 95.2%
+    Axis bias (pred−GT):  x=-0.119m  y=-0.101m  z=+0.007m
+
+  [Procrustes depth cam-0 (pred pose)]
+    pid 1: N= 373  median=0.211m  mean=0.285m  <0.5m= 87.1%
+    TOTAL: N= 373  median=0.211m  mean=0.285m  <0.5m= 87.1%  <1.0m= 98.9%
+    Axis bias (pred−GT):  x=-0.094m  y=-0.098m  z=-0.193m
+
+  [Procrustes depth cam-0 (GT pose)]
+    pid 1: N= 373  median=0.210m  mean=0.282m  <0.5m= 87.1%
+    TOTAL: N= 373  median=0.210m  mean=0.282m  <0.5m= 87.1%  <1.0m= 98.7%
+    Axis bias (pred−GT):  x=-0.104m  y=-0.063m  z=-0.199m
+
+  [Procrustes DLT all-cams (pred pose)]
+    pid 1: N= 373  median=0.205m  mean=0.260m  <0.5m= 90.6%
+    TOTAL: N= 373  median=0.205m  mean=0.260m  <0.5m= 90.6%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.065m  y=-0.105m  z=+0.033m
+
+  [Procrustes DLT all-cams (GT pose)]
+    pid 1: N= 373  median=0.184m  mean=0.245m  <0.5m= 90.3%
+    TOTAL: N= 373  median=0.184m  mean=0.245m  <0.5m= 90.3%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.079m  y=-0.067m  z=+0.025m
+
+  [Oracle: GT cams + GT pose (keypoint noise only)]
+    pid 1: N= 373  median=0.026m  mean=0.025m  <0.5m=100.0%
+    TOTAL: N= 373  median=0.026m  mean=0.025m  <0.5m=100.0%  <1.0m=100.0%
+    Axis bias (pred−GT):  x=-0.017m  y=-0.005m  z=+0.008m
+
+  [Global orient — triangulation]
+    pid 1: N= 373  median=42.6°  mean=36.4°  <30°= 22.3%  <60°=100.0%
+    TOTAL: N= 373  median=42.6°  mean=36.4°  <30°= 22.3%  <60°=100.0%
+
+  [Global orient — PnP rvec]
+    pid 1: N= 373  median=10.6°  mean=11.1°  <30°=100.0%  <60°=100.0%
+    TOTAL: N= 373  median=10.6°  mean=11.1°  <30°=100.0%  <60°=100.0%
+
+  [Global orient — Procrustes depth cam-0]
+    pid 1: N= 373  median=20.3°  mean=20.2°  <30°= 97.9%  <60°= 98.9%
+    TOTAL: N= 373  median=20.3°  mean=20.2°  <30°= 97.9%  <60°= 98.9%
+
+  [Global orient — Procrustes DLT all cams (pred pose)]
+    pid 1: N= 373  median=15.1°  mean=13.8°  <30°=100.0%  <60°=100.0%
+    TOTAL: N= 373  median=15.1°  mean=13.8°  <30°=100.0%  <60°=100.0%
+
+  [Global orient — Procrustes depth cam-0 (GT pose)]
+    pid 1: N= 373  median=8.1°  mean=9.7°  <30°= 98.1%  <60°= 99.2%
+    TOTAL: N= 373  median=8.1°  mean=9.7°  <30°= 98.1%  <60°= 99.2%
+
+  [Global orient — Procrustes DLT all cams (GT pose)]
+    pid 1: N= 373  median=3.5°  mean=3.3°  <30°=100.0%  <60°=100.0%
+    TOTAL: N= 373  median=3.5°  mean=3.3°  <30°=100.0%  <60°=100.0%
+
+  [Global orient — Oracle: GT cams + GT pose]
+    pid 1: N= 373  median=2.3°  mean=2.2°  <30°=100.0%  <60°=100.0%
+    TOTAL: N= 373  median=2.3°  mean=2.2°  <30°=100.0%  <60°=100.0%
+
+  [Camera diagnostics: VGGT vs GT]
+   cam   rot_err(°)    t_err(m)    Δfx(%)    Δcx(px)    Δcy(px)
+  ─────────────────────────────────────────────────────────────
+     0         0.00      0.0000      +1.4%        +39        +11
+     1         1.56      0.1594      -0.7%         -4        +32
+     2         0.87      0.1697      -1.0%        +23        +14
+     3         1.37      0.2455      +0.2%         +9        +64
+     4         1.74      0.2728      +0.3%        -26        +16
+     5         1.55      0.2624      -0.4%        +30         +9
+     6         2.04      0.2580      -1.5%        -29         +5
+     7         1.07      0.2380      -1.0%        +23         +5
+
