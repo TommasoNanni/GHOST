@@ -2,6 +2,7 @@
 channels = ["conda-forge", "nvidia"]
 platforms = ["linux-64", "linux-aarch64"]
 name = "ghost"
+conda-pypi-map = { "conda-forge" = "/capstor/scratch/cscs/tnanni/pixi_cache/compressed_mapping.json" }
 
 [system-requirements]
 cuda = "12.6"
@@ -26,12 +27,19 @@ gxx = ">=9"
 cuda-toolkit = "12.6.*"
 einops = ">=0.8.2,<0.9"
 safetensors = ">=0.7.0,<0.8"
+pango = ">=1.56.4,<2"
+ffmpeg = ">=4.4.2,<9"
+manimpango = ">=0.6.0,<0.7"
+cairo = ">=1.18.4,<2"
+pycairo = ">=1.29.0,<2"
+xorg-libx11 = "*"
+xorg-xorgproto = "*"
 
 [pypi-options]
 # SAM-2 and groundingdino import torch at build time; build them inside the
 # conda env (where conda's torch is already present) rather than in isolation.
 no-build-isolation = ["groundingdino", "SAM-2", "detectron2"]
-dependency-overrides = { iopath = ">=0.1.7" }
+dependency-overrides = { iopath = ">=0.1.7", pyopengl = ">=3.1.0" }
 
 
 [pypi-dependencies]
@@ -53,6 +61,7 @@ iopath = ">=0.1.7"
 smplx = ">=0.1.28, <0.2"
 pytorch-lightning = ">=2.6.1, <3"
 pyrender = ">=0.1.45"
+pyopengl = ">=3.1.0"
 yacs = ">=0.1.8, <0.2"
 tyro = ">=0.9.0"
 viser = ">=0.2.0"
@@ -128,8 +137,8 @@ drjit = "*"
 
 [target.linux-aarch64.tasks]
 setup-cuda = "python -m pip install --force-reinstall 'torch==2.7.1+cu128' --index-url https://download.pytorch.org/whl/cu128 && python -m pip install --no-build-isolation 'git+https://github.com/facebookresearch/pytorch3d.git'"
-build-torchvision = "whldir=$(mktemp -d) && PATH=$CONDA_PREFIX/nvvm/bin:$CONDA_PREFIX/bin:$PATH FORCE_CUDA=1 CUDA_HOME=$CONDA_PREFIX/targets/sbsa-linux python -m pip wheel --no-build-isolation --no-cache-dir --no-deps -w $whldir 'git+https://github.com/pytorch/vision.git@v0.22.1' && unzip -o $whldir/torchvision-*.whl 'torchvision/*.so' -d $whldir/extracted && TV_DIR=$CONDA_PREFIX/lib/python3.12/site-packages/torchvision && for f in $whldir/extracted/torchvision/*.so; do cp --remove-destination $f $TV_DIR/; done && for f in $TV_DIR/_C.so $TV_DIR/image.so $TV_DIR/video_reader.so; do [ -f $f ] && patchelf --set-rpath \"\\$ORIGIN/../torch/lib:$CONDA_PREFIX/lib\" $f 2>/dev/null; done && echo 'torchvision CUDA .so files installed and patched'"
+build-torchvision = "bash build_torchvision_aarch64.sh"
 build-arrow = "mkdir -p /tmp/arrow_src /tmp/arrow_build /tmp/arrow_install && curl -sL https://github.com/apache/arrow/releases/download/apache-arrow-18.0.0/apache-arrow-18.0.0.tar.gz -o /tmp/arrow_src/arrow.tar.gz && tar xf /tmp/arrow_src/arrow.tar.gz -C /tmp/arrow_src --strip-components=1 && cmake -S /tmp/arrow_src/cpp -B /tmp/arrow_build --preset ninja-release-minimal -DARROW_BOOST_USE_SHARED=OFF -DARROW_BUILD_SHARED=OFF -DARROW_BUILD_STATIC=ON -DARROW_COMPUTE=OFF -DARROW_IPC=ON -DARROW_JEMALLOC=OFF -DARROW_MIMALLOC=OFF -DBOOST_SOURCE=BUNDLED -DCMAKE_INSTALL_PREFIX=/tmp/arrow_install -DCMAKE_INSTALL_LIBDIR=lib -Dxsimd_SOURCE=BUNDLED -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build /tmp/arrow_build -j$(nproc) && cmake --install /tmp/arrow_build"
 build-rerun-sdk = "curl -sL https://github.com/rerun-io/rerun/releases/download/0.28.2/rerun_cpp_sdk-0.28.2-multiplatform.zip -o /tmp/rerun_cpp_sdk.zip && mkdir -p /tmp/rerun_sdk_src /tmp/rerun_sdk_build /tmp/rerun_sdk_install && unzip -o /tmp/rerun_cpp_sdk.zip -d /tmp/rerun_sdk_src && cmake -S /tmp/rerun_sdk_src/rerun_cpp_sdk -B /tmp/rerun_sdk_build -DRERUN_DOWNLOAD_AND_BUILD_ARROW=OFF -DRERUN_ARROW_LINK_SHARED=OFF -DArrow_DIR=/tmp/arrow_install/lib/cmake/Arrow -DCMAKE_INSTALL_PREFIX=/tmp/rerun_sdk_install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build /tmp/rerun_sdk_build -j$(nproc) && cmake --install /tmp/rerun_sdk_build"
-install-pymomentum = "ln -sf $CONDA_PREFIX/share/eigen3 $CONDA_PREFIX/share/Eigen3 && ln -sf $CONDA_PREFIX/targets/sbsa-linux/lib/libnvToolsExt.so.1 $CONDA_PREFIX/targets/sbsa-linux/lib/libnvToolsExt.so && echo '#pragma once' > $CONDA_PREFIX/targets/sbsa-linux/include/nvToolsExt.h && CMAKE_ARGS=\"$CMAKE_ARGS -DMOMENTUM_BUILD_RENDERER=OFF -DMOMENTUM_BUILD_TESTING=OFF -DMOMENTUM_USE_SYSTEM_RERUN_CPP_SDK=ON -Drerun_sdk_DIR=/tmp/rerun_sdk_install/lib/cmake/rerun_sdk -DArrow_DIR=/tmp/arrow_install/lib/cmake/Arrow -DCMAKE_CUDA_COMPILER=$CONDA_PREFIX/bin/nvcc -DCUDA_TOOLKIT_ROOT_DIR=$CONDA_PREFIX/targets/sbsa-linux -DCUDAToolkit_ROOT=$CONDA_PREFIX/targets/sbsa-linux\" CXXFLAGS=\"$CXXFLAGS -fsigned-char\" python -m pip install --no-build-isolation --no-cache-dir 'pymomentum @ git+https://github.com/facebookresearch/momentum.git' && PYMOMENTUM_DIR=$CONDA_PREFIX/lib/python3.12/site-packages/pymomentum && for f in $PYMOMENTUM_DIR/*.so; do patchelf --set-rpath \"\\$ORIGIN/../torch/lib:$CONDA_PREFIX/lib\" \"$f\" 2>/dev/null; done"
+install-pymomentum = "bash install_pymomentum_aarch64.sh"
 install-decord = "tmpdir=$(mktemp -d) && git clone --recursive https://github.com/dmlc/decord.git $tmpdir && mkdir -p $tmpdir/build && cmake -S $tmpdir -B $tmpdir/build -DUSE_CUDA=0 -DCMAKE_BUILD_TYPE=Release && make -C $tmpdir/build -j$(nproc) && python -m pip install $tmpdir/python"

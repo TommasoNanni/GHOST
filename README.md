@@ -45,20 +45,34 @@ CONDA_OVERRIDE_CUDA=12.6 pixi run install-hbp
 
 #### aarch64 (e.g. CSCS Alps cluster)
 
-`pymomentum` and `decord` have no aarch64 binary wheels and must be built from source. Two intermediate C++ libraries (Apache Arrow and the Rerun C++ SDK) must be compiled first because the default pymomentum build chain tries to build them inside a temporary directory in a way that fails on aarch64 with CMake 4.x.
+`pymomentum`, `torchvision` (CUDA ops), and `decord` have no aarch64 binary wheels and must be built from source. Two intermediate C++ libraries (Apache Arrow and the Rerun C++ SDK) must be compiled first as build dependencies for pymomentum.
 
 Run the following sequence **after** `pixi install` and `setup-cuda`:
 
 ```bash
-CONDA_OVERRIDE_CUDA=12.6 pixi run build-arrow        # ~5 min  — Arrow 18 static lib (no mimalloc)
-CONDA_OVERRIDE_CUDA=12.6 pixi run build-rerun-sdk    # ~2 min  — Rerun C++ SDK using that Arrow
+CONDA_OVERRIDE_CUDA=12.6 pixi run build-arrow        # ~5 min  — Arrow 18 static lib
+CONDA_OVERRIDE_CUDA=12.6 pixi run build-rerun-sdk    # ~2 min  — Rerun C++ SDK
 CONDA_OVERRIDE_CUDA=12.6 pixi run install-pymomentum # ~20 min — compiles ~550 C++ files
+CONDA_OVERRIDE_CUDA=12.6 pixi run build-torchvision  # ~30 min — torchvision CUDA .so files
 CONDA_OVERRIDE_CUDA=12.6 pixi run install-decord     # ~5 min  — video decoder from source
+cd vggt-omega && pixi run python -m pip install -e . && cd ..
+
+# DROID-SLAM CUDA extensions (lietorch, pytorch_scatter, droid_backends)
+CONDA_PREFIX=.pixi/envs/default
+PATH=$CONDA_PREFIX/nvvm/bin:$CONDA_PREFIX/bin:$PATH FORCE_CUDA=1 CUDA_HOME=$CONDA_PREFIX/targets/sbsa-linux \
+    $CONDA_PREFIX/bin/python -m pip install --no-build-isolation DROID-SLAM/thirdparty/lietorch
+PATH=$CONDA_PREFIX/nvvm/bin:$CONDA_PREFIX/bin:$PATH FORCE_CUDA=1 CUDA_HOME=$CONDA_PREFIX/targets/sbsa-linux \
+    $CONDA_PREFIX/bin/python -m pip install --no-build-isolation DROID-SLAM/thirdparty/pytorch_scatter
+cd DROID-SLAM && PATH=$CONDA_PREFIX/nvvm/bin:$CONDA_PREFIX/bin:$PATH FORCE_CUDA=1 CUDA_HOME=$CONDA_PREFIX/targets/sbsa-linux \
+    $CONDA_PREFIX/bin/python -m pip install --no-build-isolation -e . && cd ..
 ```
 
-**Note:** `build-arrow` and `build-rerun-sdk` write intermediate files to `/tmp`, which is wiped on reboot. If `import pymomentum` breaks after a reboot, re-run all four steps above — they are fully idempotent.
-
-Also note that `import torch` must appear before `import pymomentum` in any script (the conda environment contains a CPU-only `libc10.so` that would otherwise be loaded first). This is already the case everywhere in the ghost pipeline.
+**Notes:**
+- `build-arrow` and `build-rerun-sdk` write to `/tmp`, which is wiped on reboot. Re-run them before `install-pymomentum` if the node reboots.
+- `pymomentum` is installed from [TommasoNanni/momentum@aarch64-no-rasterizer](https://github.com/TommasoNanni/momentum/tree/aarch64-no-rasterizer), a fork that gates the drjit-based rasterizer behind a cmake flag (drjit 1.3.x removed the API it uses).
+- `build-torchvision` and `install-pymomentum` internally call bash scripts (`build_torchvision_aarch64.sh`, `install_pymomentum_aarch64.sh`) to work around pixi's lack of `for` loop support in task definitions.
+- `import torch` must appear before `import pymomentum` in any script (the conda env contains a CPU-only `libc10.so` that gets loaded first otherwise). This is already the case everywhere in the ghost pipeline.
+- SLURM scripts use `#!/bin/bash -l` so they source `~/.bash_profile` → `~/.bashrc`, making pixi available on compute nodes without manual PATH setup.
 
 This project uses Python 3.12 and PyTorch 2.7.1 with CUDA 12.8 support.
 
