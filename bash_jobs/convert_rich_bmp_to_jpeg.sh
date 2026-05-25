@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=rich_bmp2jpg
 #SBATCH --account=ls_polle
 #SBATCH --output=/cluster/scratch/tnanni/rich_bmp2jpg_%j.log

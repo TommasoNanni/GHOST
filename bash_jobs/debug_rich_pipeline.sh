@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --time=4:00:00
 #SBATCH --account=a144
 #SBATCH --ntasks=1

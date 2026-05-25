@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --gpus-per-node=4
-#SBATCH --job-name=rich_vggt_pipeline
+#SBATCH --job-name=rich_pipeline_v3
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
@@ -21,7 +21,7 @@ export HF_HUB_OFFLINE=1
 ulimit -c 0  # disable core dumps — they fill up home quota
 
 # Mount the test-set SquashFS archive so it looks like a normal directory.
-SQSH=/capstor/scratch/cscs/tnanni/datasets/rich/test_dataset.sqsh
+SQSH=/capstor/scratch/cscs/tnanni/datasets/rich/train_dataset.sqsh
 MOUNT=/tmp/rich_train
 mkdir -p "$MOUNT"
 squashfuse "$SQSH" "$MOUNT"
@@ -39,7 +39,7 @@ echo "Node:         $SLURMD_NODENAME"
 echo "Start:        $(date)"
 echo ""
 
-srun pixi run python -m scripts.rich_vggt_pipeline
+srun pixi run python -m scripts.rich_pipeline_v3
 
 echo ""
 echo "Done: $(date)"

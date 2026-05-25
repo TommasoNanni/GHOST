@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --time=1:30:00
 #SBATCH --account=a0185
 #SBATCH --nodes=1

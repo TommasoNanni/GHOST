@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=rich_dl_scratch
 #SBATCH --account=a144
 #SBATCH --nodes=1

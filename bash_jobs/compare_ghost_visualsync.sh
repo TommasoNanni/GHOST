@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --time=8:00:00
 #SBATCH --account=ls_polle
 #SBATCH --ntasks=1

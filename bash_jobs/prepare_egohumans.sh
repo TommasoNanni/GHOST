@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --partition=normal
 #SBATCH --time=06:00:00
 #SBATCH --account=a144

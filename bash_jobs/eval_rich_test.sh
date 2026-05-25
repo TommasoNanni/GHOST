@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=eval_rich_test
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=eval_placer
 #SBATCH --output=logs/eval_placer_%j.out
 #SBATCH --error=logs/eval_placer_%j.err
@@ -14,10 +14,10 @@
 cd /users/tnanni/ghost
 
 pixi run python scripts/eval_placer_trans.py \
-    --scene_root  /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich11_segmentation_test \
+    --scene_root  /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train \
     --rich_root   /capstor/scratch/cscs/tnanni/datasets/rich \
     --smplx_model body_models/SMPLX_NEUTRAL.pkl \
-    --max_scenes  10 \
+    --max_scenes  2 \
     --checkpoint  checkpoints/fusion_module/best.pt \
     --device      cuda \
     > results/eval_placer_10scenes.txt 2>&1
