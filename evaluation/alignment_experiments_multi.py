@@ -19,6 +19,7 @@ Usage (GPU node):
 from __future__ import annotations
 
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -29,9 +30,9 @@ import numpy as np
 import torch
 
 from synchronize_videos.synchronizer import Synchronizer
-from utilities.body_data import load_person_smplx_pose
+from utilities.body_data import load_person_smplx_pose, load_person_smplx_joints
 
-VERBOSE     = False    # set True to see per-person DTW offsets and shift distributions
+VERBOSE     = True     # set True to see per-person DTW offsets and shift distributions
 SCENES_ROOT = Path("/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich11_segmentation_test")
 # Scene folder names (relative to SCENES_ROOT) to skip entirely.
 # Add scenes here when you know cross-view re-ID is bad on them.
@@ -40,12 +41,14 @@ SKIP_SCENES: list[str] = [
 ]
 # When non-empty, only these scenes are evaluated (overrides SKIP_SCENES).
 # Useful for focused diagnosis on specific failing cases.
-ONLY_SCENES: list[str] = []
-# "Pavallion_000_plankjack",       # MAE 174 — periodic motion, false harmonics
-# "ParkingLot2_014_phonetalk2",    # MAE 173 — static, flat cost surface
-# "ParkingLot2_008_phonetalk1",    # MAE 146 — static, flat cost surface
-# "ParkingLot2_014_takingphotos2", # MAE  36 — low-motion
-# "ParkingLot1_005_pushup3",       # MAE  26 — periodic
+ONLY_SCENES: list[str] = [
+    # "BBQ_001_juggle",              # MAE=35.00 — periodic (juggle)
+    # "ParkingLot1_005_pushup3",     # MAE=40.12 — very periodic (pushup)
+    # "ParkingLot1_002_overfence2",  # MAE=18.62 — transient motion, unclear why bad
+    # "Pavallion_002_plankjack",     # MAE=5.94  — mixed: some pairs fine, some badly wrong
+    # "Pavallion_003_018_tossball",  # MAE=45.53 — catastrophic (brief motion in long static)
+    # "LectureHall_018_wipingchairs1",  # MAE=0.29 — control (should be perfect)
+]
 # Per-scene cameras to exclude (e.g. track-stealing artefacts).
 # The scene is still evaluated with its remaining cameras.
 SKIP_CAMERAS: dict[str, list[str]] = {
@@ -53,8 +56,8 @@ SKIP_CAMERAS: dict[str, list[str]] = {
     "ParkingLot2_008_pushup2": ["cam_03"],
     "ParkingLot2_014_takingphotos2": ["cam_01"],
 }
-N_TRIALS  = 10     # random-shift trials per scene
-MAX_SHIFT = 30    # maximum absolute shift (frames)
+N_TRIALS  = 10      # random-shift trials per scene (set to 10 for full runs)
+MAX_SHIFT = 30     # maximum absolute shift (frames) — matches paper setting
 SEED      = 42
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -116,6 +119,38 @@ def load_scene(
     return cam_data
 
 
+def load_scene_joints(
+    scene_dir: Path,
+    exclude_cameras: list[str] | None = None,
+) -> dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]]:
+    """Same as load_scene but loads SMPL-X FK joint positions instead of rotations.
+
+    Returns cam_data with (T, 51, 3) root-relative positions and (T, 51) confidence.
+    """
+    exclude_cameras = exclude_cameras or []
+    cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]] = {}
+
+    for cam_dir in sorted(scene_dir.iterdir()):
+        body_dir = cam_dir / "body_data"
+        if not cam_dir.is_dir() or not body_dir.exists():
+            continue
+        if cam_dir.name in exclude_cameras:
+            continue
+
+        persons: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
+        for npz_path in sorted(body_dir.glob("person_*.npz")):
+            pid = int(npz_path.stem.split("_")[1])
+            result = load_person_smplx_joints(npz_path)
+            if result is None:
+                continue
+            persons[pid] = result
+
+        if persons:
+            cam_data[cam_dir.name] = persons
+
+    return cam_data
+
+
 def common_persons(cam_data: dict[str, dict[int, tuple]]) -> list[int]:
     """Return person IDs present in every camera."""
     sets = [set(persons.keys()) for persons in cam_data.values()]
@@ -165,6 +200,61 @@ def apply_shifts(
     return joints_list, confs_list
 
 
+def _analyze_distributional_pair(
+    cam_i: str,
+    cam_j: str,
+    log_p: torch.Tensor,
+    true_k: int,
+) -> None:
+    """Log diagnostic info for one pairwise log-distribution vs the true offset."""
+    n  = len(log_p)
+    S  = (n - 1) // 2
+    finite = log_p.isfinite()
+    n_valid = int(finite.sum().item())
+
+    probs = log_p.exp()
+    probs[~finite] = 0.0
+
+    # top-5 peaks
+    top_k   = min(5, n_valid)
+    top_vals, top_idx = probs.topk(top_k)
+    map_est = int(top_idx[0].item()) - S
+    peaks_str = "  ".join(
+        f"k={int(top_idx[i].item()) - S:+d}(p={top_vals[i].item():.3f})"
+        for i in range(top_k)
+    )
+
+    # normalised entropy
+    p_fin = log_p[finite].exp()
+    entropy = -(p_fin * log_p[finite]).sum().item()
+    norm_entropy = entropy / math.log(n_valid) if n_valid > 1 else 0.0
+
+    # probability ratio between 1st and 2nd peak
+    gap_str = f"{top_vals[0].item() / max(top_vals[1].item(), 1e-9):.2f}x" if top_k > 1 else "∞"
+
+    # true offset rank and cost-scale analysis
+    # With adaptive temperature, log_p is in normalised units (std(log_p) ≈ 1).
+    # Report log-prob advantage directly instead of back-converting to radians.
+    ki_true = int(true_k) + S
+    if 0 <= ki_true < n and finite[ki_true]:
+        true_prob = probs[ki_true].item()
+        rank = int((probs > true_prob).sum().item()) + 1
+        logp_adv = log_p[int(top_idx[0].item())].item() - log_p[ki_true].item()
+        true_str = f"k={true_k:+d}(rank=#{rank}  logp_adv={logp_adv:+.3f})"
+    else:
+        true_str = f"k={true_k:+d}(no signal)"
+
+    # std(log_p) ≈ 1/temperature_multiplier by construction with adaptive temp
+    cost_std = log_p[finite].float().std().item()
+
+    flag = " <-- WRONG" if abs(map_est - true_k) > 1.5 else ""
+    logger.info(
+        f"    ({cam_i}→{cam_j}): MAP={map_est:+d}  true={true_k:+d}"
+        f"  logp_std={cost_std:.3f}  entropy={norm_entropy:.3f}  gap={gap_str}{flag}"
+        f"\n      peaks: [{peaks_str}]  true: [{true_str}]"
+    )
+
+
 def run_trial(
     cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]],
     pids: list[int],
@@ -191,16 +281,30 @@ def run_trial(
     logger.info("  Pairwise offset matrix (estimated vs. true):")
     for i in range(K):
         for j in range(i + 1, K):
-            est_pair  = offset_mat[i, j].item()
-            true_pair = float(true_shifts[cam_ids[j]] - true_shifts[cam_ids[i]])
-            err_pair  = abs(est_pair - true_pair)
-            w         = weights[i, j].item()
-            flag = " <-- WRONG" if err_pair > 1.5 else ""
-            logger.info(
-                f"    ({cam_ids[i]} → {cam_ids[j]}): "
-                f"estimated={est_pair:+.1f}  true={true_pair:+.0f}  "
-                f"pairwise_err={err_pair:.1f}  weight={w:.3f}{flag}"
-            )
+            true_pair = int(true_shifts[cam_ids[j]] - true_shifts[cam_ids[i]])
+            if isinstance(offset_mat, torch.Tensor):
+                # dtw / cross_corr: scalar K×K tensor
+                est_pair = offset_mat[i, j].item()
+                err_pair = abs(est_pair - true_pair)
+                flag = " <-- WRONG" if err_pair > 1.5 else ""
+                logger.info(
+                    f"    ({cam_ids[i]} → {cam_ids[j]}): "
+                    f"estimated={est_pair:+.1f}  true={true_pair:+d}  "
+                    f"pairwise_err={err_pair:.1f}  weight={weights[i, j].item():.3f}{flag}"
+                )
+            elif isinstance(offset_mat[i][j], torch.Tensor):
+                # distributional: full per-pair analysis
+                _analyze_distributional_pair(cam_ids[i], cam_ids[j], offset_mat[i][j], true_pair)
+            else:
+                # multi_cross_corr: list of (offset, cost) candidates
+                est_pair = float(offset_mat[i][j][0][0]) if offset_mat[i][j] else 0.0
+                err_pair = abs(est_pair - true_pair)
+                flag = " <-- WRONG" if err_pair > 1.5 else ""
+                logger.info(
+                    f"    ({cam_ids[i]} → {cam_ids[j]}): "
+                    f"estimated={est_pair:+.1f}  true={true_pair:+d}  "
+                    f"pairwise_err={err_pair:.1f}  weight=N/A{flag}"
+                )
 
     errors = (estimated.cpu() - true_t).abs()
     mae    = errors.mean().item()
@@ -222,11 +326,14 @@ def run_scene(
     scene_dir: Path,
     sync: Synchronizer,
     rng: np.random.Generator,
+    sync_alt: Synchronizer | None = None,
 ) -> dict | None:
     """Run N_TRIALS experiments for one scene.
 
-    Returns a summary dict, or None if the scene is not usable
-    (fewer than 2 cameras, no common persons, or missing pose data).
+    If sync_alt is provided, also runs trials with the alternative synchronizer
+    on the same random shifts (joints_position method) and reports both side-by-side.
+
+    Returns a summary dict, or None if the scene is not usable.
     """
     logger.info(f"\n{'=' * 60}")
     logger.info(f"Scene: {scene_dir.name}")
@@ -239,6 +346,8 @@ def run_scene(
         logger.warning(f"  Skipping: need ≥2 cameras, found {len(cam_data)}")
         return None
 
+    cam_data_joints = load_scene_joints(scene_dir, exclude_cameras=exclude_cams) if sync_alt else {}
+
     pids = common_persons(cam_data)
     if not pids:
         logger.warning("  Skipping: no person ID common across all cameras — run cross-view ReID first.")
@@ -248,7 +357,7 @@ def run_scene(
     logger.info(f"  Cameras: {cam_ids}")
     logger.info(f"  Common persons: {pids}")
 
-    results = []
+    results, results_alt = [], []
     for trial in range(N_TRIALS):
         raw_shifts  = [0] + rng.integers(-MAX_SHIFT, MAX_SHIFT + 1, size=len(cam_ids) - 1).tolist()
         true_shifts = {cam_id: int(s) for cam_id, s in zip(cam_ids, raw_shifts)}
@@ -261,6 +370,13 @@ def run_scene(
             logger.warning(f"  Trial {trial + 1} skipped (insufficient frames after shift)")
             continue
         results.append(result)
+
+        if sync_alt and cam_data_joints:
+            result_alt = run_trial(cam_data_joints, pids, true_shifts, end_cuts, sync_alt)
+            if result_alt is not None:
+                results_alt.append(result_alt)
+                logger.info(f"     [joints_pos] MAE={result_alt['mae']:.2f}  "
+                            f"within-1={result_alt['within_1']*100:.0f}%")
 
         for cam_id, true_t, est, err in zip(cam_ids, result["true_times"], result["estimated"], result["errors"]):
             logger.info(f"     {cam_id}: true={true_t:+.0f}  "
@@ -290,6 +406,10 @@ def run_scene(
     logger.info(f"    Within 0.5fr    {np.mean(all_within_half)*100:.1f}%")
     logger.info(f"    Within 1fr      {np.mean(all_within_1)*100:.1f}%")
     logger.info(f"    Within 2fr      {np.mean(all_within_2)*100:.1f}%")
+    if results_alt:
+        alt_mae = [r["mae"] for r in results_alt]
+        alt_w1  = [r["within_1"] for r in results_alt]
+        logger.info(f"    [joints_pos] MAE mean={np.mean(alt_mae):.2f}  Within-1={np.mean(alt_w1)*100:.1f}%")
 
     return {
         "scene":           scene_dir.name,
@@ -304,6 +424,8 @@ def run_scene(
         "within_1":        float(np.mean(all_within_1)),
         "within_2":        float(np.mean(all_within_2)),
         "trial_results":   results,
+        "mae_mean_alt":    float(np.mean([r["mae"] for r in results_alt])) if results_alt else None,
+        "within_1_alt":    float(np.mean([r["within_1"] for r in results_alt])) if results_alt else None,
     }
 
 if __name__ == "__main__":
@@ -326,12 +448,13 @@ if __name__ == "__main__":
 
     logger.info(f"Found {len(scene_dirs)} scene(s): {[d.name for d in scene_dirs]}")
 
-    sync = Synchronizer(method="cross_corr", device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
+    sync      = Synchronizer(method="dtw", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
+    sync_alt  = Synchronizer(method="joints_position", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=False)
     rng  = np.random.default_rng(SEED)
 
     scene_summaries = []
     for scene_dir in scene_dirs:
-        summary = run_scene(scene_dir, sync, rng)
+        summary = run_scene(scene_dir, sync, rng, sync_alt=sync_alt)
         if summary is not None:
             scene_summaries.append(summary)
 
@@ -351,25 +474,38 @@ if __name__ == "__main__":
     logger.info("")
 
     # ── per-scene table (frames) ──────────────────────────────────────────
+    has_alt = any(s.get("mae_mean_alt") is not None for s in scene_summaries)
     hdr = f"  {'Scene':<35}  {'Cams':>4}  {'Pers':>4}  {'Spread':>7}  {'MAE':>6}  {'MedAE':>6}  {'W-0.5':>7}  {'W-1':>7}  {'W-2':>7}"
+    if has_alt:
+        hdr += f"  {'JP-MAE':>7}  {'JP-W1':>7}"
     sep = f"  {'-'*35}  {'-'*4}  {'-'*4}  {'-'*7}  {'-'*6}  {'-'*6}  {'-'*7}  {'-'*7}  {'-'*7}"
+    if has_alt:
+        sep += f"  {'-'*7}  {'-'*7}"
     logger.info("  All values in frames")
     logger.info(hdr)
     logger.info(sep)
     for s in scene_summaries:
-        logger.info(
+        row = (
             f"  {s['scene']:<35}  {s['n_cameras']:>4}  {s['n_persons']:>4}  "
             f"{s['spread_mean']:>7.1f}  "
             f"{s['mae_mean']:>6.2f}  {s['median_ae_mean']:>6.2f}  "
             f"{s['within_half']*100:>6.1f}%  {s['within_1']*100:>6.1f}%  {s['within_2']*100:>6.1f}%"
         )
+        if has_alt and s.get("mae_mean_alt") is not None:
+            row += f"  {s['mae_mean_alt']:>7.2f}  {s['within_1_alt']*100:>6.1f}%"
+        logger.info(row)
     logger.info(sep)
-    logger.info(
+    alt_maes = [s["mae_mean_alt"] for s in scene_summaries if s.get("mae_mean_alt") is not None]
+    alt_w1s  = [s["within_1_alt"] for s in scene_summaries if s.get("within_1_alt") is not None]
+    mean_row = (
         f"  {'MEAN':<35}  {'':>4}  {'':>4}  "
         f"{np.mean(all_spread):>7.1f}  "
         f"{np.mean(all_mae):>6.2f}  {np.mean(all_median_ae):>6.2f}  "
         f"{np.mean(all_within_half)*100:>6.1f}%  {np.mean(all_within_1)*100:>6.1f}%  {np.mean(all_within_2)*100:>6.1f}%"
     )
+    if has_alt and alt_maes:
+        mean_row += f"  {np.mean(alt_maes):>7.2f}  {np.mean(alt_w1s)*100:>6.1f}%"
+    logger.info(mean_row)
 
     # ── ms conversion ─────────────────────────────────────────────────────
     for fps in [15, 30]:
