@@ -65,6 +65,7 @@ def _cleanup_ddp() -> None:
 
 SCENES_ROOT = Path(CONFIG.data.output_directory)
 
+
 SKIP_SCENES: list[str] = [
     "Pavallion_013_plankjack",
 ]
@@ -109,27 +110,34 @@ def _split_by_location(scenes: list[Path], num_val: int) -> tuple[list[Path], li
         loc = s.name.split("_")[0]
         by_location[loc].append(s)
 
+    # One mandatory scene per location goes to train (alphabetically first).
+    # The rest are eligible for val via round-robin across locations.
     mandatory_train: list[Path] = []
-    pool: list[Path] = []
+    available: dict[str, list[Path]] = {}
     for loc in sorted(by_location):
         loc_scenes = sorted(by_location[loc], key=lambda s: s.name)
         mandatory_train.append(loc_scenes[0])
-        pool.extend(loc_scenes[1:])
+        available[loc] = loc_scenes[1:]  # sorted ascending; we pop from the end each round
 
-    pool = sorted(pool, key=lambda s: s.name)
+    locs = sorted(available)
+    val_scenes: list[Path] = []
+    while len(val_scenes) < num_val:
+        picked_any = False
+        for loc in locs:
+            if len(val_scenes) >= num_val:
+                break
+            if available[loc]:
+                val_scenes.append(available[loc].pop())
+                picked_any = True
+        if not picked_any:
+            logger.warning(
+                f"All location pools exhausted after {len(val_scenes)} val scenes "
+                f"(requested {num_val})."
+            )
+            break
 
-    if num_val > len(pool):
-        logger.warning(
-            f"NUM_VAL_SCENES={num_val} but only {len(pool)} scenes in pool. "
-            f"Using all {len(pool)} as val."
-        )
-        val_scenes   = pool
-        extra_train: list[Path] = []
-    else:
-        val_scenes  = pool[-num_val:]
-        extra_train = pool[:-num_val]
-
-    train_scenes = sorted(mandatory_train + extra_train, key=lambda s: s.name)
+    leftover = [s for loc in locs for s in available[loc]]
+    train_scenes = sorted(mandatory_train + leftover, key=lambda s: s.name)
     return train_scenes, val_scenes
 
 
@@ -230,7 +238,7 @@ def main():
         dropout=dropout,
         temporal_window=temporal_window,
     )
-    betas_aggregator = BetasAggregator(n_betas=10, hidden_dim=32)
+    betas_aggregator = BetasAggregator(n_betas=10, embedding_dim=64, num_inducing=4, num_heads=4, dropout=0.3, input_noise_std=0.5)
     model = FusionWithBetas(pose_module, betas_aggregator).to(device)
 
     if is_main:
@@ -244,7 +252,11 @@ def main():
         model = DDP(model, device_ids=[local_rank], find_unused_parameters=False)
 
     # ── Optimizer & scheduler ─────────────────────────────────────────────────
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    betas_params = set(betas_aggregator.parameters())
+    optimizer = torch.optim.Adam([
+        {"params": [p for p in model.parameters() if p not in betas_params]},
+        {"params": list(betas_params), "weight_decay": 1e-3},
+    ], lr=lr)
 
     if scheduler_name == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -268,7 +280,7 @@ def main():
     losses = {
         "pose":           (PoseMSELoss(),                        pose_mse_weight),
         "shape":          (ShapeMSELoss(),                       shape_mse_weight),
-        "joint_position": (JointPositionLoss(use_gt_betas=True), joint_position_weight),
+        "joint_position": (JointPositionLoss(use_gt_betas=False), joint_position_weight),
     }
 
     # ── Curriculum ────────────────────────────────────────────────────────────
@@ -308,10 +320,17 @@ def main():
             gt_pose_sub = targets["pose"][:, t_idx].float().cpu()          # (B, T', P, 55, 6)
             rot_gt = rotation_6d_to_matrix(gt_pose_sub.reshape(-1, 6)).reshape(B, len(t_idx), P, 55, 3, 3).numpy()
 
-            betas_np    = betas_out.float().cpu().numpy()                  # (B, P, 10)
-            gt_betas_np = targets["shape"][:, 0].float().cpu().numpy()    # (B, P, 10)  static
+            betas_np = betas_out.float().cpu().numpy()                     # (B, P, 10)
 
+            # Compute masked time-mean of GT betas — same reference as ShapeMSELoss.
             gt_valid = targets.get("gt_valid")
+            shape_gt = targets["shape"].float()                            # (B, T, P, 10)
+            if gt_valid is not None:
+                mask_f = gt_valid.float().unsqueeze(-1)                    # (B, T, P, 1)
+                count  = mask_f.sum(dim=1).clamp(min=1)                    # (B, P, 1)
+                gt_betas_mean = ((shape_gt * mask_f).sum(dim=1) / count).cpu().numpy()  # (B, P, 10)
+            else:
+                gt_betas_mean = shape_gt.mean(dim=1).cpu().numpy()        # (B, P, 10)
 
         for b in range(B):
             for t in range(len(t_idx)):
@@ -324,7 +343,10 @@ def main():
                     mc["RR-MPJRE"].update(rot_pred[b, t, p], rot_gt[b, t, p])
 
             for p in range(P):
-                mc["Betas-MSE"].update(betas_np[b, p], gt_betas_np[b, p])
+                # Only update if person has at least one valid GT frame.
+                if gt_valid is not None and not gt_valid[b, :, p].any():
+                    continue
+                mc["Betas-MSE"].update(betas_np[b, p], gt_betas_mean[b, p])
 
     # ── Resume checkpoint ─────────────────────────────────────────────────────
     resume_checkpoint = None

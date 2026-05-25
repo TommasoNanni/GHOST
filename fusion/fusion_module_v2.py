@@ -22,6 +22,7 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +411,7 @@ class PoseFusionModule(nn.Module):
                 joint_mask = joint_mask.unsqueeze(0)
 
         # Drop root joint if caller passes all 55 SMPL-X joints; root orientation
-        # is handled separately by BodyPlacer.estimate_global_orient.
+        # is handled separately by BodyPlacer.
         if pose.shape[-2] == 55:
             pose = pose[..., 1:, :]
             if joint_mask is not None:
@@ -502,12 +503,57 @@ class PoseFusionModule(nn.Module):
 # Shape estimation
 # ─────────────────────────────────────────────────────────────────────────────
 
-class BetasAggregator(nn.Module):
-    """Aggregate per-camera, per-frame betas into a single per-person estimate.
+class _MAB(nn.Module):
+    """Multihead Attention Block (Set Transformer, Lee et al. NeurIPS 2019).
 
-    SAM3D's shape regularizer causes systematic variance shrinkage (~0.4–0.6×
-    GT std, coefficient-specific).  A visibility-weighted mean + small MLP
-    corrects this without attention overhead.
+    X (queries) attend over Y (keys / values), pre-norm style.
+    Output shape equals X.
+    """
+
+    def __init__(self, embedding_dim: int, num_heads: int, dropout: float = 0.0):
+        super().__init__()
+        self.num_heads = num_heads
+        self.norm_q    = nn.LayerNorm(embedding_dim)
+        self.attn      = nn.MultiheadAttention(
+            embedding_dim, num_heads, dropout=dropout, batch_first=True,
+        )
+        self.norm_ff   = nn.LayerNorm(embedding_dim)
+        self.ff        = nn.Sequential(
+            nn.Linear(embedding_dim, 2 * embedding_dim),
+            nn.ReLU(),
+            nn.Linear(2 * embedding_dim, embedding_dim),
+        )
+
+    def forward(
+        self,
+        X: torch.Tensor,
+        Y: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        X         : (N, S_q, D)
+        Y         : (N, S_k, D)
+        attn_mask : (N*H, S_q, S_k) additive mask, or None
+        """
+        X = X + _safe_mha(self.attn, self.norm_q(X), Y, Y, attn_mask, self.num_heads)
+        X = X + self.ff(self.norm_ff(X))
+        return X
+
+
+class BetasAggregator(nn.Module):
+    """Aggregate per-camera per-frame betas into a single per-person estimate.
+
+    Architecture — Set Transformer ISAB + PMA (Lee et al. NeurIPS 2019):
+
+      1. Project  (T*K, 10) → (T*K, d)          [input_proj]
+      2. ISAB     (T*K, d)  → (T*K, d)          [m inducing points as bottleneck]
+           MAB(I, X) : inducing points query over input tokens  → (m, d)
+           MAB(X, H) : each token queries over compressed H     → (T*K, d)
+      3. PMA      (T*K, d)  → (1, d)            [learned seed S reads from tokens]
+      4. MLP      (d,)      → (10,)
+
+    Observations where the person is not visible are excluded via attention
+    masking; _safe_mha zeroes the output when every key is masked.
 
     Input
     -----
@@ -519,24 +565,90 @@ class BetasAggregator(nn.Module):
     betas_out   : (B, P, 10) — refined per-person betas (static per clip)
     """
 
-    def __init__(self, n_betas: int = 10, hidden_dim: int = 32):
+    def __init__(
+        self,
+        n_betas: int = 10,
+        embedding_dim: int = 64,
+        num_inducing: int = 16,
+        num_heads: int = 4,
+        dropout: float = 0.1,
+        input_noise_std: float = 0.3,
+    ):
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(n_betas, hidden_dim),
+        self.embedding_dim   = embedding_dim
+        self.num_heads       = num_heads
+        self.input_noise_std = input_noise_std
+
+        self.input_proj      = nn.Linear(n_betas, embedding_dim)
+        self.inducing_points = nn.Parameter(torch.randn(num_inducing, embedding_dim))
+
+        # ISAB: two MABs
+        self.mab_enc = _MAB(embedding_dim, num_heads, dropout)  # I attends over X
+        self.mab_dec = _MAB(embedding_dim, num_heads, dropout)  # X attends over H
+
+        # PMA: single learned seed reads from enriched tokens
+        self.seed    = nn.Parameter(torch.randn(1, embedding_dim))
+        self.mab_pma = _MAB(embedding_dim, num_heads, dropout)
+
+        self.output_norm = nn.LayerNorm(embedding_dim)
+        self.output_mlp  = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, n_betas),
+            nn.Linear(embedding_dim, n_betas),
         )
-        # Small-weight init on the last layer so the residual starts near zero
-        # but gradients still flow.  Bias is zeroed so the initial output is
-        # purely the mean_betas passthrough.
-        nn.init.xavier_uniform_(self.mlp[-1].weight, gain=0.01)
-        nn.init.zeros_(self.mlp[-1].bias)
+
+    @staticmethod
+    def _pad_to_attn_mask(
+        pad_mask: torch.Tensor,
+        S_q: int,
+        num_heads: int,
+    ) -> torch.Tensor:
+        """(N, S_k) bool pad mask (True = ignore) → (N*H, S_q, S_k) additive mask."""
+        N, S_k = pad_mask.shape
+        mask = torch.zeros(N, S_q, S_k, device=pad_mask.device)
+        mask.masked_fill_(pad_mask.unsqueeze(1), float('-inf'))
+        return mask.unsqueeze(1).expand(-1, num_heads, -1, -1).reshape(N * num_heads, S_q, S_k)
 
     def forward(self, shape: torch.Tensor, person_mask: torch.Tensor) -> torch.Tensor:
-        vis = person_mask.to(shape.dtype).unsqueeze(-1)       # (B, T, K, P, 1)
-        vis_sum = vis.sum(dim=(1, 2)).clamp(min=1e-8)         # (B, P, 1)
-        mean_betas = (shape * vis).sum(dim=(1, 2)) / vis_sum  # (B, P, 10)
-        return mean_betas + self.mlp(mean_betas)              # residual
+        B, T, K, P, _ = shape.shape
+        m  = self.inducing_points.shape[0]
+        S  = T * K
+        BP = B * P
+
+        # (B, T, K, P, 10) → (BP, S, 10): flatten T*K observations, merge B and P
+        tokens   = shape.permute(0, 3, 1, 2, 4).contiguous().reshape(BP, S, -1)
+        pad_mask = ~person_mask.bool().permute(0, 3, 1, 2).contiguous().reshape(BP, S)
+
+        if self.training and self.input_noise_std > 0:
+            noise = torch.randn_like(tokens) * self.input_noise_std
+            noise.masked_fill_(pad_mask.unsqueeze(-1), 0.0)  # don't corrupt masked slots
+            tokens = tokens + noise
+
+        tokens = self.input_proj(tokens)   # (BP, S, d)
+
+        # ── ISAB ─────────────────────────────────────────────────────────────
+        I = self.inducing_points.unsqueeze(0).expand(BP, -1, -1)   # (BP, m, d)
+
+        # MAB(I, X): inducing points query over input tokens; mask invalid keys
+        H = self.mab_enc(
+            I, tokens,
+            self._pad_to_attn_mask(pad_mask, m, self.num_heads),
+        )  # (BP, m, d)
+
+        # MAB(X, H): each token queries over the compressed H (no masking on H)
+        enriched = self.mab_dec(tokens, H)                          # (BP, S, d)
+        enriched = enriched.masked_fill(pad_mask.unsqueeze(-1), 0.0)
+
+        # ── PMA ──────────────────────────────────────────────────────────────
+        seed = self.seed.unsqueeze(0).expand(BP, -1, -1)            # (BP, 1, d)
+        out  = self.mab_pma(
+            seed, enriched,
+            self._pad_to_attn_mask(pad_mask, 1, self.num_heads),
+        )  # (BP, 1, d)
+
+        # ── Output ───────────────────────────────────────────────────────────
+        betas = self.output_mlp(self.output_norm(out.squeeze(1)))   # (BP, 10)
+        return betas.reshape(B, P, 10)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
