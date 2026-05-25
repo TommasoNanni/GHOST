@@ -60,7 +60,7 @@ from mhr.mhr import MHR
 from conversion import Conversion
 from preprocessing.confidence import ConfidenceEstimator
 from preprocessing.within_video_reidentifier import InVideoReidentifier
-from preprocessing.cross_view_reidentifier import CrossVideoReidentifier
+from preprocessing.cross_view_reid_v2 import CrossVideoReidentifierV2 as CrossVideoReidentifier
 
 
 class ParametersExtractor:
@@ -658,10 +658,8 @@ class ParametersExtractor:
                             val = val.detach().cpu().numpy()
                         params[key] = np.asarray(val, dtype=np.float32)
 
-                # MHR-based per-joint confidence for within-video ReID weighting.
-                # This is overridden by SMPL-X confidence in Pass 2, but we need
-                # it here so the reidentifier can weight occluded frames lower
-                # when deciding whether to merge interrupted SAM2 tracks.
+                # --- Per-joint confidence (MHR-based; overwritten by Pass 2 when converter present) ---
+                # Computed before ReID so the scalar mean can weight gallery entries.
                 kp3d = params.get("pred_keypoints_3d")
                 kp2d = params.get("pred_keypoints_2d")
                 cam_t = params.get("pred_cam_t")
@@ -697,7 +695,9 @@ class ParametersExtractor:
                             f"{frame_idx} person {person_id}: {_ce}"
                         )
                 elif kp3d is not None:
-                    params["pred_joint_confidence"] = np.ones(kp3d.shape[0], dtype=np.float32)
+                    params["pred_joint_confidence"] = np.ones(
+                        kp3d.shape[0], dtype=np.float32
+                    )
 
                 reid_confidence: float | None = None
                 _conf_arr = params.get("pred_joint_confidence")
@@ -1066,33 +1066,32 @@ class ParametersExtractor:
         )
 
     @staticmethod
-    def _create_converter(mhr_model_path: str, smplx_model_path: str):
+    def _create_converter(mhr_model_path: str | None, smplx_model_path: str | None):
         """Create and return a Conversion object."""
-        try:
-            _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            mhr_model = MHR.from_files(folder=Path(mhr_model_path), lod=1, device=_device)
-            _sp = Path(smplx_model_path)
-            _smplx_kwargs = (
-                {"model_path": str(_sp), "ext": _sp.suffix.lstrip(".")}
-                if _sp.is_file() else
-                {"model_path": smplx_model_path, "ext": "pkl"}
-            )
-            smplx_model = smplx.create(
-                **_smplx_kwargs,
-                model_type='smplx',
-                gender='neutral',
-                use_pca=False,
-                batch_size=1,
-            )
-            return Conversion(
-                mhr_model=mhr_model,
-                smpl_model=smplx_model,
-                method="pytorch",
-            )
-        except Exception as e:
-            import traceback as _tb
+        if not mhr_model_path or not smplx_model_path:
             raise RuntimeError(
-                f"Could not initialise SMPLX converter: {e}\n{_tb.format_exc()}"
-            ) from e
+                "mhr_model_path and smplx_model_path must both be set — "
+                "check configuration/config.yaml"
+            )
+        _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        mhr_model = MHR.from_files(folder=Path(mhr_model_path), lod=1, device=_device)
+        _sp = Path(smplx_model_path)
+        _smplx_kwargs = (
+            {"model_path": str(_sp), "ext": _sp.suffix.lstrip(".")}
+            if _sp.is_file() else
+            {"model_path": smplx_model_path, "ext": "pkl"}
+        )
+        smplx_model = smplx.create(
+            **_smplx_kwargs,
+            model_type='smplx',
+            gender='neutral',
+            use_pca=False,
+            batch_size=1,
+        )
+        return Conversion(
+            mhr_model=mhr_model,
+            smpl_model=smplx_model,
+            method="pytorch",
+        )
 
 
