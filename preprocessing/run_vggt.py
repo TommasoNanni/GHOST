@@ -3,7 +3,7 @@ VGGT camera + depth preprocessing for multi-camera synchronized scenes.
 
 Runs VGGT frame-by-frame on all available cameras and saves:
   - vggt_cameras.npz  : extrinsics, intrinsics, coordinate mapping info
-  - vggt_depth.npz    : depth maps and confidence at VGGT native resolution (518×518)
+  - vggt_depth.npz    : depth maps and confidence at VGGT-Omega output resolution
 
 Coordinate conventions
 ----------------------
@@ -16,19 +16,19 @@ world frame does not affect depth values.
 
 Querying depth at a body keypoint
 ----------------------------------
-VGGT runs on square-padded 518×518 images. The original image is first padded to
-square then resized. `original_coords[t, k] = [x1, y1, x2, y2]` records where the
-top-left (x1,y1) and bottom-right (x2,y2) corners of the original image land in
-518-space. To back-project a 2D keypoint (u_orig, v_orig) from original resolution:
+VGGT-Omega resizes images with aspect ratio preserved (no square padding).
+`original_coords[t, k] = [0, 0, W_vggt, H_vggt]`. To back-project a 2D keypoint
+(u_orig, v_orig) from original resolution:
 
-    scale_x = (x2 - x1) / W_orig   # = scale_y since square padding
-    u_518   = x1 + u_orig * scale_x
-    v_518   = y1 + v_orig * scale_x
+    scale_x = W_vggt / W_orig
+    scale_y = H_vggt / H_orig
+    u_vggt  = u_orig * scale_x
+    v_vggt  = v_orig * scale_y
 
-Then look up depth[t, k] at (v_518, u_518) with bilinear interpolation and
-back-project with intrinsics[t, k] (calibrated for the 518×518 padded image):
-    X = (u_518 - cx) * depth / fx
-    Y = (v_518 - cy) * depth / fy
+Then look up depth[t, k] at (v_vggt, u_vggt) with bilinear interpolation and
+back-project with intrinsics[t, k] (calibrated for the VGGT output image):
+    X = (u_vggt - cx) * depth / fx
+    Y = (v_vggt - cy) * depth / fy
     Z = depth
 
 Depth is stored as uint16 millimetres. To recover metres:
@@ -44,7 +44,7 @@ Usage example
 -------------
     from preprocessing.run_vggt import VGGTPreprocessor
 
-    preprocessor = VGGTPreprocessor(weights="facebook/VGGT-1B")
+    preprocessor = VGGTPreprocessor(weights="/path/to/vggt_omega.pt")
 
     # frame_paths[t][k] = Path to image of camera k at frame t, or None if absent.
     preprocessor.process_scene(
@@ -58,7 +58,6 @@ Usage example
 from __future__ import annotations
 
 import logging
-import sys
 import tempfile
 from pathlib import Path
 
@@ -66,16 +65,17 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 from PIL import Image
-from torchvision import transforms as TF
 
-# Add VGGT submodule to the import path
-_VGGT_ROOT = Path(__file__).resolve().parent.parent / "vggt"
-if str(_VGGT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_VGGT_ROOT))
+from vggt_omega import VGGTOmega
+from vggt_omega.utils.load_fn import load_and_preprocess_images
+from vggt_omega.utils.pose_enc import encoding_to_camera
 
 logger = logging.getLogger(__name__)
 
-VGGT_RESOLUTION = 518   # hard-coded inference resolution for VGGT
+# Base resolution passed to load_and_preprocess_images.  The actual output
+# dimensions depend on the input aspect ratio; e.g. for RICH 1440×1053 images
+# this yields 448×592 depth/camera maps (not a square).
+VGGT_RESOLUTION = 512
 
 
 class VGGTPreprocessor:
@@ -85,63 +85,26 @@ class VGGTPreprocessor:
     ----------
     weights    : HuggingFace repo ID (e.g. "facebook/VGGT-1B") or local directory.
     device     : torch device string, e.g. "cuda:0".
-    resolution : VGGT inference resolution (default 518, do not change).
+    resolution : Base resolution passed to load_and_preprocess_images (default 512).
+                 Actual output H×W depends on input aspect ratio.
     """
 
     def __init__(
         self,
-        weights:    str = "facebook/VGGT-1B",
+        weights:    str,
         device:     str = "cuda:0",
         resolution: int = VGGT_RESOLUTION,
     ):
         self.weights    = weights
         self.device     = torch.device(device)
         self.resolution = resolution
-        self.dtype = (
-            torch.bfloat16
-            if torch.cuda.is_available()
-            and torch.cuda.get_device_capability(self.device)[0] >= 8
-            else torch.float16
-        )
 
-        from vggt.models.vggt import VGGT
-        logger.info(f"Loading VGGT on {device} from '{weights}' …")
-        self.model = VGGT.from_pretrained(weights, enable_track=False)
-        self.model.eval().to(self.device)
-        logger.info("VGGT ready.")
-
-    # ── Image loading ─────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _load_image(
-        path: Path,
-        resolution: int,
-    ) -> tuple[torch.Tensor, np.ndarray, np.ndarray]:
-        """Load one image, pad to square, resize to resolution.
-
-        Returns
-        -------
-        img_t          : (3, resolution, resolution) float32 in [0, 1]
-        original_coords: (4,) float32 [x1, y1, x2, y2] in resolution-space
-        original_size  : (2,) int32   [W, H] of the original image
-        """
-        img = Image.open(path).convert("RGB")
-        W, H = img.size
-
-        max_dim = max(W, H)
-        left    = (max_dim - W) // 2
-        top     = (max_dim - H) // 2
-        scale   = resolution / max_dim
-
-        coords = np.array(
-            [left * scale, top * scale, (left + W) * scale, (top + H) * scale],
-            dtype=np.float32,
-        )
-        square = Image.new("RGB", (max_dim, max_dim), (0, 0, 0))
-        square.paste(img, (left, top))
-        square = square.resize((resolution, resolution), Image.Resampling.BICUBIC)
-
-        return TF.ToTensor()(square), coords, np.array([W, H], dtype=np.int32)
+        logger.info(f"Loading VGGT-Omega on {device} from '{weights}' …")
+        self.model = VGGTOmega().eval()
+        state_dict = torch.load(weights, map_location="cpu", weights_only=True)
+        self.model.load_state_dict(state_dict)
+        self.model.to(self.device)
+        logger.info("VGGT-Omega ready.")
 
     # ── Coordinate helpers ────────────────────────────────────────────────────
 
@@ -175,7 +138,7 @@ class VGGTPreprocessor:
         self,
         image_paths: list[Path | None],
     ) -> dict[str, np.ndarray]:
-        """Run VGGT on the K cameras of a single timestep.
+        """Run VGGT-Omega on the K cameras of a single timestep.
 
         Parameters
         ----------
@@ -185,63 +148,78 @@ class VGGTPreprocessor:
         -------
         dict with keys:
           extrinsics      (K_present, 3, 4) float32 — cam-from-world, cam0 is world origin
-          intrinsics      (K_present, 3, 3) float32 — calibrated for 518×518 padded image
-          original_coords (K_present, 4)   float32 — [x1,y1,x2,y2] in 518-space
+          intrinsics      (K_present, 3, 3) float32 — calibrated for the VGGT output resolution
+          original_coords (K_present, 4)   float32 — [0, 0, W_vggt, H_vggt] per camera
           original_size   (K_present, 2)   int32   — [W, H] of original image
-          depth           (K_present, 518, 518) float32 — metric depth in metres
-          depth_conf      (K_present, 518, 518) float32
+          depth           (K_present, H_vggt, W_vggt) float32 — metric depth in metres
+          depth_conf      (K_present, H_vggt, W_vggt) float32
           present_indices (K_present,)     int32   — which k indices had images
         """
-        from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-
         present_indices = [k for k, p in enumerate(image_paths) if p is not None]
         present_paths   = [image_paths[k] for k in present_indices]
 
         if not present_paths:
             raise ValueError("run_frame: all image paths are None.")
 
-        imgs, coords_list, sizes_list = [], [], []
+        # Read original image sizes before preprocessing.
+        sizes_list = []
         for path in present_paths:
-            img_t, oc, os_ = self._load_image(path, self.resolution)
-            imgs.append(img_t)
-            coords_list.append(oc)
-            sizes_list.append(os_)
+            with Image.open(path) as img:
+                sizes_list.append(np.array([img.width, img.height], dtype=np.int32))
 
-        images   = torch.stack(imgs).to(self.device)    # (K_present, 3, H, W)
-        images_b = images.unsqueeze(0)                  # (1, K_present, 3, H, W)
+        # Load and preprocess: aspect-ratio-preserving resize, common padding if needed.
+        # Output: (K_present, 3, H_vggt, W_vggt)
+        images = load_and_preprocess_images(
+            [str(p) for p in present_paths], image_resolution=self.resolution
+        ).to(self.device)
 
-        with torch.amp.autocast("cuda", dtype=self.dtype):
-            aggregated_tokens_list, patch_start_idx = self.model.aggregator(images_b)
+        # Forward pass — VGGTOmega adds batch dim internally for 4-D input.
+        # predictions["images"] stores the (1, K_present, 3, H_vggt, W_vggt) tensor.
+        predictions = self.model(images)
 
-        # Camera head enforces float32 internally
-        pose_enc = self.model.camera_head(aggregated_tokens_list)[-1]  # (1, K_present, 9)
-        extrinsics_t, intrinsics_t = pose_encoding_to_extri_intri(
-            pose_enc, image_size_hw=(self.resolution, self.resolution)
+        H_vggt, W_vggt = predictions["images"].shape[-2:]
+
+        # Decode cameras from 9-D pose encoding.
+        extrinsics_t, intrinsics_t = encoding_to_camera(
+            predictions["pose_enc"], (H_vggt, W_vggt)
         )  # (1, K_present, 3, 4) and (1, K_present, 3, 3)
 
-        # Depth head also enforces float32
-        with torch.amp.autocast("cuda", enabled=False):
-            depth, depth_conf = self.model.depth_head(
-                aggregated_tokens_list, images_b, patch_start_idx
-            )
-        # depth: (1, K_present, H, W, 1),  depth_conf: (1, K_present, H, W)
+        extrinsics_np = extrinsics_t.squeeze(0).float().cpu().numpy()  # (K_present, 3, 4)
+        intrinsics_np = intrinsics_t.squeeze(0).float().cpu().numpy()  # (K_present, 3, 3)
 
-        extrinsics_np = extrinsics_t.squeeze(0).float().cpu().numpy()       # (K_present, 3, 4)
-        intrinsics_np = intrinsics_t.squeeze(0).float().cpu().numpy()       # (K_present, 3, 3)
-        depth_np      = depth.squeeze(0).squeeze(-1).float().cpu().numpy()  # (K_present, H, W)
-        depth_conf_np = depth_conf.squeeze(0).float().cpu().numpy()         # (K_present, H, W)
+        # depth: (1, K_present, H_vggt, W_vggt, 1);  depth_conf: (1, K_present, H_vggt, W_vggt)
+        depth_np      = predictions["depth"][0, :, :, :, 0].float().cpu().numpy()
+        depth_conf_np = predictions["depth_conf"][0].float().cpu().numpy()
 
         extrinsics_np = self._reroot_to_cam0(extrinsics_np)
+
+        # original_coords: [0, 0, W_vggt, H_vggt] — no padding in VGGT-Omega, image fills
+        # the full output.  Downstream _orig_to_vggt uses (x2-x1)/W_orig and (y2-y1)/H_orig
+        # as x and y scale factors, which are W_vggt/W_orig and H_vggt/H_orig respectively.
+        coords = np.array([0.0, 0.0, float(W_vggt), float(H_vggt)], dtype=np.float32)
 
         return {
             "extrinsics":      extrinsics_np,
             "intrinsics":      intrinsics_np,
-            "original_coords": np.stack(coords_list),
+            "original_coords": np.stack([coords] * len(present_paths)),
             "original_size":   np.stack(sizes_list),
             "depth":           depth_np,
             "depth_conf":      depth_conf_np,
             "present_indices": np.array(present_indices, dtype=np.int32),
         }
+
+    # ── Resolution helper ─────────────────────────────────────────────────────
+
+    def _get_vggt_hw(self, frame_paths: list[list[Path | None]]) -> tuple[int, int]:
+        """Determine actual VGGT-Omega output (H, W) by preprocessing one image."""
+        for paths in frame_paths:
+            for p in paths:
+                if p is not None:
+                    sample = load_and_preprocess_images(
+                        [str(p)], image_resolution=self.resolution
+                    )
+                    return int(sample.shape[-2]), int(sample.shape[-1])
+        raise ValueError("No valid images found in frame_paths — cannot determine VGGT output size.")
 
     # ── Frame-loop (single GPU) ───────────────────────────────────────────────
 
@@ -264,15 +242,18 @@ class VGGTPreprocessor:
         """
         T = len(frame_paths)
         K = len(camera_names)
-        R = self.resolution
 
-        all_extrinsics      = np.full((T, K, 3, 4), np.nan, dtype=np.float32)
-        all_intrinsics      = np.full((T, K, 3, 3), np.nan, dtype=np.float32)
-        all_original_coords = np.full((T, K, 4),    np.nan, dtype=np.float32)
-        all_original_size   = np.zeros((T, K, 2),           dtype=np.int32)
-        all_depth           = np.full((T, K, R, R), np.nan, dtype=np.float32)
-        all_depth_conf      = np.full((T, K, R, R), np.nan, dtype=np.float32)
-        valid               = np.zeros((T, K),               dtype=bool)
+        # Compute actual VGGT output dimensions (aspect-ratio-aware, not square).
+        H_vggt, W_vggt = self._get_vggt_hw(frame_paths)
+        logger.info(f"  VGGT-Omega output resolution: {H_vggt}×{W_vggt}")
+
+        all_extrinsics      = np.full((T, K, 3, 4),              np.nan, dtype=np.float32)
+        all_intrinsics      = np.full((T, K, 3, 3),              np.nan, dtype=np.float32)
+        all_original_coords = np.full((T, K, 4),                 np.nan, dtype=np.float32)
+        all_original_size   = np.zeros((T, K, 2),                        dtype=np.int32)
+        all_depth           = np.full((T, K, H_vggt, W_vggt),   np.nan, dtype=np.float32)
+        all_depth_conf      = np.full((T, K, H_vggt, W_vggt),   np.nan, dtype=np.float32)
+        valid               = np.zeros((T, K),                           dtype=bool)
 
         for t, paths in enumerate(frame_paths):
             if not any(p is not None for p in paths):
@@ -411,16 +392,19 @@ class VGGTPreprocessor:
         K:            int,
     ) -> None:
         """Merge per-GPU chunk files into the final output .npz files."""
-        R = VGGT_RESOLUTION
-        all_extrinsics      = np.full((T, K, 3, 4), np.nan, dtype=np.float32)
-        all_intrinsics      = np.full((T, K, 3, 3), np.nan, dtype=np.float32)
-        all_original_coords = np.full((T, K, 4),    np.nan, dtype=np.float32)
-        all_original_size   = np.zeros((T, K, 2),           dtype=np.int32)
-        all_depth           = np.full((T, K, R, R), np.nan, dtype=np.float16)
-        all_depth_conf      = np.full((T, K, R, R), np.nan, dtype=np.float16)
-        valid               = np.zeros((T, K),               dtype=bool)
+        chunk_paths = sorted(tmp_dir.glob("chunk_*.npz"))
+        first       = np.load(chunk_paths[0], allow_pickle=False)
+        H_vggt, W_vggt = first["depth"].shape[-2:]   # read actual dims from first chunk
 
-        for chunk_path in sorted(tmp_dir.glob("chunk_*.npz")):
+        all_extrinsics      = np.full((T, K, 3, 4),             np.nan, dtype=np.float32)
+        all_intrinsics      = np.full((T, K, 3, 3),             np.nan, dtype=np.float32)
+        all_original_coords = np.full((T, K, 4),                np.nan, dtype=np.float32)
+        all_original_size   = np.zeros((T, K, 2),                       dtype=np.int32)
+        all_depth           = np.full((T, K, H_vggt, W_vggt),  np.nan, dtype=np.float16)
+        all_depth_conf      = np.full((T, K, H_vggt, W_vggt),  np.nan, dtype=np.float16)
+        valid               = np.zeros((T, K),                          dtype=bool)
+
+        for chunk_path in chunk_paths:
             data = np.load(chunk_path, allow_pickle=False)
             idxs = data["frame_indices"]
             all_extrinsics[idxs]      = data["extrinsics"]
@@ -457,8 +441,8 @@ class VGGTPreprocessor:
         np.savez_compressed(
             str(cam_path),
             extrinsics      = extrinsics,       # (T, K, 3, 4) float32 — cam-from-world in cam0 frame
-            intrinsics      = intrinsics,       # (T, K, 3, 3) float32 — for 518×518 padded image
-            original_coords = original_coords, # (T, K, 4)   float32 — [x1,y1,x2,y2] in 518-space
+            intrinsics      = intrinsics,       # (T, K, 3, 3) float32 — for VGGT output image
+            original_coords = original_coords, # (T, K, 4)   float32 — [0,0,W_vggt,H_vggt]
             original_size   = original_size,   # (T, K, 2)   int32   — [W, H] original image
             valid           = valid,            # (T, K)      bool
             camera_names    = np.array(camera_names, dtype="S64"),  # (K,) byte strings
@@ -474,8 +458,8 @@ class VGGTPreprocessor:
 
         np.savez_compressed(
             str(depth_path),
-            depth       = depth_mm,                         # (T, K, 518, 518) uint16 mm
-            depth_conf  = depth_conf.astype(np.float16),   # (T, K, 518, 518) float16
+            depth       = depth_mm,                         # (T, K, H_vggt, W_vggt) uint16 mm
+            depth_conf  = depth_conf.astype(np.float16),   # (T, K, H_vggt, W_vggt) float16
             depth_valid = valid,                            # (T, K) bool
         )
         logger.info(f"Saved depth   → {depth_path}  depth shape={depth_mm.shape} dtype=uint16")

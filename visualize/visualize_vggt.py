@@ -116,10 +116,10 @@ def visualize_scene(
             if frame_bgr is None:
                 continue
 
-            # ── Depth crop to original image region ──────────────────────
-            x1, y1, x2, y2 = original_coords[t, k].astype(int)
-            depth_f = depth_mm[t, k].astype(np.float32) / 1000.0  # metres, (518,518)
-            depth_crop = depth_f[y1:y2, x1:x2]  # original-image region
+            # VGGT-Omega: no square padding, image fills full depth map.
+            # original_coords = [0, 0, W_vggt, H_vggt], so the crop is the whole map.
+            depth_f = depth_mm[t, k].astype(np.float32) / 1000.0  # metres
+            depth_crop = depth_f
 
             # Normalise to [0, 255] using per-camera range.
             depth_norm = np.clip((depth_crop - d_min) / (d_max - d_min), 0, 1)

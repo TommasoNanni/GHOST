@@ -514,11 +514,12 @@ class FusionDatapoint(Dataset, ABC):
         self._fill_static_gt_cameras(gt_camera)
 
         # Default self-supervised targets: mirror inputs where GT wasn't set.
+        # gt_camera is intentionally not mirrored: _fill_static_gt_cameras stamped
+        # the XML calibration just above, and losses gate on quaternion norm > 0.5.
         _has_gt = any(len(g) > 0 for g in self._gt) if self._gt else False
         if not _has_gt:
             gt_body_pose = pose.copy()
             gt_body_shape = shape.copy()
-            gt_camera = camera.copy()
             gt_kp3d = kp3d.copy()
 
         inputs = {
@@ -804,6 +805,24 @@ class RICHFusionDatapoint(FusionDatapoint):
             self._raw.append(persons)
             logger.debug(f"  {cam_dir.name}: loaded {len(persons)} person(s)")
 
+        # Keep only ghost persons that appear in at least (num_cameras - 1) views.
+        # Foreground people are tracked consistently across nearly all cameras;
+        # background/spurious tracks appear in fewer views and are dropped here
+        # so they never pollute the GT matching step.
+        if self._raw:
+            num_cams = len(self._raw)
+            min_cams = max(1, num_cams - 1)
+            cam_count: dict[int, int] = {}
+            for cam in self._raw:
+                for pid in cam:
+                    cam_count[pid] = cam_count.get(pid, 0) + 1
+            foreground_pids = {pid for pid, cnt in cam_count.items() if cnt >= min_cams}
+            self._raw = [
+                {pid: data for pid, data in cam.items() if pid in foreground_pids}
+                for cam in self._raw
+            ]
+            logger.info(f"  foreground ghost pids (>={min_cams}/{num_cams} cams): {sorted(foreground_pids)}")
+
     def load_cameras(self, **kwargs: Any) -> None:
         """Parse OpenCV XML grounf truth calibration files from scan_calibration/.
 
@@ -892,37 +911,65 @@ class RICHFusionDatapoint(FusionDatapoint):
                 self._gt_camera_vecs[i][4:7] = t_rel.astype(np.float32)
 
         # STEP 3:
-        # Load estimated camera poses from camera_alignment.npz (produced by
-        # CameraAlignment.estimate in the preprocessing pipeline).
-        # These are pairwise Kabsch-estimated transforms x_b = R @ x_a + t,
-        # mapping joints in cam-a frame to joints in cam-b frame.
-        # We chain each pair to cam-0 to get one cam-0→cam-i transform per camera,
-        # stored in self._cameras[i]["estimated_extrinsics"] as a (3, 4) matrix.
-        # self._cameras[i] already contains the xml-parsed cameras in "exitrinsics"
-        # and "intrinsics" fields
-        align_path = self.scene_dir / "camera_alignment.npz"
-        if align_path.exists():
-            from preprocessing.camera_alignment import CameraAlignment
-            alignment = CameraAlignment.load(align_path)
-            cam0_name = self._cam_dirs[0].name if self._cam_dirs else None
-            for i, cam_dir in enumerate(self._cam_dirs):
-                cam_i_name = cam_dir.name
-                if i == 0:
-                    self._cameras[i]["est_ext_is_reference"] = True
-                elif (cam0_name, cam_i_name) in alignment:
-                    R_arr, t_arr = alignment[(cam0_name, cam_i_name)]
-                    self._cameras[i]["est_ext_R"] = R_arr
-                    self._cameras[i]["est_ext_t"] = t_arr
-                elif (cam_i_name, cam0_name) in alignment:
-                    R_arr, t_arr = alignment[(cam_i_name, cam0_name)]
-                    R_inv = R_arr.T
-                    t_inv = -R_inv @ t_arr
-                    self._cameras[i]["est_ext_R"] = R_inv
-                    self._cameras[i]["est_ext_t"] = t_inv
+        # Load estimated camera poses from vggt_cameras.npz (produced by the
+        # VGGT preprocessing step).  Extrinsics are (T, K, 3, 4) world-to-camera
+        # transforms; we average over time to get a single static estimate per
+        # camera, then express each camera relative to cam-0 (same convention
+        # as the GT camera vectors computed in STEP 2 above).
+        vggt_path = self.scene_dir / "vggt_cameras.npz"
+        if vggt_path.exists():
+            vggt = np.load(str(vggt_path))
+            vggt_exts   = vggt["extrinsics"].astype(np.float64)   # (T, K, 3, 4)
+            vggt_names  = [n.decode() if isinstance(n, bytes) else n
+                           for n in vggt["camera_names"]]          # list[str], len K
+
+            # Build name→index map for VGGT cameras
+            vggt_name_to_idx = {name: k for k, name in enumerate(vggt_names)}
+
+            # Average extrinsics over frames (valid frames only where available)
+            valid_mask = vggt.get("valid")  # (T, K) bool or None
+            mean_exts: dict[int, np.ndarray] = {}
+            for k in range(vggt_exts.shape[1]):
+                if valid_mask is not None:
+                    frames_k = vggt_exts[valid_mask[:, k], k]
                 else:
-                    logger.warning(f"No alignment found for {cam_i_name} relative to {cam0_name}")
+                    frames_k = vggt_exts[:, k]
+                if len(frames_k) == 0:
+                    frames_k = vggt_exts[:, k]
+                mean_exts[k] = frames_k.mean(axis=0)  # (3, 4)
+
+            # Get cam-0 mean extrinsic for relative computation
+            cam0_name = self._cam_dirs[0].name if self._cam_dirs else None
+            cam0_vggt_idx = vggt_name_to_idx.get(cam0_name)
+            if cam0_vggt_idx is None:
+                logger.warning(
+                    f"vggt_cameras.npz: cam0 '{cam0_name}' not found — "
+                    "falling back to pred_cam_t"
+                )
+            else:
+                ext0 = mean_exts[cam0_vggt_idx]
+                R0, t0 = ext0[:3, :3], ext0[:3, 3]
+                for i, cam_dir in enumerate(self._cam_dirs):
+                    if i == 0:
+                        self._cameras[i]["est_ext_is_reference"] = True
+                        continue
+                    vggt_idx = vggt_name_to_idx.get(cam_dir.name)
+                    if vggt_idx is None:
+                        logger.warning(
+                            f"vggt_cameras.npz: '{cam_dir.name}' not found"
+                        )
+                        continue
+                    ext_i = mean_exts[vggt_idx]
+                    R_i, t_i = ext_i[:3, :3], ext_i[:3, 3]
+                    R_rel = R_i @ R0.T
+                    t_rel = t_i - R_rel @ t0
+                    self._cameras[i]["est_ext_R"] = R_rel.astype(np.float32)
+                    self._cameras[i]["est_ext_t"] = t_rel.astype(np.float32)
         else:
-            logger.warning(f"camera_alignment.npz not found in {self.scene_dir} — input camera tokens will fall back to pred_cam_t")
+            logger.warning(
+                f"vggt_cameras.npz not found in {self.scene_dir} — "
+                "input camera tokens will fall back to pred_cam_t"
+            )
 
     def load_ground_truth(self, **kwargs: Any) -> None:
         """Load per-frame SMPL-X GT params from train_body/.
@@ -933,7 +980,8 @@ class RICHFusionDatapoint(FusionDatapoint):
         """
         rich_gt_dir = Path(kwargs.get("rich_gt_dir", kwargs.get("rich_data_root", "")))
         scene_name = self.scene_dir.name
-        gt_root = rich_gt_dir / "train_body" / scene_name
+        body_split = kwargs.get("body_split", "train_body")
+        gt_root = rich_gt_dir / body_split / scene_name
 
         # Load SMPL-X hand PCA basis so 12-dim GT hand coefficients can be
         # decoded to 45-dim axis-angle (15 joints × 3).
@@ -1198,6 +1246,7 @@ class RICHFusionDatapoint(FusionDatapoint):
         self._gt = [new_gt_dict]
         self._gt_frame_lut = new_lut
         self._gt_matched_ghost_pids = set(new_gt_dict.keys())
+        self._rich_to_ghost: dict[int, int] = rich_to_ghost  # rich_pid → ghost_pid
 
         unmatched = set(ghost_pids) - set(rich_to_ghost.values())
         if unmatched:

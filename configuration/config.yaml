@@ -5,12 +5,14 @@ data:
   egohumans_data_root: "/capstor/scratch/cscs/tnanni/datasets/egohumans"
   rich_max_side: 1440  # resize RICH frames so longest side <= this before SAM3; null to skip
   rich_frames_base_dir: "/tmp/rich_frames"  # writable dir for resized frames (needed when data root is read-only)
-  output_directory: "/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich11_segmentation_test"
+  output_directory: "/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train"
   egohumans_output_directory: "/iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_segmentation_test"
   slice: null # Number of scenes to load (null = all)
   exclude_egocentric: true # Exclude egocentric videos for simplicity
   smplx_model_path: "body_models/SMPLX_NEUTRAL.pkl"
   mhr_model_path: "MHR/assets"
+  vggt_omega_checkpoint: "checkpoints/vggt_omega/vggt_omega_1b_512.pt"
+  droid_weights: "/capstor/scratch/cscs/tnanni/ghost_checkpoints/droid.pth"
   fusion_output_dir: "fusion_outputs"
 
 segmentation:
@@ -33,6 +35,7 @@ parameters_extraction:
   cross_view_pose_weight: 0.5 # Weight of canonical joint sequence (root-relative 3D keypoints)
   geo_reid_distance_threshold: 0.5 # First-pass max median world-space distance (m) for background ReID
   geo_reid_second_pass_threshold: 1.5 # Second-pass threshold for displaced nodes + singletons
+  slam_cams: null  # List of camera IDs to run DROID-SLAM on, e.g. ["cam_10"]. null = all cameras
 
 synchronization:
   enabled: false  # Set true to run temporal sync before camera alignment (uses random-shift evaluation)
@@ -42,7 +45,7 @@ fusion:
   use_wandb: true
   architecture:
     embedding_dimension: 128
-    temporal_window: 32
+    temporal_window: 128
     max_temporal_len: 2048  # PE table size — must be >= longest sequence in the dataset
     num_heads: 8
     num_layers: 4
@@ -50,7 +53,7 @@ fusion:
     max_cameras: 64
   loss:
     VPoser_path: "checkpoints/V02_05/"
-    pose_mse_weight: 8.0
+    pose_mse_weight: 0.05
     shape_mse_weight: 0.1
     epipolar_weight: 10.0
     temporal_weight: 0.1
@@ -63,7 +66,7 @@ fusion:
     shape_reg_weight: 1.0
     translation_temporal_weight: 0.1
     vposer_weight: 0.001
-    joint_position_weight: 8.0
+    joint_position_weight: 1.0
   training:
     max_epochs: 400
     lr: 0.0001

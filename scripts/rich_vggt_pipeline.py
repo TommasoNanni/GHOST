@@ -47,7 +47,7 @@ SYNC_SEED        = 42
 SYNC_DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 SYNC_MIN_OVERLAP = 100
 
-VGGT_WEIGHTS = "facebook/VGGT-1B"
+VGGT_WEIGHTS = CONFIG.data.vggt_omega_checkpoint
 
 
 def _load_body_data(
