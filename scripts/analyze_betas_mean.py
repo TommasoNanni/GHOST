@@ -36,9 +36,9 @@ SCENE_DIRS = sorted(
 
 
 def main() -> None:
-    all_errors: list[np.ndarray] = []
-    all_gt: list[np.ndarray] = []
-    all_pred: list[np.ndarray] = []
+    # Per-scene MSE accumulators (static estimate vs mean GT betas per person)
+    scene_mse_mean:   list[float] = []
+    scene_mse_median: list[float] = []
 
     for scene_dir in SCENE_DIRS:
         if not scene_dir.is_dir():
@@ -46,7 +46,7 @@ def main() -> None:
         try:
             dp = RICHFusionDatapoint(
                 scene_dir=scene_dir,
-                rich_data_root=CONFIG.data.rich_data_root,
+                rich_data_root="/capstor/scratch/cscs/tnanni/datasets/rich",
             )
             ds = RICHFusionDataset([dp])
             inputs, targets = ds[0]
@@ -55,61 +55,52 @@ def main() -> None:
             continue
 
         # (T, K, P, 10), (T, K, P) bool
-        pred_shape  = inputs["shape"].float()         # (T, K, P, 10)
-        person_mask = inputs["person_mask"].float()   # (T, K, P)
-        gt_shape    = targets["shape"].float()        # (T, P, 10)
-        gt_valid    = targets["gt_valid"]             # (T, P) bool
+        pred_shape  = inputs["shape"].float()   # (T, K, P, 10)
+        person_mask = inputs["person_mask"]     # (T, K, P) bool
+        gt_shape    = targets["shape"].float()  # (T, P, 10)
+        gt_valid    = targets["gt_valid"]       # (T, P) bool
 
-        # Average predicted betas across cameras where person is detected
-        view_mask  = person_mask.unsqueeze(-1)                             # (T, K, P, 1)
-        mean_shape = (pred_shape * view_mask).sum(1) / view_mask.sum(1).clamp(min=1)
-        # mean_shape: (T, P, 10)
+        T, K, P, n_betas = pred_shape.shape
 
-        detected = person_mask.sum(1) > 0  # (T, P) bool
-        valid    = gt_valid & detected
+        scene_mean_mse   = []
+        scene_median_mse = []
 
-        if not valid.any():
-            print(f"  SKIP {scene_dir.name}: no valid frames")
+        for p in range(P):
+            obs_mask = person_mask[:, :, p].bool()  # (T, K)
+            gt_mask  = gt_valid[:, p]               # (T,)
+
+            if not obs_mask.any() or not gt_mask.any():
+                continue
+
+            # All valid observations: (N_valid, 10)
+            obs = pred_shape[:, :, p, :][obs_mask]  # (N_valid, 10)
+
+            static_mean   = obs.mean(dim=0)    # (10,)
+            static_median = obs.median(dim=0).values  # (10,)
+
+            # GT target: mean of per-frame GT betas over valid frames
+            gt_target = gt_shape[:, p, :][gt_mask].mean(dim=0)  # (10,)
+
+            scene_mean_mse.append(((static_mean   - gt_target) ** 2).mean().item())
+            scene_median_mse.append(((static_median - gt_target) ** 2).mean().item())
+
+        if not scene_mean_mse:
+            print(f"  SKIP {scene_dir.name}: no valid persons")
             continue
 
-        err = (mean_shape - gt_shape).abs()  # (T, P, 10)
-        err_np      = err[valid].numpy()
-        gt_np       = gt_shape[valid].numpy()
-        pred_np     = mean_shape[valid].numpy()
+        m_mean   = np.mean(scene_mean_mse)
+        m_median = np.mean(scene_median_mse)
+        scene_mse_mean.append(m_mean)
+        scene_mse_median.append(m_median)
+        print(f"[{scene_dir.name}]  MSE(mean)={m_mean:.4f}  MSE(median)={m_median:.4f}")
 
-        all_errors.append(err_np)
-        all_gt.append(gt_np)
-        all_pred.append(pred_np)
-
-        scene_mae = err_np.mean()
-        scene_mse = (err_np ** 2).mean()
-        print(f"[{scene_dir.name}]  MAE={scene_mae:.4f}  MSE={scene_mse:.4f}"
-              f"  samples={valid.sum()}")
-
-    if not all_errors:
+    if not scene_mse_mean:
         print("No valid samples found.")
         return
 
-    errors = np.concatenate(all_errors, axis=0)   # (N_total, 10)
-    gt_all = np.concatenate(all_gt, axis=0)
-    pred_all = np.concatenate(all_pred, axis=0)
-
-    print("\n=== Overall betas error (cross-view mean vs GT) ===")
-    print(f"Total samples: {errors.shape[0]}")
-    print(f"Overall  MAE : {errors.mean():.4f}")
-    print(f"Overall  MSE : {(errors**2).mean():.4f}")
-    print(f"Overall RMSE : {np.sqrt((errors**2).mean()):.4f}")
-
-    print("\nPer-coefficient MAE:")
-    for i, mae_i in enumerate(errors.mean(axis=0)):
-        print(f"  beta[{i:02d}]: {mae_i:.4f}")
-
-    # GT vs pred variance check: how much does GT vary across the dataset?
-    gt_std = gt_all.std(axis=0)
-    pred_std = pred_all.std(axis=0)
-    print("\nPer-coefficient std  (GT / Pred):")
-    for i, (gs, ps) in enumerate(zip(gt_std, pred_std)):
-        print(f"  beta[{i:02d}]: GT={gs:.4f}  Pred={ps:.4f}")
+    print(f"\n=== Static per-scene estimate vs mean GT betas ({len(scene_mse_mean)} scenes) ===")
+    print(f"  Mean-pool  MSE : {np.mean(scene_mse_mean):.4f}")
+    print(f"  Median-pool MSE: {np.mean(scene_mse_median):.4f}")
 
 
 if __name__ == "__main__":

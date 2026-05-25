@@ -309,36 +309,6 @@ def load_pred_betas(cam_dirs: list[Path]) -> dict[int, np.ndarray]:
 # Translation evaluation
 # ---------------------------------------------------------------------------
 
-def _predict_translations(
-    placer: BodyPlacer,
-    scale: float,
-    cam_dirs: list[Path],
-    all_pids: set[int],
-    gt_intrinsics: list[np.ndarray] | None = None,
-) -> dict[int, dict[int, np.ndarray]]:
-    """Run estimate_root_translation for every camera/pid and median-fuse.
-
-    Returns {ghost_pid: {global_frame_idx: t_pred (3,)}}.
-    """
-    result: dict[int, dict[int, np.ndarray]] = {}
-    for pid in sorted(all_pids):
-        accum: dict[int, list[np.ndarray]] = defaultdict(list)
-        for k, cam_dir in enumerate(cam_dirs):
-            body_file = cam_dir / "body_data" / f"person_{pid}.npz"
-            if not body_file.exists():
-                continue
-            gt_K = gt_intrinsics[k] if (gt_intrinsics and k < len(gt_intrinsics)) else None
-            t_cam = placer.estimate_root_translation(k, body_file, scale, gt_K_orig=gt_K)
-            data = np.load(body_file, allow_pickle=False)
-            fi = data["frame_indices"].astype(int)
-            for local_t, global_t in enumerate(fi):
-                if not np.any(np.isnan(t_cam[local_t])):  # NaN = no depth at this frame
-                    accum[int(global_t)].append(t_cam[local_t])
-        result[pid] = {
-            global_t: np.median(np.stack(ests, axis=0), axis=0)
-            for global_t, ests in accum.items()
-        }
-    return result
 
 
 def _match_pids_by_distance(
@@ -409,142 +379,6 @@ def eval_translations(
 # PnP-based translation (prototype)
 # ---------------------------------------------------------------------------
 
-def predict_translations_pnp(
-    placer: BodyPlacer,
-    scale: float,
-    cam_dirs: list[Path],
-    all_pids: set[int],
-    pred_betas_by_pid: dict[int, np.ndarray],
-    gt_intrinsics: list[np.ndarray] | None = None,
-) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
-    """Estimate root translation + global orient jointly via PnP.
-
-    For each (camera, person, frame):
-      1. Run FK with predicted body_pose + betas, zero global_orient →
-         canonical 3D joints {J_i} in body frame (metric, pelvis at origin).
-      2. Build 2D-3D correspondences using _SMPLX_TO_MHR70.
-      3. Solve PnP (RANSAC) → tvec = pelvis position in cam-k space (metric),
-         rvec = rotation from body canonical frame to cam-k frame.
-      4. Transform both to world (cam-0) using VGGT extrinsics scaled by `scale`.
-
-    Returns:
-        translations : {ghost_pid: {global_frame_idx: t_pred (3,)}}
-        orientations : {ghost_pid: {global_frame_idx: R_pred (3,3)}}
-            — orientation from the camera with the most PnP inliers per frame.
-    """
-    import cv2
-
-    _JOINTS = sorted(_SMPLX_TO_MHR70.keys())  # SMPL-X indices with MHR70 matches
-
-    translations: dict[int, dict[int, np.ndarray]] = {}
-    orientations: dict[int, dict[int, np.ndarray]] = {}
-
-    for pid in sorted(all_pids):
-        betas = pred_betas_by_pid.get(pid, np.zeros(10, dtype=np.float32))
-        accum: dict[int, list[np.ndarray]] = defaultdict(list)
-        # best orient per frame: track (n_inliers, R_world)
-        best_orient: dict[int, tuple[int, np.ndarray]] = {}
-
-        for k, cam_dir in enumerate(cam_dirs):
-            body_file = cam_dir / "body_data" / f"person_{pid}.npz"
-            if not body_file.exists():
-                continue
-
-            data = np.load(body_file, allow_pickle=False)
-            assert {"pred_keypoints_2d", "frame_indices", "smplx_body_pose"}.issubset(data.files), (
-                f"Missing required keys in {body_file}"
-            )
-
-            kp2d        = data["pred_keypoints_2d"]    # (T_local, J_mhr70, 2+)
-            body_pose   = data["smplx_body_pose"]      # (T_local, 63)
-            frame_indices = data["frame_indices"]
-            joint_conf  = (
-                data["pred_joint_confidence"]
-                if "pred_joint_confidence" in data.files else None
-            )
-
-            T_local = len(frame_indices)
-            betas_arr  = np.tile(betas[np.newaxis], (T_local, 1))
-            zero_orient = np.zeros((T_local, 3), dtype=np.float32)
-            fk = placer._smplx_fk(betas_arr, body_pose, zero_orient)  # (T_local, 55, 3)
-
-            for local_t, global_t in enumerate(frame_indices):
-                global_t = int(global_t)
-                if global_t >= placer.T or not placer.cam_valid[global_t, k]:
-                    continue
-
-                intr = placer.intrinsics[global_t, k]
-                fx, fy = float(intr[0, 0]), float(intr[1, 1])
-                cx, cy = float(intr[0, 2]), float(intr[1, 2])
-
-                oc = placer.original_coords[global_t, k]
-                os = placer.original_size[global_t, k]
-                W_orig, H_orig = float(os[0]), float(os[1])
-
-                pelvis_3d = fk[local_t, 0]  # (3,) — body frame origin
-
-                pts_3d, pts_2d = [], []
-                for j in _JOINTS:
-                    mhr70 = _SMPLX_TO_MHR70[j]
-                    assert mhr70 < kp2d.shape[1], (
-                        f"MHR70 joint {mhr70} out of bounds (kp2d has {kp2d.shape[1]} joints)"
-                    )
-                    if joint_conf is not None and j < joint_conf.shape[1]:
-                        if joint_conf[local_t, j] < 0.3:
-                            continue
-                    u, v = placer._orig_to_518(kp2d[local_t, mhr70], oc, W_orig, H_orig)
-                    if not placer._in_bounds(u, v):
-                        continue
-                    pts_3d.append(fk[local_t, j] - pelvis_3d)
-                    pts_2d.append([u, v])
-
-                if len(pts_3d) < 4:
-                    continue
-
-                if gt_intrinsics and k < len(gt_intrinsics):
-                    gt_K = gt_intrinsics[k]
-                    cx = float(oc[0]) + float(gt_K[0, 2]) * fx / float(gt_K[0, 0])
-                    cy = float(oc[1]) + float(gt_K[1, 2]) * fy / float(gt_K[1, 1])
-                K_mat = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
-                success, rvec, tvec, inliers = cv2.solvePnPRansac(
-                    np.array(pts_3d, dtype=np.float64),
-                    np.array(pts_2d, dtype=np.float64),
-                    K_mat, np.zeros(4),
-                    iterationsCount=200,
-                    reprojectionError=8.0,
-                    confidence=0.99,
-                )
-                if not success or inliers is None or len(inliers) < 4:
-                    continue
-
-                t_camk = tvec.squeeze().astype(np.float32)
-                if t_camk[2] < 0.1:  # body behind camera — reject
-                    continue
-
-                # Transform pelvis from cam-k to cam-0 (world) frame.
-                R_k = placer.extrinsics[global_t, k, :3, :3].astype(np.float32)
-                t_k = placer.extrinsics[global_t, k, :3, 3].astype(np.float32) * scale
-                t_cam0 = R_k.T @ (t_camk - t_k)
-                accum[global_t].append(t_cam0)
-
-                # rvec: rotation from body canonical frame → cam-k frame.
-                # global_orient in world = R_k.T @ R_pnp.
-                R_pnp, _ = cv2.Rodrigues(rvec)
-                R_world = (R_k.T @ R_pnp).astype(np.float32)
-                n_inliers = len(inliers)
-                if global_t not in best_orient or n_inliers > best_orient[global_t][0]:
-                    best_orient[global_t] = (n_inliers, R_world)
-
-        translations[pid] = {
-            gt: np.median(np.stack(ests, axis=0), axis=0)
-            for gt, ests in accum.items()
-            if ests
-        }
-        orientations[pid] = {
-            gt: R for gt, (_, R) in best_orient.items()
-        }
-
-    return translations, orientations
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +392,6 @@ def predict_translations_procrustes(
     all_pids: set[int],
     pred_betas_by_pid: dict[int, np.ndarray],
     gt_intrinsics: list[np.ndarray] | None = None,
-    joint_conf_threshold: float = 0.3,
     min_cams: int = 2,
     min_joints: int = 4,
     gt_body_pose_map: dict[int, dict[int, np.ndarray]] | None = None,
@@ -567,6 +400,7 @@ def predict_translations_procrustes(
     gt_rot_cameras: list[np.ndarray | None] | None = None,
 ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
     """Estimate root translation + global orient via multi-camera DLT + Procrustes.
+
 
     For each (person, frame):
       1. For each SMPL-X joint j (with MHR70 mapping), collect 2D observations
@@ -599,7 +433,6 @@ def predict_translations_procrustes(
                 "local_t": {int(g): int(l) for l, g in enumerate(fi)},
                 "kp2d":       d["pred_keypoints_2d"],
                 "body_pose":  d["smplx_body_pose"],
-                "jconf":      d["pred_joint_confidence"] if "pred_joint_confidence" in d.files else None,
             }
         cam_data_all.append(cam_map)
 
@@ -641,13 +474,8 @@ def predict_translations_procrustes(
 
                     local_t = cm[pid]["local_t"][global_t]
                     kp2d  = cm[pid]["kp2d"]
-                    jconf = cm[pid]["jconf"]
-
                     if mhr70_j >= kp2d.shape[1]:
                         continue
-                    if jconf is not None and smplx_j < jconf.shape[1]:
-                        if jconf[local_t, smplx_j] < joint_conf_threshold:
-                            continue
 
                     oc  = placer.original_coords[global_t, k]
                     os_ = placer.original_size[global_t, k]
@@ -676,9 +504,9 @@ def predict_translations_procrustes(
                         P = K_gt_resized.astype(np.float64) @ E_gt_metric.astype(np.float64)
                     elif use_gt_rot:
                         # Hybrid: GT rotation + VGGT translation × scale.
-                        # Stays in 518-space (VGGT intrinsics) so observations use _orig_to_518.
-                        u, v = placer._orig_to_518(kp2d[local_t, mhr70_j], oc, W_orig, H_orig)
-                        if not placer._in_bounds(u, v):
+                        # Observations are in VGGT output space.
+                        u, v = placer._orig_to_vggt(kp2d[local_t, mhr70_j], oc, W_orig, H_orig)
+                        if not placer._in_bounds(u, v, oc[2], oc[3]):
                             continue
                         intr = placer.intrinsics[global_t, k].astype(np.float64)
                         ext = placer.extrinsics[global_t, k].astype(np.float64).copy()
@@ -686,9 +514,9 @@ def predict_translations_procrustes(
                         ext[:3, 3] *= scale
                         P = intr @ ext
                     else:
-                        # VGGT cameras: map keypoint to 518-space.
-                        u, v = placer._orig_to_518(kp2d[local_t, mhr70_j], oc, W_orig, H_orig)
-                        if not placer._in_bounds(u, v):
+                        # VGGT cameras: map keypoint to VGGT output space.
+                        u, v = placer._orig_to_vggt(kp2d[local_t, mhr70_j], oc, W_orig, H_orig)
+                        if not placer._in_bounds(u, v, oc[2], oc[3]):
                             continue
                         intr = placer.intrinsics[global_t, k].astype(np.float64)
                         if gt_intrinsics and k < len(gt_intrinsics):
@@ -873,7 +701,7 @@ def eval_cameras(
     Rotation error: geodesic angle (°) between VGGT and GT rotation matrices.
     Translation error: ||t_vggt * scale − t_gt_rel|| in metres, where t_gt_rel is
     the GT extrinsic re-expressed relative to the first available camera (= VGGT reference).
-    Intrinsics: converted from VGGT 518-space to original pixel space.
+    Intrinsics: converted from VGGT output space to original pixel space.
         Δfx (%) = (fx_vggt_orig − fx_gt) / fx_gt × 100
         Δcx, Δcy = principal point offset in original pixels
     """
@@ -917,7 +745,7 @@ def eval_cameras(
         vggt_R_all = placer.extrinsics[valid_frames, k, :3, :3]  # (N, 3, 3)
         vggt_t_all = placer.extrinsics[valid_frames, k, :3, 3]   # (N, 3)
 
-        # VGGT intrinsics in 518-space (use first valid frame — static camera)
+        # VGGT intrinsics in VGGT output space (use first valid frame — static camera)
         vggt_intr = placer.intrinsics[valid_frames[0], k]          # (3, 3)
         vggt_oc   = placer.original_coords[valid_frames[0], k]     # [x1,y1,x2,y2]
         vggt_os   = placer.original_size[valid_frames[0], k]       # [W_orig, H_orig]
@@ -1068,11 +896,14 @@ def _load_fusion_model(checkpoint: Path, device: "torch.device"):
     num_layers       = sum(1 for k in state
                            if k.startswith("pose_module.layers.") and k.endswith(".ff.norm.weight"))
     max_temporal_len = state["pose_module.temporal_pe.pe"].shape[0]
+    num_inducing     = state["betas_aggregator.inducing_points"].shape[0]
+    betas_emb_dim    = state["betas_aggregator.inducing_points"].shape[1]
     pose_module = PoseFusionModule(
         embedding_dim=embedding_dim, num_layers=num_layers,
         num_joints=num_joints, max_temporal_len=max_temporal_len,
     )
-    betas_agg = BetasAggregator(n_betas=10, hidden_dim=64, dropout=0.1)
+    betas_agg = BetasAggregator(n_betas=10, embedding_dim=betas_emb_dim,
+                                num_inducing=num_inducing, dropout=0.1)
     model = FusionWithBetas(pose_module, betas_agg).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
@@ -1187,8 +1018,23 @@ def run() -> None:
         cam_dirs = placer._cam_dirs
 
         if CAMERAS_ONLY:
-            scale = placer.estimate_scale()
-            eval_cameras(placer, scale, scene_name, cam_dirs)
+            fwd_c = _run_fusion_fwd(cam_dirs, FUSION_MODEL, FUSION_DEVICE)
+            if fwd_c is not None:
+                _fa, _fb, _mp, _fs = fwd_c
+                _pts = {pid: _fa[:, i] for i, pid in enumerate(_mp)}
+                _bm = {
+                    cam_dir / "body_data" / f"person_{pid}.npz": _fb[i]
+                    for i, pid in enumerate(_mp)
+                    for cam_dir in placer._cam_dirs
+                    if (cam_dir / "body_data" / f"person_{pid}.npz").exists()
+                }
+                _scale_c = placer.estimate_scale_triangulated(
+                    fused_betas_map=_bm, fused_pose_by_pid=_pts, frame_start=_fs,
+                )
+            else:
+                print("  [fusion] forward pass failed — skipping cameras eval")
+                continue
+            eval_cameras(placer, float(np.median(_scale_c)), scene_name, cam_dirs)
             continue
 
         gt_trans_raw = load_gt_trans(scene_name)
@@ -1218,9 +1064,53 @@ def run() -> None:
             status = f"{len(gt_intrinsics)} cameras" if gt_intrinsics else "NOT FOUND"
             print(f"  GT intrinsics: {status}")
 
-        # Predicted scale (bone-length method) — raw SAM3D betas.
-        scale_raw = placer.estimate_scale()
-        scale     = scale_raw  # will be updated to fused after fusion forward pass
+        # ── Fusion model forward pass (must run before scale estimation) ──────
+        assert FUSION_MODEL is not None, "A --checkpoint is required (fused pose needed for scale)"
+        fused_body_pose_by_ghost: dict[int, dict[int, np.ndarray]] | None = None
+        fused_pose_by_pid_arr: dict[int, np.ndarray] = {}
+        fused_betas_file_map: dict[Path, np.ndarray] = {}
+        fwd_frame_start = 0
+        fwd = _run_fusion_fwd(cam_dirs, FUSION_MODEL, FUSION_DEVICE)
+        if fwd is not None:
+            fused_pose_arr, fused_betas_arr, model_pids, fwd_frame_start = fwd
+            pid_to_slot = {pid: i for i, pid in enumerate(model_pids)}
+            T_fused = fused_pose_arr.shape[0]
+            fused_body_pose_by_ghost = {}
+            for ghost_pid in all_pids:
+                if ghost_pid not in pid_to_slot:
+                    continue
+                slot = pid_to_slot[ghost_pid]
+                fused_pose_by_pid_arr[ghost_pid] = fused_pose_arr[:, slot]  # (T, 54, 6)
+                frames_dict: dict[int, np.ndarray] = {}
+                for t_local in range(T_fused):
+                    global_t = fwd_frame_start + t_local
+                    aa = _6d_to_aa(fused_pose_arr[t_local, slot, :21])
+                    frames_dict[global_t] = aa.reshape(63).astype(np.float32)
+                fused_body_pose_by_ghost[ghost_pid] = frames_dict
+            if fused_betas_arr is not None:
+                for ghost_pid in all_pids:
+                    if ghost_pid in pid_to_slot:
+                        pred_betas_map_by_pid[ghost_pid] = fused_betas_arr[pid_to_slot[ghost_pid]]
+                for k, cam_dir in enumerate(cam_dirs):
+                    for ghost_pid in all_pids:
+                        body_file = cam_dir / "body_data" / f"person_{ghost_pid}.npz"
+                        if body_file.exists() and ghost_pid in pid_to_slot:
+                            fused_betas_file_map[body_file] = fused_betas_arr[pid_to_slot[ghost_pid]]
+        else:
+            print("  [fusion] forward pass failed — skipping scene")
+            continue
+
+        # ── Scale estimation (fused betas + fused pose) ───────────────────────
+        try:
+            scale = placer.estimate_scale_triangulated(
+                fused_betas_map=fused_betas_file_map,
+                fused_pose_by_pid=fused_pose_by_pid_arr,
+                frame_start=fwd_frame_start,
+            )  # (T,) per-frame scale
+        except RuntimeError as e:
+            print(f"  [scale] failed: {e} — skipping scene")
+            continue
+        scale_median = float(np.median(scale))  # scalar for display / eval_cameras
 
         # GT scale from camera baseline ratios (isolates scale error).
         gt_exts_list = load_gt_extrinsics(scene_name)
@@ -1247,8 +1137,6 @@ def run() -> None:
         _is_cam00 = np.allclose(R_w2ref, np.eye(3)) and np.allclose(t_w2ref, 0.0)
         if not _is_cam00:
             print(f"  NOTE: first cam is {cam_dirs[0].name} — re-expressing GT in its frame")
-
-        # (agg_scale.append moved to after fusion block so it captures fused scale)
 
         # Transform GT pelvis positions to VGGT reference frame.
         # correct_gt_pelvis returns positions in RICH world; apply R_w2ref, t_w2ref.
@@ -1315,64 +1203,30 @@ def run() -> None:
                 matched_gt = min(gt_pids_list, key=lambda p: abs(p - ghost_pid))
                 gt_betas_by_ghost[ghost_pid] = gt_betas_map[matched_gt]
 
-        # Scale with GT betas (oracle upper bound for bone-length scale).
-        scale_gt_betas: float | None = None
+        # Scale with GT betas + fused pose (oracle upper bound for bone-length scale).
+        scale_gt_betas: np.ndarray | None = None
+        scale_gt_betas_median: float | None = None
         if gt_betas_by_ghost:
-            _gt_b_file_map: dict[Path, np.ndarray] = {}
-            for _cam_dir in cam_dirs:
-                for _ghost_pid in all_pids:
-                    _bf = _cam_dir / "body_data" / f"person_{_ghost_pid}.npz"
-                    if _bf.exists() and _ghost_pid in gt_betas_by_ghost:
-                        _gt_b_file_map[_bf] = gt_betas_by_ghost[_ghost_pid]
+            _gt_b_file_map: dict[Path, np.ndarray] = {
+                _cam_dir / "body_data" / f"person_{_ghost_pid}.npz": gt_betas_by_ghost[_ghost_pid]
+                for _cam_dir in cam_dirs
+                for _ghost_pid in all_pids
+                if (_cam_dir / "body_data" / f"person_{_ghost_pid}.npz").exists()
+                and _ghost_pid in gt_betas_by_ghost
+            }
             try:
-                scale_gt_betas = placer.estimate_scale(fused_betas_map=_gt_b_file_map)
+                scale_gt_betas = placer.estimate_scale_triangulated(
+                    fused_betas_map=_gt_b_file_map,
+                    fused_pose_by_pid=fused_pose_by_pid_arr,
+                    frame_start=fwd_frame_start,
+                )  # (T,) per-frame
+                scale_gt_betas_median = float(np.median(scale_gt_betas))
             except RuntimeError:
                 pass
 
-        # ── Fusion model forward pass (optional) ─────────────────────────────
-        # When --checkpoint is provided, fused body_pose replaces raw SAM3D
-        # for all "pred pose" calls.  Also overrides pred_betas_map_by_pid.
-        fused_body_pose_by_ghost: dict[int, dict[int, np.ndarray]] | None = None
-        if FUSION_MODEL is not None:
-            fwd = _run_fusion_fwd(cam_dirs, FUSION_MODEL, FUSION_DEVICE)
-            if fwd is not None:
-                fused_pose_arr, fused_betas_arr, model_pids, fwd_frame_start = fwd
-                pid_to_slot = {pid: i for i, pid in enumerate(model_pids)}
-                T_fused = fused_pose_arr.shape[0]
-                fused_body_pose_by_ghost = {}
-                for ghost_pid in all_pids:
-                    if ghost_pid not in pid_to_slot:
-                        continue
-                    slot = pid_to_slot[ghost_pid]
-                    frames_dict: dict[int, np.ndarray] = {}
-                    for t_local in range(T_fused):
-                        global_t = fwd_frame_start + t_local
-                        aa = _6d_to_aa(fused_pose_arr[t_local, slot, :21])  # (21, 3)
-                        frames_dict[global_t] = aa.reshape(63).astype(np.float32)
-                    fused_body_pose_by_ghost[ghost_pid] = frames_dict
-                if fused_betas_arr is not None:
-                    for ghost_pid in all_pids:
-                        if ghost_pid in pid_to_slot:
-                            pred_betas_map_by_pid[ghost_pid] = fused_betas_arr[pid_to_slot[ghost_pid]]
-                    # Re-estimate scale with fused betas so it is consistent with
-                    # what we use downstream (FK bone lengths from fused betas).
-                    fused_betas_file_map: dict[Path, np.ndarray] = {}
-                    for k, cam_dir in enumerate(cam_dirs):
-                        for ghost_pid in all_pids:
-                            body_file = cam_dir / "body_data" / f"person_{ghost_pid}.npz"
-                            if body_file.exists() and ghost_pid in pid_to_slot:
-                                fused_betas_file_map[body_file] = fused_betas_arr[pid_to_slot[ghost_pid]]
-                    try:
-                        scale = placer.estimate_scale(fused_betas_map=fused_betas_file_map)
-                    except RuntimeError:
-                        pass  # keep raw-SAM3D scale if no valid samples
-            else:
-                print("  [fusion] forward pass failed — using raw SAM3D pose")
-
-        # Record all scale variants now that fused scale is finalised.
+        # Record scale variants (use medians for display).
         if gt_scale is not None:
-            scale_fused = scale if (FUSION_MODEL is not None and scale != scale_raw) else None
-            agg_scale.append((scene_name, scale_raw, scale_fused, scale_gt_betas, gt_scale))
+            agg_scale.append((scene_name, scale_median, scale_gt_betas_median, gt_scale))
 
         # Helper: run eval + accumulate cross-scene errors.
         # Returns the ghost→gt pid match so orient eval can reuse it.
@@ -1408,23 +1262,22 @@ def run() -> None:
                       f"mean={np.mean(e):.1f}°  <30°={(e<30).mean()*100:5.1f}%")
             print()
 
-        # ── Baseline: hip-midpoint back-projection ───────────────────────────
-        pm_hip = _run("Hip midpoint",
-                      _predict_translations(placer, scale, cam_dirs, all_pids, gt_intrinsics),
-                      gt_trans)
-
-        # ── PnP ─────────────────────────────────────────────────────────────
-        preds_pnp, pnp_orients = predict_translations_pnp(
-            placer, scale, cam_dirs, all_pids, pred_betas_map_by_pid, gt_intrinsics,
-        )
-        pm_pnp = _run("PnP", preds_pnp, gt_trans)
-
         # ── Procrustes DLT all-cams, pred scale ──────────────────────────────
         preds_dlt, ors_dlt = predict_translations_procrustes(
             placer, scale, cam_dirs, all_pids, pred_betas_map_by_pid, gt_intrinsics,
             gt_body_pose_map=fused_body_pose_by_ghost,
         )
         pm_dlt = _run("Proc DLT | pred scale | pred pose", preds_dlt, gt_trans)
+
+        pm_dlt_pgb = pm_dlt
+        if gt_betas_by_ghost:
+            _scale_pgb = scale_gt_betas if scale_gt_betas is not None else scale  # (T,) array
+            preds_dlt_pgb, ors_dlt_pgb = predict_translations_procrustes(
+                placer, _scale_pgb, cam_dirs, all_pids, pred_betas_map_by_pid, gt_intrinsics,
+                gt_body_pose_map=fused_body_pose_by_ghost,
+                gt_betas_by_pid=gt_betas_by_ghost,
+            )
+            pm_dlt_pgb = _run("Proc DLT | pred scale | pred pose | GT betas", preds_dlt_pgb, gt_trans)
 
         pm_dlt_gp = pm_dlt
         if has_gt_pose:
@@ -1437,6 +1290,7 @@ def run() -> None:
 
         # ── Procrustes DLT all-cams, GT scale ────────────────────────────────
         pm_dlt_gs = pm_dlt
+        pm_dlt_gs_pgb = pm_dlt_pgb
         pm_dlt_gs_gp = pm_dlt_gp
         if gt_scale is not None:
             preds_dlt_gs, ors_dlt_gs = predict_translations_procrustes(
@@ -1444,6 +1298,14 @@ def run() -> None:
                 gt_body_pose_map=fused_body_pose_by_ghost,
             )
             pm_dlt_gs = _run("Proc DLT | GT scale  | pred pose", preds_dlt_gs, gt_trans)
+
+            if gt_betas_by_ghost:
+                preds_dlt_gs_pgb, ors_dlt_gs_pgb = predict_translations_procrustes(
+                    placer, gt_scale, cam_dirs, all_pids, pred_betas_map_by_pid, gt_intrinsics,
+                    gt_body_pose_map=fused_body_pose_by_ghost,
+                    gt_betas_by_pid=gt_betas_by_ghost,
+                )
+                pm_dlt_gs_pgb = _run("Proc DLT | GT scale  | pred pose | GT betas",  preds_dlt_gs_pgb, gt_trans)
 
             if has_gt_pose:
                 preds_dlt_gs_gp, ors_dlt_gs_gp = predict_translations_procrustes(
@@ -1475,6 +1337,7 @@ def run() -> None:
         # ── Oracle: GT cameras ────────────────────────────────────────────────
         pm_ora_pp_ps = pm_dlt
         pm_ora_pp_gs = pm_dlt_gs
+        pm_ora_pgb   = pm_dlt_pgb
         pm_ora_gp    = pm_dlt_gp
         if has_gt_cams:
             preds_ora_pp_ps, ors_ora_pp_ps = predict_translations_procrustes(
@@ -1484,6 +1347,16 @@ def run() -> None:
                 gt_body_pose_map=fused_body_pose_by_ghost,
             )
             pm_ora_pp_ps = _run("GT cams | pred pose | pred scale", preds_ora_pp_ps, gt_trans)
+
+            if gt_betas_by_ghost:
+                preds_ora_pgb, ors_ora_pgb = predict_translations_procrustes(
+                    placer, _scale_pgb, cam_dirs, all_pids, pred_betas_map_by_pid,
+                    gt_intrinsics=None,
+                    gt_cameras=gt_cameras_oracle,
+                    gt_body_pose_map=fused_body_pose_by_ghost,
+                    gt_betas_by_pid=gt_betas_by_ghost,
+                )
+                pm_ora_pgb = _run("GT cams | pred pose | pred scale | GT betas", preds_ora_pgb, gt_trans)
 
             if gt_scale is not None:
                 preds_ora_pp_gs, ors_ora_pp_gs = predict_translations_procrustes(
@@ -1526,12 +1399,15 @@ def run() -> None:
                 for gt_pid, frames in gt_orient.items()
             }
         if gt_orient:
-            _run_orient("Orient — PnP",                               pnp_orients,   gt_orient, pm_pnp)
             _run_orient("Orient — Proc DLT | pred scale | pred pose", ors_dlt,       gt_orient, pm_dlt)
+            if gt_betas_by_ghost:
+                _run_orient("Orient — Proc DLT | pred scale | pred pose | GT betas", ors_dlt_pgb, gt_orient, pm_dlt_pgb)
             if has_gt_pose:
                 _run_orient("Orient — Proc DLT | pred scale | GT pose+betas",  ors_dlt_gp,    gt_orient, pm_dlt_gp)
             if gt_scale is not None:
                 _run_orient("Orient — Proc DLT | GT scale  | pred pose", ors_dlt_gs,   gt_orient, pm_dlt_gs)
+                if gt_betas_by_ghost:
+                    _run_orient("Orient — Proc DLT | GT scale  | pred pose | GT betas", ors_dlt_gs_pgb, gt_orient, pm_dlt_gs_pgb)
                 if has_gt_pose:
                     _run_orient("Orient — Proc DLT | GT scale  | GT pose+betas", ors_dlt_gs_gp, gt_orient, pm_dlt_gs_gp)
             if has_gt_rot:
@@ -1540,6 +1416,8 @@ def run() -> None:
                     _run_orient("Orient — Proc DLT | GT scale  | GT rot", ors_dlt_gr_gs, gt_orient, pm_dlt_gr_gs)
             if has_gt_cams:
                 _run_orient("Orient — GT cams | pred pose | pred scale", ors_ora_pp_ps, gt_orient, pm_ora_pp_ps)
+                if gt_betas_by_ghost:
+                    _run_orient("Orient — GT cams | pred pose | pred scale | GT betas", ors_ora_pgb, gt_orient, pm_ora_pgb)
                 if gt_scale is not None:
                     _run_orient("Orient — GT cams | pred pose | GT scale", ors_ora_pp_gs, gt_orient, pm_ora_pp_gs)
                 if has_gt_pose:
@@ -1550,10 +1428,10 @@ def run() -> None:
             print("  [Global orient] no GT data\n")
 
         # ── Bone length error (pred betas vs GT betas) ───────────────────────
-        eval_bone_lengths(placer, pm_hip, gt_betas_map, pred_betas_map_by_pid)
+        eval_bone_lengths(placer, pm_dlt, gt_betas_map, pred_betas_map_by_pid)
 
         # ── Per-camera diagnostics ───────────────────────────────────────────
-        eval_cameras(placer, scale, scene_name, cam_dirs)
+        eval_cameras(placer, scale_median, scene_name, cam_dirs)
 
     # ── Aggregate summary across all scenes ──────────────────────────────────
     print(f"\n{'='*65}")
@@ -1578,28 +1456,23 @@ def run() -> None:
                   f"{(e<30).mean()*100:>5.1f}%")
     if agg_scale:
         def _epct(pred, gt): return (pred - gt) / gt * 100.0 if pred is not None else float("nan")
-        print(f"\n  {'Scene':<40}  {'raw':>7}  {'fused':>7}  {'gt_b':>6}  {'gt_cam':>7}  "
-              f"{'err_raw':>8}  {'err_fused':>9}  {'err_gtb':>8}")
-        print(f"  {'-'*40}  {'-'*7}  {'-'*7}  {'-'*6}  {'-'*7}  {'-'*8}  {'-'*9}  {'-'*8}")
-        raw_errs, fused_errs, gtb_errs = [], [], []
-        for scene, s_raw, s_fused, s_gtb, s_gt in agg_scale:
-            er = _epct(s_raw,   s_gt)
+        print(f"\n  {'Scene':<40}  {'fused':>7}  {'gt_b':>6}  {'gt_cam':>7}  "
+              f"{'err_fused':>9}  {'err_gtb':>8}")
+        print(f"  {'-'*40}  {'-'*7}  {'-'*6}  {'-'*7}  {'-'*9}  {'-'*8}")
+        fused_errs, gtb_errs = [], []
+        for scene, s_fused, s_gtb, s_gt in agg_scale:
             ef = _epct(s_fused, s_gt)
             eg = _epct(s_gtb,   s_gt)
-            raw_errs.append(er)
             if not np.isnan(ef): fused_errs.append(ef)
             if not np.isnan(eg): gtb_errs.append(eg)
-            sf  = f"{s_fused:.4f}" if s_fused is not None else "  N/A "
             sg  = f"{s_gtb:.4f}"   if s_gtb   is not None else "  N/A"
             eef = f"{ef:+.1f}%"    if not np.isnan(ef)   else "  N/A  "
             eeg = f"{eg:+.1f}%"    if not np.isnan(eg)   else "  N/A  "
-            print(f"  {scene:<40}  {s_raw:>7.4f}  {sf:>7}  {sg:>6}  {s_gt:>7.4f}  "
-                  f"{er:>+7.1f}%  {eef:>9}  {eeg:>8}")
-        raw_a = np.array(raw_errs)
-        print(f"\n  AGGREGATE raw   : median={np.nanmedian(raw_a):+.1f}%  mean={np.nanmean(raw_a):+.1f}%")
+            print(f"  {scene:<40}  {s_fused:>7.4f}  {sg:>6}  {s_gt:>7.4f}  "
+                  f"{eef:>9}  {eeg:>8}")
         if fused_errs:
             fa = np.array(fused_errs)
-            print(f"  AGGREGATE fused : median={np.nanmedian(fa):+.1f}%  mean={np.nanmean(fa):+.1f}%")
+            print(f"\n  AGGREGATE fused : median={np.nanmedian(fa):+.1f}%  mean={np.nanmean(fa):+.1f}%")
         if gtb_errs:
             ga = np.array(gtb_errs)
             print(f"  AGGREGATE gt_b  : median={np.nanmedian(ga):+.1f}%  mean={np.nanmean(ga):+.1f}%")

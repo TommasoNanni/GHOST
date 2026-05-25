@@ -1,7 +1,8 @@
 """
 Naive multi-view mean aggregator baseline.
 
-Reports RR-MPJPE / RR-MPJRE / Betas-MSE — the same metrics as train_rich_v2.py.
+Reports RR-MPJPE / RR-MPJRE / Betas-MSE — the same metrics as train_rich_v2.py,
+evaluated on the val split only (same round-robin logic as train_rich_v2.py).
 
 For every (frame, person):
   - Joints 1-54 (parent-relative, camera-invariant): visibility-weighted mean
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -37,13 +39,54 @@ RICH_OUTPUT_ROOT = Path(
     "/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich11_segmentation_test"
 )
 
+SKIP_SCENES: list[str] = ["Pavallion_013_plankjack"]
+SKIP_CAMERAS: dict[str, list[str]] = {
+    "Pavallion_003_018_tossball": ["cam_06"],
+    "ParkingLot2_008_pushup2":   ["cam_03"],
+    "ParkingLot2_014_takingphotos2": ["cam_01"],
+}
+NUM_VAL_SCENES = 10
+
 METRIC_STRIDE = 8
+
+
+def _val_scenes(output_root: Path) -> list[Path]:
+    """Round-robin val split — mirrors _split_by_location in train_rich_v2.py."""
+    all_dirs = sorted(d for d in output_root.iterdir() if d.is_dir())
+    scenes = [d for d in all_dirs if d.name not in SKIP_SCENES]
+
+    by_location: dict[str, list[Path]] = defaultdict(list)
+    for s in scenes:
+        by_location[s.name.split("_")[0]].append(s)
+
+    available: dict[str, list[Path]] = {}
+    for loc in sorted(by_location):
+        loc_scenes = sorted(by_location[loc], key=lambda s: s.name)
+        available[loc] = loc_scenes[1:]  # first scene per location → mandatory train
+
+    locs = sorted(available)
+    val: list[Path] = []
+    while len(val) < NUM_VAL_SCENES:
+        picked_any = False
+        for loc in locs:
+            if len(val) >= NUM_VAL_SCENES:
+                break
+            if available[loc]:
+                val.append(available[loc].pop())
+                picked_any = True
+        if not picked_any:
+            break
+
+    return val
 
 
 def _process_scene(scene_dir: Path, mc: MetricCollection) -> bool:
     try:
         dp = RICHFusionDatapoint(
-            scene_dir=scene_dir, rich_data_root=CONFIG.data.rich_data_root
+            scene_dir=scene_dir,
+            rich_data_root=CONFIG.data.rich_data_root,
+            rich_gt_dir=CONFIG.data.rich_gt_dir,
+            exclude_cameras=SKIP_CAMERAS.get(scene_dir.name, []),
         )
         ds = RICHFusionDataset([dp])
         inputs, targets = ds[0]
@@ -132,8 +175,10 @@ def _process_scene(scene_dir: Path, mc: MetricCollection) -> bool:
 
 
 def main():
-    scene_dirs = sorted(d for d in RICH_OUTPUT_ROOT.iterdir() if d.is_dir())
-    print(f"Found {len(scene_dirs)} scenes under {RICH_OUTPUT_ROOT.name}")
+    scene_dirs = _val_scenes(RICH_OUTPUT_ROOT)
+    print(f"Val scenes ({len(scene_dirs)}) under {RICH_OUTPUT_ROOT.name}:")
+    for d in sorted(scene_dirs, key=lambda s: s.name):
+        print(f"  {d.name}")
 
     mc = MetricCollection([RootRelativeMPJPE(), RootRelativeMPJRE(), BetasMSE()])
 

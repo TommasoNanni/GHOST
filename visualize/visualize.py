@@ -408,6 +408,7 @@ def _log_pinhole(cam_name: str, cam: CameraView) -> None:
             width=cam.W,
             height=cam.H,
             camera_xyz=rr.ViewCoordinates.RDF,   # OpenCV: right-down-forward
+            image_plane_distance=0.3,
         ),
         static=True,
     )
