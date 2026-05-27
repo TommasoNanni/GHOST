@@ -37,6 +37,17 @@ if str(_REPO_ROOT) not in sys.path:
 
 from fusion.placer import BodyPlacer, _SMPLX_TO_MHR70
 
+_EVAL_ROOT = Path(__file__).resolve().parent.parent / "evaluation"
+if str(_EVAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_EVAL_ROOT))
+from evaluate_on_rich_test import (
+    metric_wa_mpjpe, metric_w_mpjpe, metric_ga_mpjpe, metric_pa_mpjpe, metric_rte,
+    load_gt_body_data as _load_gt_body_data_chromm,
+    _BODY_JOINT_IDX,
+)
+
+_6D_TO_AA_IMPORT = None  # lazily set to _6d_to_aa from evaluate_on_rich_test
+
 SCENE_ROOT:       Path
 RICH_ROOT:        Path
 SMPLX_MODEL:      Path
@@ -397,7 +408,7 @@ def predict_translations_procrustes(
     gt_body_pose_map: dict[int, dict[int, np.ndarray]] | None = None,
     gt_cameras: list[tuple[np.ndarray, np.ndarray] | None] | None = None,
     gt_betas_by_pid: dict[int, np.ndarray] | None = None,
-    gt_rot_cameras: list[np.ndarray | None] | None = None,
+    gt_transl_cameras: list[np.ndarray | None] | None = None,
 ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
     """Estimate root translation + global orient via multi-camera DLT + Procrustes.
 
@@ -486,11 +497,11 @@ def predict_translations_procrustes(
                         and k < len(gt_cameras)
                         and gt_cameras[k] is not None
                     )
-                    use_gt_rot = (
+                    use_gt_transl = (
                         not use_gt_cam
-                        and gt_rot_cameras is not None
-                        and k < len(gt_rot_cameras)
-                        and gt_rot_cameras[k] is not None
+                        and gt_transl_cameras is not None
+                        and k < len(gt_transl_cameras)
+                        and gt_transl_cameras[k] is not None
                     )
 
                     if use_gt_cam:
@@ -502,16 +513,15 @@ def predict_translations_procrustes(
                         if not (0.0 <= u < W_orig and 0.0 <= v < H_orig):
                             continue
                         P = K_gt_resized.astype(np.float64) @ E_gt_metric.astype(np.float64)
-                    elif use_gt_rot:
-                        # Hybrid: GT rotation + VGGT translation × scale.
+                    elif use_gt_transl:
+                        # Hybrid: VGGT predicted rotation + GT translation (metric, no scaling).
                         # Observations are in VGGT output space.
                         u, v = placer._orig_to_vggt(kp2d[local_t, mhr70_j], oc, W_orig, H_orig)
                         if not placer._in_bounds(u, v, oc[2], oc[3]):
                             continue
                         intr = placer.intrinsics[global_t, k].astype(np.float64)
                         ext = placer.extrinsics[global_t, k].astype(np.float64).copy()
-                        ext[:3, :3] = gt_rot_cameras[k].astype(np.float64)
-                        ext[:3, 3] *= scale
+                        ext[:3, 3] = gt_transl_cameras[k].astype(np.float64)
                         P = intr @ ext
                     else:
                         # VGGT cameras: map keypoint to VGGT output space.
@@ -525,7 +535,7 @@ def predict_translations_procrustes(
                             intr[0, 2] = float(oc[0]) + float(gt_K[0, 2]) * intr[0, 0] / float(gt_K[0, 0])
                             intr[1, 2] = float(oc[1]) + float(gt_K[1, 2]) * intr[1, 1] / float(gt_K[1, 1])
                         ext = placer.extrinsics[global_t, k].astype(np.float64).copy()
-                        ext[:3, 3] *= scale
+                        ext[:3, 3] *= float(scale[global_t]) if isinstance(scale, np.ndarray) else scale
                         P = intr @ ext
 
                     pmats.append(P)
@@ -639,6 +649,102 @@ _BONE_NAMES = {
     (4,  7):  "L tibia  ",
     (5,  8):  "R tibia  ",
 }
+
+
+def eval_chromm_metrics(
+    label: str,
+    placer: "BodyPlacer",
+    trans_dict: dict[int, dict[int, np.ndarray]],
+    orient_dict: dict[int, dict[int, np.ndarray]],
+    pid_match: dict[int, int],
+    gt_body_data: "dict[int, dict[int, dict]]",
+    fused_pose_arr: np.ndarray,        # (T_scene, P, 54, 6) from _run_fusion_fwd
+    pid_to_slot: dict[int, int],       # ghost_pid → slot in fused_pose_arr
+    betas_by_pid: dict[int, np.ndarray],
+    frame_start: int,
+    agg: dict[str, list[float]],
+) -> None:
+    """Compute WA-MPJPE, W-MPJPE, GA-MPJPE, PA-MPJPE, RTE and print + accumulate."""
+    from fusion.placer import _6d_to_aa_batch  # noqa: PLC0415
+
+    if not pid_match:
+        return
+
+    all_frames: set[int] = set()
+    for ghost_pid in pid_match:
+        for frames in trans_dict.get(ghost_pid, {}).keys():
+            all_frames.add(frames)
+    if not all_frames:
+        return
+
+    frame_start_t = min(all_frames)
+    frame_end_t   = max(all_frames)
+    T = frame_end_t - frame_start_t + 1
+    P = len(pid_match)
+    J = len(_BODY_JOINT_IDX)
+
+    pred_joints = np.full((T, P, J, 3), np.nan, dtype=np.float32)
+    pred_roots  = np.full((T, P, 3),    np.nan, dtype=np.float32)
+    gt_joints   = np.full((T, P, J, 3), np.nan, dtype=np.float32)
+    gt_roots    = np.full((T, P, 3),    np.nan, dtype=np.float32)
+
+    for slot, (ghost_pid, gt_pid) in enumerate(sorted(pid_match.items())):
+        betas = betas_by_pid.get(ghost_pid, np.zeros(10, dtype=np.float32))
+        p_slot = pid_to_slot.get(ghost_pid)
+
+        # ── Predicted world joints ────────────────────────────────────────────
+        for global_t, pelvis_world in trans_dict.get(ghost_pid, {}).items():
+            R_mat = orient_dict.get(ghost_pid, {}).get(global_t)
+            if R_mat is None or p_slot is None:
+                continue
+            t_rel = int(global_t) - frame_start_t
+            if not (0 <= t_rel < T):
+                continue
+            t_fused = int(global_t) - frame_start
+            if not (0 <= t_fused < fused_pose_arr.shape[0]):
+                continue
+            bp_6d = fused_pose_arr[t_fused, p_slot, :21]   # (21, 6)
+            bp_aa = _6d_to_aa_batch(bp_6d).reshape(63)
+            J_can = placer._smplx_fk(
+                betas[np.newaxis],
+                bp_aa[np.newaxis],
+                np.zeros((1, 3), dtype=np.float32),
+            )[0]  # (55, 3)
+            J_world = (R_mat @ (J_can - J_can[0]).T).T + pelvis_world
+            pred_joints[t_rel, slot] = J_world[_BODY_JOINT_IDX]
+            pred_roots[t_rel,  slot] = J_world[0]
+
+        # ── GT world joints ───────────────────────────────────────────────────
+        for frame_idx, params in gt_body_data.get(gt_pid, {}).items():
+            t_rel = int(frame_idx) - frame_start_t
+            if not (0 <= t_rel < T):
+                continue
+            J_gt = placer._smplx_fk(
+                params["betas"][np.newaxis],
+                params["body_pose"][np.newaxis],
+                params["global_orient"][np.newaxis],
+            )[0] + params["transl"]
+            gt_joints[t_rel, slot] = J_gt[_BODY_JOINT_IDX]
+            gt_roots[t_rel,  slot] = J_gt[0]
+
+    valid = (
+        np.isfinite(pred_joints).all((-2, -1)) &
+        np.isfinite(gt_joints).all((-2, -1))
+    )
+    if not valid.any():
+        print(f"  [{label}] CHROMM: no valid pairs")
+        return
+
+    wa  = metric_wa_mpjpe(pred_joints, gt_joints, valid)
+    w   = metric_w_mpjpe( pred_joints, gt_joints, valid)
+    ga  = metric_ga_mpjpe(pred_joints, gt_joints, valid)
+    pa  = metric_pa_mpjpe(pred_joints, gt_joints, valid)
+    rte = metric_rte(pred_roots, gt_roots)
+
+    print(f"  [{label}] WA={wa:.1f}mm  W={w:.1f}mm  GA={ga:.1f}mm  PA={pa:.1f}mm  RTE={rte:.2f}%")
+    for k, v in [("wa", wa), ("w", w), ("ga", ga), ("pa", pa), ("rte", rte)]:
+        if np.isfinite(v):
+            agg[f"{label}/{k}"].append(v)
 
 
 def eval_bone_lengths(
@@ -1005,6 +1111,7 @@ def run() -> None:
     agg_trans:  dict[str, list[float]] = defaultdict(list)
     agg_orient: dict[str, list[float]] = defaultdict(list)
     agg_scale:  list[tuple[str, float, float, float | None, float | None]] = []  # (scene, raw, fused, gt_betas, gt_cam)
+    agg_chromm: dict[str, list[float]] = defaultdict(list)  # "{label}/{metric}" → values
 
     for scene_dir in scenes:
         scene_name = scene_dir.name
@@ -1041,6 +1148,7 @@ def run() -> None:
         gt_betas_map = load_gt_betas(scene_name)
         assert gt_trans_raw, f"No GT translations found for scene {scene_name}"
         assert gt_betas_map, f"No GT betas found for scene {scene_name}"
+        gt_body_data_chromm = _load_gt_body_data_chromm(scene_name, RICH_ROOT, split="train")
 
         gt_trans = correct_gt_pelvis(gt_trans_raw, gt_betas_map, placer)
         K = len(cam_dirs)
@@ -1154,7 +1262,7 @@ def run() -> None:
         # then re-express extrinsic relative to the VGGT reference frame so the
         # DLT result is in the same frame as all other predictions.
         gt_cameras_oracle: list[tuple[np.ndarray, np.ndarray] | None] = []
-        gt_rot_cameras_list: list[np.ndarray | None] = []
+        gt_transl_cameras_list: list[np.ndarray | None] = []
         for k, cam_dir in enumerate(cam_dirs):
             _m = re.search(r"\d+", cam_dir.name)
             gt_idx = int(_m.group()) if _m else k
@@ -1176,15 +1284,15 @@ def run() -> None:
                     t_i_rel = E_i[:3, 3] - R_i_rel @ t_w2ref
                     E_i_rel = np.concatenate([R_i_rel, t_i_rel[:, np.newaxis]], axis=1)
                     gt_cameras_oracle.append((K_r, E_i_rel))
-                    gt_rot_cameras_list.append(R_i_rel.astype(np.float32))
+                    gt_transl_cameras_list.append(t_i_rel.astype(np.float32))
                 else:
                     gt_cameras_oracle.append(None)
-                    gt_rot_cameras_list.append(None)
+                    gt_transl_cameras_list.append(None)
             else:
                 gt_cameras_oracle.append(None)
-                gt_rot_cameras_list.append(None)
+                gt_transl_cameras_list.append(None)
         has_gt_cams = any(c is not None for c in gt_cameras_oracle)
-        has_gt_rot = any(r is not None for r in gt_rot_cameras_list)
+        has_gt_transl = any(t is not None for t in gt_transl_cameras_list)
 
         # ── GT body_pose map keyed by ghost pid ───────────────────────────────
         gt_body_pose_raw = load_gt_body_pose(scene_name)
@@ -1268,6 +1376,12 @@ def run() -> None:
             gt_body_pose_map=fused_body_pose_by_ghost,
         )
         pm_dlt = _run("Proc DLT | pred scale | pred pose", preds_dlt, gt_trans)
+        eval_chromm_metrics(
+            "Proc DLT | pred scale | pred pose",
+            placer, preds_dlt, ors_dlt, pm_dlt, gt_body_data_chromm,
+            fused_pose_arr, pid_to_slot, pred_betas_map_by_pid,
+            fwd_frame_start, agg_chromm,
+        )
 
         pm_dlt_pgb = pm_dlt
         if gt_betas_by_ghost:
@@ -1298,6 +1412,12 @@ def run() -> None:
                 gt_body_pose_map=fused_body_pose_by_ghost,
             )
             pm_dlt_gs = _run("Proc DLT | GT scale  | pred pose", preds_dlt_gs, gt_trans)
+            eval_chromm_metrics(
+                "Proc DLT | GT scale  | pred pose",
+                placer, preds_dlt_gs, ors_dlt_gs, pm_dlt_gs, gt_body_data_chromm,
+                fused_pose_arr, pid_to_slot, pred_betas_map_by_pid,
+                fwd_frame_start, agg_chromm,
+            )
 
             if gt_betas_by_ghost:
                 preds_dlt_gs_pgb, ors_dlt_gs_pgb = predict_translations_procrustes(
@@ -1315,24 +1435,21 @@ def run() -> None:
                 )
                 pm_dlt_gs_gp = _run("Proc DLT | GT scale  | GT pose+betas", preds_dlt_gs_gp, gt_trans)
 
-        # ── Hybrid: GT rotation + VGGT translation (pred / GT scale) ────────────
-        pm_dlt_gr_ps = pm_dlt
-        pm_dlt_gr_gs = pm_dlt_gs
-        if has_gt_rot:
-            preds_dlt_gr_ps, ors_dlt_gr_ps = predict_translations_procrustes(
+        # ── Hybrid: VGGT rotation + GT translation (no scale needed) ─────────────
+        pm_dlt_gt_ps = pm_dlt
+        if has_gt_transl:
+            preds_dlt_gt_ps, ors_dlt_gt_ps = predict_translations_procrustes(
                 placer, scale, cam_dirs, all_pids, pred_betas_map_by_pid, gt_intrinsics,
-                gt_rot_cameras=gt_rot_cameras_list,
+                gt_transl_cameras=gt_transl_cameras_list,
                 gt_body_pose_map=fused_body_pose_by_ghost,
             )
-            pm_dlt_gr_ps = _run("Proc DLT | pred scale | GT rot", preds_dlt_gr_ps, gt_trans)
-
-            if gt_scale is not None:
-                preds_dlt_gr_gs, ors_dlt_gr_gs = predict_translations_procrustes(
-                    placer, gt_scale, cam_dirs, all_pids, pred_betas_map_by_pid, gt_intrinsics,
-                    gt_rot_cameras=gt_rot_cameras_list,
-                    gt_body_pose_map=fused_body_pose_by_ghost,
-                )
-                pm_dlt_gr_gs = _run("Proc DLT | GT scale  | GT rot", preds_dlt_gr_gs, gt_trans)
+            pm_dlt_gt_ps = _run("Proc DLT | GT transl | pred pose", preds_dlt_gt_ps, gt_trans)
+            eval_chromm_metrics(
+                "Proc DLT | GT transl | pred pose",
+                placer, preds_dlt_gt_ps, ors_dlt_gt_ps, pm_dlt_gt_ps, gt_body_data_chromm,
+                fused_pose_arr, pid_to_slot, pred_betas_map_by_pid,
+                fwd_frame_start, agg_chromm,
+            )
 
         # ── Oracle: GT cameras ────────────────────────────────────────────────
         pm_ora_pp_ps = pm_dlt
@@ -1347,6 +1464,12 @@ def run() -> None:
                 gt_body_pose_map=fused_body_pose_by_ghost,
             )
             pm_ora_pp_ps = _run("GT cams | pred pose | pred scale", preds_ora_pp_ps, gt_trans)
+            eval_chromm_metrics(
+                "GT cams | pred pose | pred scale",
+                placer, preds_ora_pp_ps, ors_ora_pp_ps, pm_ora_pp_ps, gt_body_data_chromm,
+                fused_pose_arr, pid_to_slot, pred_betas_map_by_pid,
+                fwd_frame_start, agg_chromm,
+            )
 
             if gt_betas_by_ghost:
                 preds_ora_pgb, ors_ora_pgb = predict_translations_procrustes(
@@ -1410,10 +1533,8 @@ def run() -> None:
                     _run_orient("Orient — Proc DLT | GT scale  | pred pose | GT betas", ors_dlt_gs_pgb, gt_orient, pm_dlt_gs_pgb)
                 if has_gt_pose:
                     _run_orient("Orient — Proc DLT | GT scale  | GT pose+betas", ors_dlt_gs_gp, gt_orient, pm_dlt_gs_gp)
-            if has_gt_rot:
-                _run_orient("Orient — Proc DLT | pred scale | GT rot", ors_dlt_gr_ps, gt_orient, pm_dlt_gr_ps)
-                if gt_scale is not None:
-                    _run_orient("Orient — Proc DLT | GT scale  | GT rot", ors_dlt_gr_gs, gt_orient, pm_dlt_gr_gs)
+            if has_gt_transl:
+                _run_orient("Orient — Proc DLT | GT transl | pred pose", ors_dlt_gt_ps, gt_orient, pm_dlt_gt_ps)
             if has_gt_cams:
                 _run_orient("Orient — GT cams | pred pose | pred scale", ors_ora_pp_ps, gt_orient, pm_ora_pp_ps)
                 if gt_betas_by_ghost:
@@ -1476,6 +1597,28 @@ def run() -> None:
         if gtb_errs:
             ga = np.array(gtb_errs)
             print(f"  AGGREGATE gt_b  : median={np.nanmedian(ga):+.1f}%  mean={np.nanmean(ga):+.1f}%")
+
+    if agg_chromm:
+        # Collect unique labels (preserve insertion order via dict key order)
+        _seen: dict[str, None] = {}
+        for k in agg_chromm:
+            label = k.rsplit("/", 1)[0]
+            _seen[label] = None
+        chromm_labels = list(_seen)
+        metrics = ["wa", "w", "ga", "pa", "rte"]
+        print(f"\n  CHROMM metrics (mm / %, aggregate means across scenes)")
+        header = f"  {'Method':<48}  {'WA':>7}  {'W':>7}  {'GA':>7}  {'PA':>7}  {'RTE':>7}"
+        print(header)
+        print(f"  {'-'*48}  {'-'*7}  {'-'*7}  {'-'*7}  {'-'*7}  {'-'*7}")
+        for label in chromm_labels:
+            row_vals = []
+            for m in metrics:
+                vals = agg_chromm.get(f"{label}/{m}", [])
+                row_vals.append(np.mean(vals) if vals else float("nan"))
+            wa, w, ga, pa, rte = row_vals
+            unit = lambda v, is_rte: f"{v:.2f}%" if is_rte else f"{v:.1f}mm"
+            print(f"  {label:<48}  {unit(wa,False):>7}  {unit(w,False):>7}  "
+                  f"{unit(ga,False):>7}  {unit(pa,False):>7}  {unit(rte,True):>7}")
 
 
 if __name__ == "__main__":

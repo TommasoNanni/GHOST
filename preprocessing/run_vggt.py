@@ -211,14 +211,18 @@ class VGGTPreprocessor:
     # ── Resolution helper ─────────────────────────────────────────────────────
 
     def _get_vggt_hw(self, frame_paths: list[list[Path | None]]) -> tuple[int, int]:
-        """Determine actual VGGT-Omega output (H, W) by preprocessing one image."""
+        """Determine actual VGGT-Omega output (H, W) by preprocessing all cameras of one frame.
+
+        Must use all cameras together (not just one) because load_and_preprocess_images
+        pads to a common size when cameras have different aspect ratios. Using a single
+        image underestimates the padded output dimensions, causing a shape mismatch in
+        the depth assignment loop and silently leaving depth all-zero.
+        """
         for paths in frame_paths:
-            for p in paths:
-                if p is not None:
-                    sample = load_and_preprocess_images(
-                        [str(p)], image_resolution=self.resolution
-                    )
-                    return int(sample.shape[-2]), int(sample.shape[-1])
+            present = [str(p) for p in paths if p is not None]
+            if present:
+                sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+                return int(sample.shape[-2]), int(sample.shape[-1])
         raise ValueError("No valid images found in frame_paths — cannot determine VGGT output size.")
 
     # ── Frame-loop (single GPU) ───────────────────────────────────────────────
@@ -455,6 +459,16 @@ class VGGTPreprocessor:
         depth_mm = np.clip(
             np.nan_to_num(depth, nan=0.0) * 1000.0, 0, 65535
         ).astype(np.uint16)
+
+        valid_frames = int(valid.any(axis=1).sum())
+        nonzero_px   = int(np.count_nonzero(depth_mm))
+        depth_finite = depth[np.isfinite(depth)]
+        depth_stats  = (f"raw depth: min={depth_finite.min():.4f} max={depth_finite.max():.4f} "
+                        f"mean={depth_finite.mean():.4f}") if depth_finite.size else "raw depth: all NaN"
+        logger.info(
+            f"Depth stats → valid_frames={valid_frames}/{depth_mm.shape[0]}  "
+            f"nonzero_pixels={nonzero_px}  {depth_stats}"
+        )
 
         np.savez_compressed(
             str(depth_path),

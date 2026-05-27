@@ -25,6 +25,9 @@ from pathlib import Path
 faulthandler.enable()
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# human_body_prior submodule: the actual Python package is one level deep.
+# Must be inserted before any other import touches human_body_prior.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "human_body_prior"))
 
 import torch
 import torch.distributed as dist
@@ -281,11 +284,14 @@ def main():
         "pose":           (PoseMSELoss(),                        pose_mse_weight),
         "shape":          (ShapeMSELoss(),                       shape_mse_weight),
         "joint_position": (JointPositionLoss(use_gt_betas=False), joint_position_weight),
+        "vposer":         (VPoserLoss(),                         vposer_weight),
+        "temporal":       (TemporalSmoothnessLoss(),             temporal_weight),
     }
 
     # ── Curriculum ────────────────────────────────────────────────────────────
     curriculum_schedule = {
         0: ["pose", "shape", "joint_position"],
+        50: ["vposer", "temporal"],
     }
 
     # ── Metrics ───────────────────────────────────────────────────────────────

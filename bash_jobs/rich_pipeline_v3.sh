@@ -1,6 +1,6 @@
 #!/bin/bash -l
-#SBATCH --time=12:00:00
-#SBATCH --account=a0185
+#SBATCH --time=1:30:00
+#SBATCH --account=a144
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
@@ -11,7 +11,7 @@
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=tnanni@ethz.ch
-#SBATCH --partition=normal
+#SBATCH --partition=debug
 
 set -euo pipefail
 
@@ -39,7 +39,7 @@ echo "Node:         $SLURMD_NODENAME"
 echo "Start:        $(date)"
 echo ""
 
-srun pixi run python -m scripts.rich_pipeline_v3
+pixi run python -m scripts.rich_pipeline_v3
 
 echo ""
 echo "Done: $(date)"

@@ -118,8 +118,10 @@ class BodyPlacer:
         self.original_coords = cam_npz["original_coords"]
         # (T, K, 2) int32  — [W_orig, H_orig] of the frame before padding
         self.original_size = cam_npz["original_size"]
-        # (T, K) bool
+        # (T, K) bool — fall back to non-NaN extrinsics for files saved before the valid-flag fix
         self.cam_valid = cam_npz["valid"]
+        if not self.cam_valid.any():
+            self.cam_valid = ~np.isnan(self.extrinsics[:, :, 0, 0])
         # (K,) bytes
         self.camera_names = cam_npz["camera_names"]
 
@@ -191,9 +193,9 @@ class BodyPlacer:
 
     def estimate_scale_triangulated(
         self,
+        fused_pose_by_pid: dict[int, np.ndarray],
         min_cams: int = 2,
         fused_betas_map: dict[Path, np.ndarray] | None = None,
-        fused_pose_by_pid: dict[int, np.ndarray],
         frame_start: int = 0,
     ) -> np.ndarray:
         """Return per-frame VGGT depth scale using multi-view triangulation (metres / VGGT unit).

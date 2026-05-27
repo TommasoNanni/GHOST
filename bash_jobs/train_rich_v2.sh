@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --time=01:30:00
+#SBATCH --time=06:00:00
 #SBATCH --account=a0185
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -11,7 +11,7 @@
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=tnanni@ethz.ch
-#SBATCH --partition=debug
+#SBATCH --partition=normal
 
 set -euo pipefail
 

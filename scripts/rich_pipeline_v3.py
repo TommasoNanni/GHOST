@@ -152,8 +152,16 @@ def _build_vggt_frame_paths(
     return frame_paths, camera_names
 
 
-def process_scene(scene, segmenter, estimator, reidentifier, output_dir, vggt_weights, vggt_devices, skip_geo_reid=True):
+def process_scene(scene, segmenter, estimator, reidentifier, output_dir, vggt_weights, vggt_devices, skip_geo_reid=True, skip_cams: set[str] | None = None):
     """Run the full pipeline (with VGGT) on a single scene."""
+    skip_cams = skip_cams or set()
+    if skip_cams:
+        removed = [v for v in scene.videos if v.video_id in skip_cams]
+        if removed:
+            print(f"  Skipping cameras: {[v.video_id for v in removed]}")
+            scene.videos = [v for v in scene.videos if v.video_id not in skip_cams]
+            scene.video_ids = [v.video_id for v in scene.videos]
+
     print(f"\n=== Scene: {scene.scene_id} ({len(scene)} videos) ===")
     for v in scene:
         print(f"  {v}")
@@ -299,10 +307,26 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir, vggt_we
     vggt_cameras_path = scene_output_dir / "vggt_cameras.npz"
     vggt_depth_path   = scene_output_dir / "vggt_depth.npz"
 
-    if vggt_cameras_path.exists() and vggt_depth_path.exists():
+    # A run is considered complete only if depth_valid has at least one True entry.
+    # Old pipeline runs saved depth as all-zero with depth_valid all-False.
+    def _depth_valid(path: Path) -> bool:
+        try:
+            return bool(np.load(path, mmap_mode="r")["depth_valid"].any())
+        except Exception:
+            return False
+
+    _vggt_done = (vggt_cameras_path.exists() and vggt_depth_path.exists()
+                  and _depth_valid(vggt_depth_path))
+
+    if _vggt_done:
         print(f"\n--- Step 6: VGGT (already done, skipping) ---")
     else:
-        print(f"\n--- Step 6: VGGT camera + depth estimation ---")
+        if vggt_cameras_path.exists() and vggt_depth_path.exists():
+            print(f"\n--- Step 6: VGGT depth stale/invalid — recomputing ---")
+            vggt_cameras_path.unlink()
+            vggt_depth_path.unlink()
+        else:
+            print(f"\n--- Step 6: VGGT camera + depth estimation ---")
         frame_paths, camera_names = _build_vggt_frame_paths(scene, video_dirs)
         if frame_paths:
             print(f"  {len(frame_paths)} frames × {len(camera_names)} cameras")
@@ -379,7 +403,19 @@ def main():
     parser.add_argument("--skip-geo-reid", action="store_true", default=True,
                         help="Skip step 6 (geometric ReID). Use when VGGT cameras "
                              "are newly estimated and geo-reid should be re-run later.")
+    parser.add_argument("--skip-cameras", type=str, nargs="+", default=[],
+                        metavar="SCENE_ID:CAM_ID",
+                        help="Cameras to skip, as 'scene_id:cam_id' pairs "
+                             "(e.g. Pavallion_003_plankjack:cam_03). "
+                             "Can be repeated for multiple cameras.")
     args = parser.parse_args()
+
+    skip_cams_map: dict[str, set[str]] = {}
+    for entry in args.skip_cameras:
+        if ":" not in entry:
+            parser.error(f"--skip-cameras: expected 'scene_id:cam_id', got {entry!r}")
+        scene_id, cam_id = entry.split(":", 1)
+        skip_cams_map.setdefault(scene_id, set()).add(cam_id)
 
     # Auto-detect CUDA devices if not specified.
     if args.vggt_devices:
@@ -447,6 +483,7 @@ def main():
                 vggt_weights=args.vggt_weights,
                 vggt_devices=vggt_devices,
                 skip_geo_reid=args.skip_geo_reid,
+                skip_cams=skip_cams_map.get(scene.scene_id, set()),
             )
         except Exception as e:
             logging.error(

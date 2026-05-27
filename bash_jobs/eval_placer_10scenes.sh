@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --account=a0185
+#SBATCH --account=a144
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=tnanni@ethz.ch
 
@@ -18,6 +18,6 @@ pixi run python scripts/eval_placer_trans.py \
     --rich_root   /capstor/scratch/cscs/tnanni/datasets/rich \
     --smplx_model body_models/SMPLX_NEUTRAL.pkl \
     --max_scenes  2 \
-    --checkpoint  checkpoints/fusion_module/best.pt \
+    --checkpoint  checkpoints/fusion_module_latest/best.pt \
     --device      cuda \
     > results/eval_placer_10scenes.txt 2>&1

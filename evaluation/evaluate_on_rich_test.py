@@ -481,7 +481,7 @@ def load_fusion_model(checkpoint: Path, device: torch.device) -> FusionWithBetas
         embedding_dim=emb_dim, num_layers=n_layers,
         num_joints=n_joints, max_temporal_len=max_tlen,
     )
-    betas_agg = BetasAggregator(n_betas=10, hidden_dim=64, dropout=0.1)
+    betas_agg = BetasAggregator(n_betas=10, embedding_dim=64, num_inducing=4, num_heads=4, dropout=0.3, input_noise_std=0.5)
     model = FusionWithBetas(pose_module, betas_agg).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
@@ -638,6 +638,83 @@ def evaluate_scene(
         R_w2ref = np.eye(3, dtype=np.float64)
         t_w2ref = np.zeros(3, dtype=np.float64)
 
+    # ── 5b. Camera + scale diagnostics ──────────────────────────────────────
+    cam_rot_err   = float("nan")
+    cam_t_cos     = float("nan")
+    gt_scale_val  = float("nan")
+    pred_scale_val = float("nan")
+    scale_err_pct  = float("nan")
+
+    if gt_exts:
+        E0     = gt_exts[_ref_idx].astype(np.float64)
+        R0_gt  = E0[:3, :3]
+        t0_gt  = E0[:3,  3]
+
+        vggt_names = [n.decode() if isinstance(n, bytes) else n
+                      for n in placer.camera_names]
+        rot_errs, t_coses, gt_scale_vals = [], [], []
+
+        for ki, cam_name in enumerate(vggt_names):
+            m = re.search(r"\d+", cam_name)
+            if not m:
+                continue
+            gt_idx = int(m.group())
+            if gt_idx >= len(gt_exts):
+                continue
+
+            # GT extrinsic re-rooted to first available camera
+            Ek    = gt_exts[gt_idx].astype(np.float64)
+            Rk_gt = Ek[:3, :3] @ R0_gt.T
+            tk_gt = Ek[:3,  3] - Ek[:3, :3] @ R0_gt.T @ t0_gt
+
+            # Predicted extrinsic: median over valid frames, re-orthogonalised
+            vmask = placer.cam_valid[:, ki]
+            if not vmask.any():
+                continue
+            ext_k = placer.extrinsics[vmask, ki]
+            R_med = np.median(ext_k[:, :3, :3], axis=0)
+            t_med = np.median(ext_k[:, :3,  3], axis=0)
+            U, _, Vt = np.linalg.svd(R_med)
+            R_med = U @ Vt
+            if np.linalg.det(R_med) < 0:
+                U[:, -1] *= -1; R_med = U @ Vt
+
+            if ki == 0:   # reference camera — skip (both [I|0] by construction)
+                continue
+
+            # Rotation error
+            R_err = R_med @ Rk_gt.T
+            angle = float(np.degrees(np.arccos(np.clip((np.trace(R_err) - 1) / 2, -1, 1))))
+            rot_errs.append(angle)
+
+            # Translation direction cosine
+            pn, gn = np.linalg.norm(t_med), np.linalg.norm(tk_gt)
+            if pn > 1e-6 and gn > 1e-6:
+                t_coses.append(float(np.dot(t_med / pn, tk_gt / gn)))
+
+            # GT scale: ||t_gt_baseline|| / ||t_pred_baseline||
+            if pn > 1e-6:
+                gt_scale_vals.append(gn / pn)
+
+        if rot_errs:
+            cam_rot_err = float(np.mean(rot_errs))
+        if t_coses:
+            cam_t_cos = float(np.mean(t_coses))
+        if gt_scale_vals:
+            gt_scale_val = float(np.median(gt_scale_vals))
+
+        valid_scale = scale_pf[scale_pf > 0]
+        if valid_scale.size:
+            pred_scale_val = float(np.mean(valid_scale))
+        if gt_scale_val > 0 and np.isfinite(pred_scale_val):
+            scale_err_pct = (pred_scale_val - gt_scale_val) / gt_scale_val * 100.0
+
+    logger.info(
+        f"  Cam rot err = {cam_rot_err:.2f}°  |  Cam t_cos = {cam_t_cos:.4f}  |  "
+        f"pred_scale = {pred_scale_val:.4f}  gt_scale = {gt_scale_val:.4f}  "
+        f"scale_err = {scale_err_pct:+.1f}%"
+    )
+
     # ── 6. Ghost↔GT pid matching ─────────────────────────────────────────────
     K = len(cam_dirs)
     pid_cam_count: dict[int, int] = defaultdict(int)
@@ -687,6 +764,26 @@ def evaluate_scene(
             gt_joints[t_rel, slot] = J_gt_world[_BODY_JOINT_IDX]
             gt_roots[t_rel,  slot] = J_gt_world[0]
 
+    # ── 7b. Raw root translation error (no alignment) ────────────────────────
+    # Pred roots are in VGGT reference frame; GT roots are in RICH world frame.
+    # Apply R_w2ref / t_w2ref to GT to bring both into the same frame.
+    raw_root_err_cm = float("nan")
+    raw_errs = []
+    for slot, (ghost_pid, gt_pid) in enumerate(sorted(pid_match.items())):
+        gt_pdata = gt_body_data[gt_pid]
+        for frame_idx, params in gt_pdata.items():
+            t_rel = frame_idx - frame_start
+            if not (0 <= t_rel < T):
+                continue
+            if not np.isfinite(pred_roots_m[t_rel, slot]).all():
+                continue
+            gt_root_vggt = R_w2ref @ params["transl"].astype(np.float64) + t_w2ref
+            raw_errs.append(float(np.linalg.norm(pred_roots_m[t_rel, slot] - gt_root_vggt)))
+    if raw_errs:
+        raw_root_err_cm = float(np.median(raw_errs)) * 100.0
+
+    logger.info(f"  Raw root error (median, no alignment) = {raw_root_err_cm:.1f} cm")
+
     # ── 8. Validity mask ──────────────────────────────────────────────────────
     valid = (
         np.isfinite(pred_joints_m).all((-2, -1)) &
@@ -709,8 +806,14 @@ def evaluate_scene(
         f"  WA-MPJPE = {wa:6.1f} mm   W-MPJPE = {w:6.1f} mm   "
         f"GA-MPJPE = {ga:6.1f} mm   PA-MPJPE = {pa:6.1f} mm   RTE = {rte:5.2f}%"
     )
-    return {"wa_mpjpe": wa, "w_mpjpe": w, "ga_mpjpe": ga, "pa_mpjpe": pa,
-            "rte": rte, "n_valid": n_valid}
+    return {
+        "wa_mpjpe": wa, "w_mpjpe": w, "ga_mpjpe": ga, "pa_mpjpe": pa, "rte": rte,
+        "n_valid": n_valid,
+        "cam_rot_err": cam_rot_err, "cam_t_cos": cam_t_cos,
+        "pred_scale": pred_scale_val, "gt_scale": gt_scale_val,
+        "scale_err_pct": scale_err_pct,
+        "raw_root_err_cm": raw_root_err_cm,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -775,13 +878,21 @@ def main() -> None:
     print(f"\n{'='*65}")
     print(f"AGGREGATE  ({len(all_results)} scenes evaluated)")
     print(f"{'='*65}")
-    print(f"  {'Metric':<20}  {'Ghost (ours)':>14}  {'CHROMM multi':>14}")
-    print(f"  {'-'*20}  {'-'*14}  {'-'*14}")
-    print(f"  {'WA-MPJPE':<20}  {agg('wa_mpjpe'):>12.1f}mm  {'53.1 mm':>14}")
-    print(f"  {'W-MPJPE':<20}  {agg('w_mpjpe'):>12.1f}mm  {'79.0 mm':>14}")
-    print(f"  {'GA-MPJPE':<20}  {agg('ga_mpjpe'):>12.1f}mm  {'—':>14}")
-    print(f"  {'PA-MPJPE':<20}  {agg('pa_mpjpe'):>12.1f}mm  {'—':>14}")
-    print(f"  {'RTE':<20}  {agg('rte'):>13.2f}%  {'1.4 %':>14}")
+    print(f"  {'Metric':<26}  {'Ghost (ours)':>14}  {'CHROMM multi':>14}")
+    print(f"  {'-'*26}  {'-'*14}  {'-'*14}")
+    print(f"  {'WA-MPJPE':<26}  {agg('wa_mpjpe'):>12.1f}mm  {'53.1 mm':>14}")
+    print(f"  {'W-MPJPE':<26}  {agg('w_mpjpe'):>12.1f}mm  {'79.0 mm':>14}")
+    print(f"  {'GA-MPJPE':<26}  {agg('ga_mpjpe'):>12.1f}mm  {'—':>14}")
+    print(f"  {'PA-MPJPE':<26}  {agg('pa_mpjpe'):>12.1f}mm  {'—':>14}")
+    print(f"  {'RTE':<26}  {agg('rte'):>13.2f}%  {'1.4 %':>14}")
+    print()
+    print(f"  --- Diagnostics ---")
+    print(f"  {'Cam rot err (°)':<26}  {agg('cam_rot_err'):>14.2f}")
+    print(f"  {'Cam t_cos':<26}  {agg('cam_t_cos'):>14.4f}")
+    print(f"  {'Pred scale':<26}  {agg('pred_scale'):>14.4f}")
+    print(f"  {'GT scale':<26}  {agg('gt_scale'):>14.4f}")
+    print(f"  {'Scale err (%)':<26}  {agg('scale_err_pct'):>13.1f}%")
+    print(f"  {'Raw root err (cm)':<26}  {agg('raw_root_err_cm'):>14.1f}")
     print()
 
 
