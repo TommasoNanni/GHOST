@@ -273,12 +273,13 @@ def run(
     gt_camera_data = d.get("gt_camera")
     gt_R_w2c = gt_t_w2c = gt_focal = None
     if gt_camera_data is not None:
+        K_gt        = gt_camera_data.shape[1]   # may differ from K (missing cams)
         gt_quat_raw = gt_camera_data[..., :4]
         gt_norms    = np.linalg.norm(gt_quat_raw, axis=-1, keepdims=True).clip(1e-8)
         gt_quat_n   = gt_quat_raw / gt_norms
         gt_R_w2c    = quaternion_to_matrix(
             torch.from_numpy(gt_quat_n.reshape(-1, 4).astype(np.float32))
-        ).numpy().reshape(T, K, 3, 3)
+        ).numpy().reshape(T, K_gt, 3, 3)
         gt_t_w2c    = gt_camera_data[..., 4:7]
         gt_focal    = gt_camera_data[0, :, 7]
 
@@ -457,7 +458,7 @@ def run(
     # GT camera frustums — green
     _gt_frustum_handles = []
     if gt_R_w2c is not None:
-        for k in range(K):
+        for k in range(gt_R_w2c.shape[1]):
             vfov_gt = 2 * np.arctan(H / 2 / max(gt_focal[k], 1.0))
             wxyz_gt, pos_gt = _cam_to_viser(gt_R_w2c[0, k], gt_t_w2c[0, k])
             fh_gt = server.scene.add_camera_frustum(
@@ -494,7 +495,7 @@ def run(
         if src == "pred":
             R, t, f_k = R_w2c[t_idx, k], t_w2c[t_idx, k], focal[k]
         else:
-            if gt_R_w2c is None:
+            if gt_R_w2c is None or k >= gt_R_w2c.shape[1]:
                 return
             R, t, f_k = gt_R_w2c[t_idx, k], gt_t_w2c[t_idx, k], gt_focal[k]
         wxyz, pos = _cam_to_viser(R, t)
