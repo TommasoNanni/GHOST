@@ -37,6 +37,30 @@ _LONG_BONES = [
     (2,  8),   # right leg:  right hip → right ankle
 ]
 
+# All candidate bone pairs for dynamic scale estimation.
+# Each tuple: (mhr_a, mhr_b) — MHR70 keypoint indices.
+# Bone lengths are computed via the Mapper which gives the correct SMPLX
+# surface/joint position for each MHR70 keypoint (surface landmark for
+# ankle/elbow, FK joint for hip/knee/wrist).
+_SCALE_BONE_CANDIDATES = [
+    ( 9, 13),  # L-hip  → L-ankle
+    (10, 14),  # R-hip  → R-ankle
+    ( 9, 11),  # L-hip  → L-knee
+    (10, 12),  # R-hip  → R-knee
+    (11, 13),  # L-knee → L-ankle
+    (12, 14),  # R-knee → R-ankle
+    ( 7, 62),  # L-elbow → L-wrist
+    ( 8, 41),  # R-elbow → R-wrist
+]
+_N_BEST_BONES = 4
+_SCALE_CONF_THR = 0.6
+
+# Per-bone calibration factors: median L_fk / (L_vggt × gt_scale) across 62 RICH
+# training scenes (compute_bone_calibration.py). Dividing L_fk by this factor
+# removes the systematic MHR70 landmark offset bias from the scale estimate.
+_BONE_CALIB_FACTORS: dict[tuple, float] = dict(zip(_SCALE_BONE_CANDIDATES,
+    [0.97, 0.96, 0.91, 0.86, 1.03, 1.04, 0.95, 1.01]))
+
 # Maps SMPL-X joint index → MHR70 joint index.
 # pred_keypoints_2d from SAM3D uses MHR70 ordering (70 joints).
 # FK joints use SMPL-X ordering (55 joints).
@@ -50,14 +74,27 @@ _SMPLX_TO_MHR70 = {
     20: 62, 21: 41,  # left/right wrist
 }
 
-# Subset used for PnP and Procrustes DLT — joints with lowest skeleton-definition
-# mismatch between SMPL-X and MHR70 (mean error ≤ 4cm, std ≤ 0.9cm from empirical
-# analysis on BBQ_001_juggle + BBQ_001_guitar).  Knees (~7cm, pose-dependent z-bias),
-# neck (~4cm, std 2cm), elbows and wrists (~3-5cm, std 1.3cm) are excluded.
+# Subset used for PnP and Procrustes DLT.
+# Ankles and shoulders excluded: for sitting/occluded poses SAM3D 2D detections
+# are biased by 25-30cm (ankles: occluded/folded legs; shoulders: acromion vs
+# glenohumeral offset amplified by side-view depth ambiguity).
+# Hips (~2cm) + neck (~4cm) give 3 non-collinear points that are robust across
+# all poses (standing, sitting, bending).
 _SMPLX_TO_MHR70_ALIGN = {
-    1: 9,   2: 10,   # left/right hip      (~2cm, std 0.4cm)
-    7: 13,  8: 14,   # left/right ankle    (~3cm, std 0.7cm)
-    16: 5,  17: 6,   # left/right shoulder (~3.5cm, std 0.7cm)
+    1: 9,   2: 10,   # left/right hip  (~2cm, std 0.4cm)
+    12: 69,          # neck            (~4cm, std 2cm)
+}
+
+# SMPL-X → COCO-17 joint mapping for ViTPose keypoints.
+# Same direction as _SMPLX_TO_MHR70_ALIGN: keys = SMPL-X indices, values = COCO indices.
+# Shoulders (COCO 5,6) excluded: acromion vs glenohumeral mismatch.
+# Face joints (COCO 0-4) excluded: no SMPL-X body joint equivalent.
+_COCO_SMPLX_ALIGN = {
+    1: 11, 2: 12,   # left/right hip
+    4: 13, 5: 14,   # left/right knee
+    7: 15, 8: 16,   # left/right ankle
+    18: 7, 19: 8,   # left/right elbow
+    20: 9, 21: 10,  # left/right wrist
 }
 
 
@@ -91,6 +128,14 @@ class BodyPlacer:
     def __init__(self, scene_output_dir: str | Path, smplx_model_path: str | Path) -> None:
         self.scene_dir = Path(scene_output_dir)
 
+        import sys
+        _repo_root = Path(__file__).parent.parent
+        if str(_repo_root) not in sys.path:
+            sys.path.insert(0, str(_repo_root))
+        from mappings.mapper import Mapper
+        _regressor = _repo_root / "mappings" / "mhr_smplx_regressor.npy"
+        self._mapper = Mapper.load(_regressor)
+
         import smplx as smplx_lib
         smplx_path = Path(smplx_model_path)
         create_kwargs: dict = {"model_type": "smplx"}
@@ -106,9 +151,6 @@ class BodyPlacer:
         self._smplx_device = torch.device("cpu")
 
         cam_npz = np.load(self.scene_dir / "vggt_cameras.npz")
-        # Depth maps can be large (T*K*518*518 ~ GB); memory-map so only accessed
-        # slices are paged in rather than loading the full array at construction time.
-        depth_npz = np.load(self.scene_dir / "vggt_depth.npz", mmap_mode="r")
 
         # (T, K, 3, 4) float32 — camera-from-world, OpenCV convention
         self.extrinsics = cam_npz["extrinsics"]
@@ -125,12 +167,17 @@ class BodyPlacer:
         # (K,) bytes
         self.camera_names = cam_npz["camera_names"]
 
-        # (T, K, 518, 518) uint16 mm — memory-mapped
-        self.depth_mm = depth_npz["depth"]
-        # (T, K, 518, 518) float16 — memory-mapped
-        self.depth_conf = depth_npz["depth_conf"]
-        # (T, K) bool
-        self.depth_valid = depth_npz["depth_valid"]
+        # Depth is optional (legacy; not used by estimate_scale_triangulated).
+        depth_path = self.scene_dir / "vggt_depth.npz"
+        if depth_path.exists():
+            depth_npz = np.load(depth_path, mmap_mode="r")
+            self.depth_mm    = depth_npz["depth"]
+            self.depth_conf  = depth_npz["depth_conf"]
+            self.depth_valid = depth_npz["depth_valid"]
+        else:
+            self.depth_mm    = None
+            self.depth_conf  = None
+            self.depth_valid = np.zeros(self.cam_valid.shape, dtype=bool)
 
         self.T, self.K = self.cam_valid.shape
 
@@ -144,11 +191,29 @@ class BodyPlacer:
     # Public API
     # ------------------------------------------------------------------
 
+    def load_mapanything_scale(self) -> np.ndarray | None:
+        """Load per-frame scale from MapAnything preprocessing output, if available.
+
+        Returns ``(T,)`` float32 or None when the file is absent or mismatched.
+        """
+        path = self.scene_dir / "mapanything_scale.npy"
+        if not path.exists():
+            return None
+        scale = np.load(path).astype(np.float32)
+        if scale.shape != (self.T,):
+            import logging
+            logging.getLogger(__name__).warning(
+                f"mapanything_scale.npy has shape {scale.shape}, expected ({self.T},) — ignoring"
+            )
+            return None
+        return scale
+
     def estimate_scale_per_frame(
         self,
         conf_threshold: float = 0.5,
         min_delta_z: float = 0.05,
         fused_betas_map: dict[Path, np.ndarray] | None = None,
+        frame_start: int = 0,
     ) -> np.ndarray:
         """Return per-frame VGGT depth scale ``(T,)`` in metres per VGGT unit.
 
@@ -172,6 +237,7 @@ class BodyPlacer:
                 )
                 tagged = self._collect_scale_samples_tagged(
                     k, body_file, conf_threshold, min_delta_z, fused_betas,
+                    frame_start=frame_start,
                 )
                 for global_t, slist in tagged.items():
                     frame_samples[global_t].extend(slist)
@@ -186,8 +252,9 @@ class BodyPlacer:
         global_scale = float(np.median(all_samples))
         result = np.full(self.T, global_scale, dtype=np.float32)
         for global_t, slist in frame_samples.items():
-            if 0 <= global_t < self.T and slist:
-                result[global_t] = float(np.median(slist))
+            vggt_t = global_t - frame_start
+            if 0 <= vggt_t < self.T and slist:
+                result[vggt_t] = float(np.median(slist))
 
         return result
 
@@ -228,6 +295,23 @@ class BodyPlacer:
         """
         from collections import defaultdict
 
+        # ── Pre-pass: compute mean SAM3D betas per pid across all cameras ────────
+        sam3d_betas_sum: dict[int, np.ndarray] = {}
+        sam3d_betas_cnt: dict[int, int] = {}
+        for cam_dir in self._cam_dirs:
+            for body_file in sorted((cam_dir / "body_data").glob("person_*.npz")):
+                pid = int(body_file.stem.split("_")[1])
+                d_b = np.load(body_file, allow_pickle=False)
+                if "smplx_betas" not in d_b.files:
+                    continue
+                b = d_b["smplx_betas"].mean(axis=0)   # (10,)
+                sam3d_betas_sum[pid] = sam3d_betas_sum.get(pid, np.zeros(10, np.float32)) + b
+                sam3d_betas_cnt[pid] = sam3d_betas_cnt.get(pid, 0) + 1
+        mean_sam3d_betas: dict[int, np.ndarray] = {
+            pid: sam3d_betas_sum[pid] / sam3d_betas_cnt[pid]
+            for pid in sam3d_betas_sum
+        }
+
         # ── Load body data per (cam_idx, pid) ─────────────────────────────────
         # cam_data[k][pid] = {gt_map, fk, kp2d}
         cam_data: dict[int, dict[int, dict]] = {}
@@ -241,11 +325,10 @@ class BodyPlacer:
                     continue
 
                 fi = d["frame_indices"]
-                betas = (
-                    np.tile(fused_betas_map[body_file][np.newaxis], (len(fi), 1))
-                    if fused_betas_map is not None and body_file in fused_betas_map
-                    else d["smplx_betas"]
-                )
+                # Use mean SAM3D betas (averaged across cameras+frames) — less biased
+                # than fused BetasAggregator which overestimates bone length by ~20%.
+                b_mean = mean_sam3d_betas.get(pid, np.zeros(10, np.float32))
+                betas = np.tile(b_mean[np.newaxis], (len(fi), 1))
                 if pid not in fused_pose_by_pid:
                     continue
                 fused_arr = fused_pose_by_pid[pid]   # (T_scene, 54, 6)
@@ -256,15 +339,18 @@ class BodyPlacer:
                     body_pose_arr[valid] = _6d_to_aa_batch(
                         fused_arr[t_fused[valid], :21]
                     ).reshape(len(valid), 63)
-                fk = self._smplx_fk(betas, body_pose_arr,
-                                    np.zeros((len(betas), 3), dtype=np.float32))
+                _, verts = self._smplx_fk(betas, body_pose_arr,
+                                          np.zeros((len(betas), 3), dtype=np.float32),
+                                          return_verts=True)
+                kp_smplx = self._mapper.map(verts)  # (T_local, N_kps, 3)
 
                 gt_map = {int(gt): lt for lt, gt in enumerate(d["frame_indices"])}
-                cam_data[k][pid] = {
-                    "gt_map": gt_map,
-                    "fk":     fk,
-                    "kp2d":   d["pred_keypoints_2d"],
+                entry: dict = {
+                    "gt_map":   gt_map,
+                    "kp_smplx": kp_smplx,
+                    "kp2d":     d["pred_keypoints_2d"],
                 }
+                cam_data[k][pid] = entry
 
         # ── Collect all (global_t, pid) pairs ─────────────────────────────────
         all_pids: set[int] = set()
@@ -277,57 +363,70 @@ class BodyPlacer:
                 global_ts_by_pid[pid].update(bd["gt_map"].keys())
 
         frame_samples: dict[int, list[float]] = defaultdict(list)
+        n_bones_used: dict[int, int] = {}
 
         for pid in sorted(all_pids):
             for global_t in sorted(global_ts_by_pid[pid]):
-                if global_t >= self.T:
+                vggt_t = global_t - frame_start
+                if vggt_t < 0 or vggt_t >= self.T:
                     continue
 
-                for (j_a, j_b) in _LONG_BONES:
-                    mhr_a = _SMPLX_TO_MHR70.get(j_a)
-                    mhr_b = _SMPLX_TO_MHR70.get(j_b)
-                    if mhr_a is None or mhr_b is None:
-                        continue
+                # Score each candidate bone by how many cameras see both endpoints
+                # with confidence >= _SCALE_CONF_THR.  Pick the top _N_BEST_BONES.
+                bone_scores: list[tuple[int, tuple]] = []
+                for bone in _SCALE_BONE_CANDIDATES:
+                    mhr_a, mhr_b = bone[0], bone[1]
+                    n_cams = 0
+                    for k in range(self.K):
+                        if not self.cam_valid[vggt_t, k]: continue
+                        bd = cam_data.get(k, {}).get(pid)
+                        if bd is None or global_t not in bd["gt_map"]: continue
+                        lt = bd["gt_map"][global_t]
+                        if mhr_a < bd["kp2d"].shape[1] and mhr_b < bd["kp2d"].shape[1]:
+                            n_cams += 1
+                    if n_cams >= min_cams:
+                        bone_scores.append((n_cams, bone))
 
+                bone_scores.sort(key=lambda x: x[0], reverse=True)
+                selected_bones = [b for _, b in bone_scores[:_N_BEST_BONES]]
+                n_bones_used[global_t] = n_bones_used.get(global_t, 0) + len(selected_bones)
+
+                for mhr_a, mhr_b in selected_bones:
                     pts_a: list[tuple[float, float]] = []
                     pts_b: list[tuple[float, float]] = []
                     Pmats: list[np.ndarray] = []
                     fk_lengths: list[float] = []
 
                     for k in range(self.K):
-                        if not self.cam_valid[global_t, k]:
+                        if not self.cam_valid[vggt_t, k]:
                             continue
-                        if pid not in cam_data.get(k, {}):
-                            continue
-                        bd = cam_data[k][pid]
-                        if global_t not in bd["gt_map"]:
+                        bd = cam_data.get(k, {}).get(pid)
+                        if bd is None or global_t not in bd["gt_map"]:
                             continue
                         local_t = bd["gt_map"][global_t]
 
-                        kp2d = bd["kp2d"]
-                        if mhr_a >= kp2d.shape[1] or mhr_b >= kp2d.shape[1]:
+                        if mhr_a >= bd["kp2d"].shape[1] or mhr_b >= bd["kp2d"].shape[1]:
                             continue
 
-                        oc = self.original_coords[global_t, k]
-                        os_ = self.original_size[global_t, k]
+                        oc = self.original_coords[vggt_t, k]
+                        os_ = self.original_size[vggt_t, k]
                         W_orig, H_orig = float(os_[0]), float(os_[1])
-
-                        u_a, v_a = self._orig_to_vggt(kp2d[local_t, mhr_a], oc, W_orig, H_orig)
-                        u_b, v_b = self._orig_to_vggt(kp2d[local_t, mhr_b], oc, W_orig, H_orig)
                         x1, y1, x2, y2 = oc
+
+                        u_a, v_a = self._orig_to_vggt(bd["kp2d"][local_t, mhr_a], oc, W_orig, H_orig)
+                        u_b, v_b = self._orig_to_vggt(bd["kp2d"][local_t, mhr_b], oc, W_orig, H_orig)
                         if not (x1 <= u_a < x2 and y1 <= v_a < y2
                                 and x1 <= u_b < x2 and y1 <= v_b < y2):
                             continue
 
-                        K_mat = self.intrinsics[global_t, k].astype(np.float64)
-                        E_mat = self.extrinsics[global_t, k].astype(np.float64)
-                        P = K_mat @ E_mat
-
+                        K_mat = self.intrinsics[vggt_t, k].astype(np.float64)
+                        E_mat = self.extrinsics[vggt_t, k].astype(np.float64)
                         pts_a.append((u_a, v_a))
                         pts_b.append((u_b, v_b))
-                        Pmats.append(P)
+                        Pmats.append(K_mat @ E_mat)
                         fk_lengths.append(float(np.linalg.norm(
-                            bd["fk"][local_t, j_b] - bd["fk"][local_t, j_a]
+                            bd["kp_smplx"][local_t, self._mapper.index(mhr_b)]
+                            - bd["kp_smplx"][local_t, self._mapper.index(mhr_a)]
                         )))
 
                     if len(pts_a) < min_cams:
@@ -347,7 +446,8 @@ class BodyPlacer:
                     if L_fk < 0.05:
                         continue
 
-                    s = L_fk / L_vggt
+                    bone_key = (mhr_a, mhr_b)
+                    s = (L_fk / _BONE_CALIB_FACTORS.get(bone_key, 1.0)) / L_vggt
                     if 0.1 < s < 100.0:
                         frame_samples[global_t].append(s)
 
@@ -361,8 +461,15 @@ class BodyPlacer:
         global_scale = float(np.median(all_samples))
         result = np.full(self.T, global_scale, dtype=np.float32)
         for global_t, slist in frame_samples.items():
-            if slist:
-                result[global_t] = float(np.median(slist))
+            vggt_t = global_t - frame_start
+            if 0 <= vggt_t < self.T and slist:
+                result[vggt_t] = float(np.median(slist))
+
+        if n_bones_used:
+            counts = list(n_bones_used.values())
+            print(f"  [scale] bones/frame: mean={np.mean(counts):.1f}  "
+                  f"min={min(counts)}  max={max(counts)}  "
+                  f"frames_with_bones={len(counts)}/{self.T}")
         return result
 
     def estimate_procrustes_dlt(
@@ -373,7 +480,7 @@ class BodyPlacer:
         fused_pose_by_pid: dict[int, np.ndarray] | None = None,
         frame_start: int = 0,
         min_cams: int = 2,
-        min_joints: int = 4,
+        min_joints: int = 3,
     ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
         """Estimate root translation + global orient via multi-camera DLT + Procrustes.
 
@@ -406,9 +513,10 @@ class BodyPlacer:
             translations : ``{pid: {global_frame_idx: pelvis_world (3,)}}``
             orientations : ``{pid: {global_frame_idx: R (3,3)}}``
         """
-        _JOINTS = sorted(_SMPLX_TO_MHR70_ALIGN.keys())
-
         # Pre-load body data once per (cam, pid) to avoid repeated file reads.
+        # If vitpose_kps_person_<pid>.npz exists alongside body_data, use COCO
+        # keypoints + per-joint confidence weights; otherwise fall back to SAM3D
+        # pred_keypoints_2d (MHR70) with uniform weights.
         cam_data_all: list[dict[int, dict]] = []
         for cam_dir in self._cam_dirs:
             cam_map: dict[int, dict] = {}
@@ -420,12 +528,17 @@ class BodyPlacer:
                 if not {"pred_keypoints_2d", "frame_indices", "smplx_body_pose"}.issubset(d.files):
                     continue
                 fi = d["frame_indices"].astype(int)
-                cam_map[pid] = {
-                    "local_t": {int(g): int(l) for l, g in enumerate(fi)},
-                    "kp2d":      d["pred_keypoints_2d"],
+                entry: dict = {
+                    "local_t":  {int(g): int(l) for l, g in enumerate(fi)},
                     "body_pose": d["smplx_body_pose"],
                 }
+                entry["kp2d"]     = d["pred_keypoints_2d"]
+                entry["kp_conf"]  = None
+                entry["use_coco"] = False
+                cam_map[pid] = entry
             cam_data_all.append(cam_map)
+
+        _JOINTS = sorted(j for j in _SMPLX_TO_MHR70 if _SMPLX_TO_MHR70[j] in self._mapper._index)
 
         translations: dict[int, dict[int, np.ndarray]] = {}
         orientations: dict[int, dict[int, np.ndarray]] = {}
@@ -442,48 +555,53 @@ class BodyPlacer:
             orient_out: dict[int, np.ndarray] = {}
 
             for global_t in sorted(all_frames):
-                if global_t >= self.T:
+                vggt_t = global_t - frame_start
+                if vggt_t < 0 or vggt_t >= self.T:
                     continue
 
-                s = float(scale[global_t]) if isinstance(scale, np.ndarray) else float(scale)
+                s = float(scale[vggt_t]) if isinstance(scale, np.ndarray) else float(scale)
 
                 # ── Step 1: DLT-triangulate each joint across cameras ──────────
                 joint_world: dict[int, np.ndarray] = {}
                 for smplx_j in _JOINTS:
-                    mhr70_j = _SMPLX_TO_MHR70[smplx_j]
-                    obs:   list[tuple[float, float]] = []
-                    pmats: list[np.ndarray] = []
+                    joint_idx = _SMPLX_TO_MHR70[smplx_j]
+                    obs:     list[tuple[float, float]] = []
+                    pmats:   list[np.ndarray] = []
+                    weights: list[float] = []
 
                     for k, cm in enumerate(cam_data_all):
                         if pid not in cm:
                             continue
                         if global_t not in cm[pid]["local_t"]:
                             continue
-                        if not self.cam_valid[global_t, k]:
+                        if not self.cam_valid[vggt_t, k]:
                             continue
 
-                        local_t = cm[pid]["local_t"][global_t]
-                        kp2d  = cm[pid]["kp2d"]
+                        local_t  = cm[pid]["local_t"][global_t]
+                        kp2d     = cm[pid]["kp2d"]
 
-                        if mhr70_j >= kp2d.shape[1]:
+                        if joint_idx >= kp2d.shape[1]:
                             continue
 
-                        oc  = self.original_coords[global_t, k]
-                        os_ = self.original_size[global_t, k]
+                        conf = 1.0
+
+                        oc  = self.original_coords[vggt_t, k]
+                        os_ = self.original_size[vggt_t, k]
                         W_orig, H_orig = float(os_[0]), float(os_[1])
 
-                        u, v = self._orig_to_vggt(kp2d[local_t, mhr70_j], oc, W_orig, H_orig)
+                        u, v = self._orig_to_vggt(kp2d[local_t, joint_idx], oc, W_orig, H_orig)
                         if not self._in_bounds(u, v, oc[2], oc[3]):
                             continue
 
-                        intr = self.intrinsics[global_t, k].astype(np.float64)
-                        ext  = self.extrinsics[global_t, k].astype(np.float64).copy()
+                        intr = self.intrinsics[vggt_t, k].astype(np.float64)
+                        ext  = self.extrinsics[vggt_t, k].astype(np.float64).copy()
                         ext[:3, 3] *= s
                         pmats.append(intr @ ext)
                         obs.append((u, v))
+                        weights.append(conf)
 
                     if len(obs) >= min_cams:
-                        joint_world[smplx_j] = self._triangulate_dlt(obs, pmats)
+                        joint_world[smplx_j] = self._triangulate_dlt(obs, pmats, weights)
 
                 if len(joint_world) < min_joints:
                     continue
@@ -509,17 +627,22 @@ class BodyPlacer:
                 if body_pose_frame is None:
                     continue
 
-                fk = self._smplx_fk(
+                fk, verts = self._smplx_fk(
                     betas[np.newaxis],
                     body_pose_frame[np.newaxis],
                     np.zeros((1, 3), dtype=np.float32),
+                    return_verts=True,
                 )
-                J_can = fk[0]  # (55, 3) in metres
+                J_can   = fk[0]                        # (55, 3) — still needed for pelvis (joint 0)
+                kp_can  = self._mapper.map(verts[0])   # (N_kps, 3) — mapper-corrected landmarks
 
                 # ── Step 3: Procrustes — R, t s.t. R @ J_can + t ≈ J_world ──
                 vis = sorted(joint_world.keys())
                 A = np.stack([joint_world[j] for j in vis], axis=0).astype(np.float64)
-                B = np.stack([J_can[j]       for j in vis], axis=0).astype(np.float64)
+                B = np.stack([
+                    kp_can[self._mapper.index(_SMPLX_TO_MHR70[j])]
+                    for j in vis
+                ], axis=0).astype(np.float64)
 
                 A_mean = A.mean(0)
                 B_mean = B.mean(0)
@@ -555,14 +678,16 @@ class BodyPlacer:
         global_orient: np.ndarray,                  # (T_local, 3)
         left_hand_pose: np.ndarray | None = None,   # (T_local, 45) optional
         right_hand_pose: np.ndarray | None = None,  # (T_local, 45) optional
-    ) -> np.ndarray:
-        """Run SMPL-X FK and return joints in camera-oriented space.
+        return_verts: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        """Run SMPL-X FK and return joints (and optionally vertices).
 
         Uses zero translation so all positions are body-centric (origin at root).
         The global_orient rotation IS applied, so the z-axis matches camera depth.
 
         Returns:
-            (T_local, 55, 3) float32 — first 55 SMPL-X joints in metres.
+            joints: (T_local, 55, 3) float32 — first 55 SMPL-X joints in metres.
+            verts:  (T_local, 10475, 3) float32 — only when return_verts=True.
         """
         T = betas.shape[0]
         num_expr = self._smplx_model.num_expression_coeffs
@@ -582,9 +707,13 @@ class BodyPlacer:
                 left_hand_pose=lhp,
                 right_hand_pose=rhp,
                 expression=torch.zeros(T, num_expr, dtype=torch.float32),
-                return_verts=False,
+                return_verts=return_verts,
             )
-        return out.joints[:, :55].cpu().numpy().astype(np.float32)
+        joints = out.joints[:, :55].cpu().numpy().astype(np.float32)
+        if return_verts:
+            verts = out.vertices.cpu().numpy().astype(np.float32)
+            return joints, verts
+        return joints
 
     # ------------------------------------------------------------------
     # Geometry helpers
@@ -594,24 +723,28 @@ class BodyPlacer:
     def _triangulate_dlt(
         observations: list[tuple[float, float]],
         proj_matrices: list[np.ndarray],
+        weights: list[float] | None = None,
     ) -> np.ndarray:
         """Linear (DLT) triangulation from N ≥ 2 camera observations.
 
         For each camera, the projection constraint ``x × (P @ X) = 0`` gives
         two independent linear equations.  All equations are stacked and the
-        null-space solution is found via SVD.
+        null-space solution is found via SVD.  Optional per-observation weights
+        implement weighted least squares (each row scaled by sqrt(weight)).
 
         Args:
-            observations: 2D joint positions ``(u, v)`` in 518-space per camera.
+            observations: 2D joint positions ``(u, v)`` in VGGT-space per camera.
             proj_matrices: ``(3, 4)`` projection matrices ``K @ [R|t]`` per camera.
+            weights: Optional per-camera confidence weights in [0, 1]. Uniform if None.
 
         Returns:
             ``(3,)`` world-space position.
         """
         rows = []
-        for (u, v), P in zip(observations, proj_matrices):
-            rows.append(u * P[2] - P[0])
-            rows.append(v * P[2] - P[1])
+        for i, ((u, v), P) in enumerate(zip(observations, proj_matrices)):
+            sw = np.sqrt(max(weights[i], 0.0)) if weights is not None else 1.0
+            rows.append(sw * (u * P[2] - P[0]))
+            rows.append(sw * (v * P[2] - P[1]))
         A = np.stack(rows, axis=0)           # (2N, 4)
         _, _, Vt = np.linalg.svd(A)
         X = Vt[-1]                           # smallest singular vector
@@ -670,6 +803,7 @@ class BodyPlacer:
         conf_threshold: float,
         min_delta_z: float,
         fused_betas: np.ndarray | None = None,
+        frame_start: int = 0,
     ) -> dict[int, list[float]]:
         """Collect scale samples s = L_FK / L_VGGT, tagged by global frame index.
 
@@ -700,22 +834,23 @@ class BodyPlacer:
         result: dict[int, list[float]] = defaultdict(list)
 
         for local_t, global_t in enumerate(frame_indices):
-            if global_t >= self.T:
+            vggt_t = int(global_t) - frame_start
+            if vggt_t < 0 or vggt_t >= self.T:
                 continue
-            if not self.cam_valid[global_t, k]:
+            if not self.cam_valid[vggt_t, k]:
                 continue
-            if not self.depth_valid[global_t, k]:
+            if not self.depth_valid[vggt_t, k]:
                 continue
 
-            depth_frame = self.depth_mm[global_t, k].astype(np.float32) / 1000.0
-            conf_frame  = self.depth_conf[global_t, k].astype(np.float32)
+            depth_frame = self.depth_mm[vggt_t, k].astype(np.float32) / 1000.0
+            conf_frame  = self.depth_conf[vggt_t, k].astype(np.float32)
 
-            intr = self.intrinsics[global_t, k]
+            intr = self.intrinsics[vggt_t, k]
             fx, fy = float(intr[0, 0]), float(intr[1, 1])
             cx, cy = float(intr[0, 2]), float(intr[1, 2])
 
-            oc = self.original_coords[global_t, k]
-            os = self.original_size[global_t, k]
+            oc = self.original_coords[vggt_t, k]
+            os = self.original_size[vggt_t, k]
             W_orig, H_orig = float(os[0]), float(os[1])
 
             for j_a, j_b in _LONG_BONES:
@@ -766,10 +901,12 @@ class BodyPlacer:
         conf_threshold: float,
         min_delta_z: float,
         fused_betas: np.ndarray | None = None,
+        frame_start: int = 0,
     ) -> list[float]:
         """Flat list of scale samples; delegates to :meth:`_collect_scale_samples_tagged`."""
         tagged = self._collect_scale_samples_tagged(
             k, body_file, conf_threshold, min_delta_z, fused_betas,
+            frame_start=frame_start,
         )
         return [s for sl in tagged.values() for s in sl]
 
