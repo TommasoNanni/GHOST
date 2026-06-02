@@ -17,3 +17,6 @@ manual_reids/
 manual_reid_yaml/
 renders/
 media/
+debug_outputs/
+DROID-SLAM/
+results/

@@ -71,6 +71,7 @@ SCENES_ROOT = Path(CONFIG.data.output_directory)
 
 SKIP_SCENES: list[str] = [
     "Pavallion_013_plankjack",
+    "Pavallion_013_phonesiteat",
 ]
 SKIP_CAMERAS: dict[str, list[str]] = {
     "Pavallion_003_018_tossball": ["cam_06"],

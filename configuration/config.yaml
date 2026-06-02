@@ -41,7 +41,7 @@ synchronization:
   enabled: false  # Set true to run temporal sync before camera alignment (uses random-shift evaluation)
 
 fusion:
-  checkpoint_dir: "checkpoints/fusion_module"
+  checkpoint_dir: "checkpoints/fusion_module_latest"
   use_wandb: true
   architecture:
     embedding_dimension: 128

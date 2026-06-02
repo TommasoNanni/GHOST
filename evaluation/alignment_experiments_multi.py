@@ -448,7 +448,7 @@ if __name__ == "__main__":
 
     logger.info(f"Found {len(scene_dirs)} scene(s): {[d.name for d in scene_dirs]}")
 
-    sync      = Synchronizer(method="dtw", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
+    sync      = Synchronizer(method="cross_corr", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
     sync_alt  = Synchronizer(method="joints_position", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=False)
     rng  = np.random.default_rng(SEED)
 
