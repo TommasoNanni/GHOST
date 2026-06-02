@@ -59,7 +59,7 @@ def _build_model() -> FusionWithBetas:
         dropout          = arch.dropout,
         temporal_window  = arch.temporal_window,
     )
-    betas_aggregator = BetasAggregator(n_betas=10, hidden_dim=64, dropout=0.1)
+    betas_aggregator = BetasAggregator(n_betas=10, embedding_dim=64, num_inducing=4, num_heads=4, dropout=0.3, input_noise_std=0.5)
     return FusionWithBetas(pose_module, betas_aggregator)
 
 
@@ -145,6 +145,7 @@ def main(
     no_visualize: bool = False,
     frame_start:  int  = 0,
     show_gt:      bool = True,
+    body_split:   str  = "train_body",
     device:       str  = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> None:
     """
@@ -179,6 +180,7 @@ def main(
         scene_dir      = scene_dir,
         rich_data_root = CONFIG.data.rich_data_root,
         rich_gt_dir    = CONFIG.data.rich_gt_dir,
+        body_split     = body_split,
     )
     T = dp._frame_end - dp._frame_start
     logger.info(f"  {T} frames, {dp.num_cameras} cameras, {dp.max_persons} persons")

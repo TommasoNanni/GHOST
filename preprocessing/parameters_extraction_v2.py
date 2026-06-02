@@ -123,9 +123,11 @@ class ParametersExtractor:
             if child.tag == "Intrinsics":
                 vals = [float(x) for x in child.find("data").text.split()]
                 K = np.array(vals, dtype=np.float32).reshape(3, 3)
-                scale = img_w / (K[0, 2] * 2)   # cx * 2 ≈ original image width
-                K[0] *= scale
-                K[1] *= scale
+                # Scale from sensor space to working image space.
+                # _RICH_ORIG_W/H = 4112×3008 (assumed; verify with raw images).
+                _RICH_ORIG_W, _RICH_ORIG_H = 4112, 3008
+                K[0] *= img_w / _RICH_ORIG_W   # scale fx, cx
+                K[1] *= img_h / _RICH_ORIG_H   # scale fy, cy
                 return K
         return None
 
@@ -440,7 +442,7 @@ class ParametersExtractor:
         reid_threshold: float = 0.65,
         reid_match_window: int = 5,
         fps: float = 15.0,
-        converter,
+        converter=None,
         cam_int: np.ndarray | None = None,
     ) -> None:
         """Process all frames of one video with batched per-frame inference.

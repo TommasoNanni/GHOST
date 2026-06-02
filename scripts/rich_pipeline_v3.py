@@ -33,6 +33,7 @@ from configuration import CONFIG
 from data.video_dataset import RichDataset
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from preprocessing.geometric_reidentifier import GeometricReidentifier
+from preprocessing.run_mapanything import MapAnythingScaleEstimator
 from preprocessing.run_vggt import VGGTPreprocessor
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction_v2 import ParametersExtractor
@@ -152,7 +153,13 @@ def _build_vggt_frame_paths(
     return frame_paths, camera_names
 
 
-def process_scene(scene, segmenter, estimator, reidentifier, output_dir, vggt_weights, vggt_devices, skip_geo_reid=True, skip_cams: set[str] | None = None):
+def process_scene(
+    scene, segmenter, estimator, reidentifier,
+    output_dir, vggt_weights, vggt_devices,
+    skip_geo_reid=True,
+    skip_cams: set[str] | None = None,
+    ma_estimator: MapAnythingScaleEstimator | None = None,
+):
     """Run the full pipeline (with VGGT) on a single scene."""
     skip_cams = skip_cams or set()
     if skip_cams:
@@ -344,9 +351,21 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir, vggt_we
         else:
             print("  WARNING: no frames available — skipping VGGT.")
 
-    # Step 7: Geometric post-ReID.
+    # Step 7: MapAnything metric scale estimation.
+    print(f"\n--- Step 7: MapAnything scale estimation ---")
+    if ma_estimator is None:
+        print("  Skipped (--skip-mapanything).")
+    elif not (vggt_cameras_path.exists() and vggt_depth_path.exists()):
+        print("  Skipped — VGGT outputs missing.")
+    else:
+        ma_estimator.process_scene(
+            scene_dir=scene_output_dir,
+            rich_root=Path(CONFIG.data.rich_data_root),
+        )
+
+    # Step 8: Geometric post-ReID.
     if skip_geo_reid:
-        print(f"\n--- Step 7: Geometric post-ReID (skipped via --skip-geo-reid) ---")
+        print(f"\n--- Step 8: Geometric post-ReID (skipped via --skip-geo-reid) ---")
     else:
         geo_reid = GeometricReidentifier(
             distance_threshold=CONFIG.parameters_extraction.geo_reid_distance_threshold,
@@ -355,8 +374,8 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir, vggt_we
         )
         geo_reid.reidentify(scene=scene, video_dirs=video_dirs)
 
-    # Step 8: FusionDatapoint compatibility check.
-    print(f"\n--- Step 8: FusionDatapoint compatibility check ---")
+    # Step 9: FusionDatapoint compatibility check.
+    print(f"\n--- Step 9: FusionDatapoint compatibility check ---")
     try:
         fusion_dp = RICHFusionDatapoint(
             scene_dir=scene_output_dir,
@@ -368,9 +387,9 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir, vggt_we
     except Exception as e:
         print(f"  ERROR: FusionDatapoint failed to load: {e}")
 
-    # Step 9: Visualise re-ID corrected segmentation (only if ReID ran this session).
+    # Step 10: Visualise re-ID corrected segmentation (only if ReID ran this session).
     if not _reid_already_done:
-        print(f"\n--- Step 9: Visualising re-ID corrected segmentation ---")
+        print(f"\n--- Step 10: Visualising re-ID corrected segmentation ---")
         for video in scene.videos:
             if video.video_id not in video_dirs:
                 continue
@@ -384,7 +403,7 @@ def process_scene(scene, segmenter, estimator, reidentifier, output_dir, vggt_we
             except FileNotFoundError as e:
                 print(f"  WARNING: skipping visualisation — {e}")
     else:
-        print(f"\n--- Skipping re-ID visualisation (cross-view ReID was already done) ---")
+        print(f"\n--- Skipping step 10: re-ID visualisation (cross-view ReID was already done) ---")
 
 
 def main():
@@ -403,6 +422,12 @@ def main():
     parser.add_argument("--skip-geo-reid", action="store_true", default=True,
                         help="Skip step 6 (geometric ReID). Use when VGGT cameras "
                              "are newly estimated and geo-reid should be re-run later.")
+    parser.add_argument("--skip-mapanything", action="store_true", default=False,
+                        help="Skip step 7 (MapAnything scale estimation).")
+    parser.add_argument("--mapanything-device", type=str, default=None,
+                        help="CUDA device for MapAnything (defaults to first VGGT device).")
+    parser.add_argument("--mapanything-batch-size", type=int, default=8,
+                        help="Number of consecutive frames per MapAnything call.")
     parser.add_argument("--skip-cameras", type=str, nargs="+", default=[],
                         metavar="SCENE_ID:CAM_ID",
                         help="Cameras to skip, as 'scene_id:cam_id' pairs "
@@ -448,6 +473,16 @@ def main():
 
     import gc as _gc
 
+    if args.skip_mapanything:
+        ma_estimator = None
+    else:
+        ma_device = args.mapanything_device or vggt_devices[0]
+        ma_estimator = MapAnythingScaleEstimator(
+            device=ma_device,
+            batch_size=args.mapanything_batch_size,
+        )
+        print(f"MapAnything estimator: device={ma_device}  batch_size={args.mapanything_batch_size}")
+
     failed_videos_by_scene: dict[str, list[str]] = {}
     needs_reid: list[str] = []
 
@@ -484,6 +519,7 @@ def main():
                 vggt_devices=vggt_devices,
                 skip_geo_reid=args.skip_geo_reid,
                 skip_cams=skip_cams_map.get(scene.scene_id, set()),
+                ma_estimator=ma_estimator,
             )
         except Exception as e:
             logging.error(

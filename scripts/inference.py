@@ -305,8 +305,8 @@ def _run_placer(
     frame_start: int,
     T: int,
     smplx_model_path: Path,
-    fused_betas: np.ndarray | None = None,
     fused_pose: np.ndarray,
+    fused_betas: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Estimate world-space root translation + orientation via Procrustes DLT.
 
@@ -353,13 +353,17 @@ def _run_placer(
         for pid in all_pids
     }
 
-    logger.info("Estimating VGGT depth scale (triangulation) ...")
-    scale_per_frame = placer.estimate_scale_triangulated(
-        fused_betas_map=fused_betas_map,
-        fused_pose_by_pid=fused_pose_by_pid,
-        frame_start=frame_start,
-    )
-    logger.info(f"  scale: median={float(np.median(scale_per_frame)):.4f} m/VGGT-unit")
+    scale_per_frame = placer.load_mapanything_scale()
+    if scale_per_frame is not None:
+        logger.info(f"  scale: using MapAnything  median={float(np.median(scale_per_frame)):.4f} m/VGGT-unit")
+    else:
+        logger.info("Estimating VGGT depth scale (triangulation) — MapAnything scale not found ...")
+        scale_per_frame = placer.estimate_scale_triangulated(
+            fused_betas_map=fused_betas_map,
+            fused_pose_by_pid=fused_pose_by_pid,
+            frame_start=frame_start,
+        )
+        logger.info(f"  scale: triangulated  median={float(np.median(scale_per_frame)):.4f} m/VGGT-unit")
     # Depth arrays (~3 GB) are only needed for depth-based methods; free them
     # before the DLT loop to avoid running out of memory on long sequences.
     del placer.depth_mm, placer.depth_conf
