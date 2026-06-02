@@ -321,6 +321,23 @@ def load_gt_extrinsics(scene_name: str, rich_root: Path) -> list[np.ndarray] | N
     return exts if exts else None
 
 
+def load_gt_intrinsics(scene_name: str, rich_root: Path) -> list[np.ndarray] | None:
+    """Return list of (3,3) GT intrinsic matrices per camera in original full-res image space."""
+    location  = _scene_to_location(scene_name)
+    calib_dir = rich_root / "scan_calibration" / location / "calibration"
+    if not calib_dir.is_dir():
+        return None
+    intrs: list[np.ndarray] = []
+    for xml_path in sorted(calib_dir.glob("*.xml")):
+        tree = ET.parse(xml_path)
+        intr_node = tree.getroot().find("Intrinsics")
+        if intr_node is None:
+            continue
+        vals = list(map(float, intr_node.find("data").text.split()))
+        intrs.append(np.array(vals, dtype=np.float64).reshape(3, 3))
+    return intrs if intrs else None
+
+
 # ---------------------------------------------------------------------------
 # Person ID matching
 # ---------------------------------------------------------------------------
@@ -393,9 +410,14 @@ def _aa_to_6d(aa: np.ndarray) -> np.ndarray:
     return sixd.reshape(shape + (6,)).astype(np.float32)
 
 
-def load_scene_body_data(scene_dir: Path) -> tuple[list[Path], list[dict[int, dict]]]:
+def load_scene_body_data(
+    scene_dir: Path,
+    exclude_cameras: list[str] | None = None,
+) -> tuple[list[Path], list[dict[int, dict]]]:
+    exclude_cameras = set(exclude_cameras or [])
     cam_dirs = sorted(d for d in scene_dir.iterdir()
-                      if d.is_dir() and (d / "body_data").is_dir())
+                      if d.is_dir() and (d / "body_data").is_dir()
+                      and d.name not in exclude_cameras)
     raw: list[dict[int, dict]] = []
     for cam_dir in cam_dirs:
         cam_persons: dict[int, dict] = {}
@@ -494,14 +516,24 @@ def load_fusion_model(checkpoint: Path, device: torch.device) -> FusionWithBetas
 # ---------------------------------------------------------------------------
 
 def evaluate_scene(
-    scene_dir:      Path,
-    scene_name:     str,
-    rich_root:      Path,
-    fusion_model:   FusionWithBetas,
-    device:         torch.device,
+    scene_dir:        Path,
+    scene_name:       str,
+    rich_root:        Path,
+    fusion_model:     FusionWithBetas,
+    device:           torch.device,
     smplx_model_path: Path,
-    gt_split:       str = "test",
+    gt_split:         str = "test",
+    modalities:       list[int] | None = None,
+    exclude_cameras:  list[str] | None = None,
 ) -> dict[str, float] | None:
+    """Modalities:
+      1 = pred cameras + pred scale + pred pose
+      2 = pred cameras + GT scale   + pred pose
+      3 = GT cameras   + GT scale   + pred pose
+      4 = GT cameras   + GT scale   + GT pose   (oracle)
+    """
+    if modalities is None:
+        modalities = [1]
     """Run full inference + evaluation for one scene. Returns metric dict or None."""
     logger.info(f"\n{'─'*60}")
     logger.info(f"Scene: {scene_name}")
@@ -511,7 +543,7 @@ def evaluate_scene(
         return None
 
     # ── 1. Load body data ────────────────────────────────────────────────────
-    cam_dirs, raw = load_scene_body_data(scene_dir)
+    cam_dirs, raw = load_scene_body_data(scene_dir, exclude_cameras=exclude_cameras)
     if not cam_dirs or all(len(c) == 0 for c in raw):
         logger.warning("  No body data — skipping")
         return None
@@ -571,89 +603,168 @@ def evaluate_scene(
             for pid in all_pids
         }
 
+    # ── 3a. Pre-compute GT extrinsics + intrinsics (shared across modalities) ──
+    gt_exts_for_scale  = load_gt_extrinsics(scene_name, rich_root)
+    gt_intrs_for_scale = load_gt_intrinsics(scene_name, rich_root)
+    _ref_name_idx      = int(re.search(r"\d+", cam_dirs[0].name).group()) if cam_dirs else 0
+
+    def _compute_gt_scale() -> float:
+        """GT scale = median(||t_gt_k_rel|| / ||t_vggt_k_med||) over cameras."""
+        if not gt_exts_for_scale:
+            return 1.0
+        E0 = gt_exts_for_scale[_ref_name_idx].astype(np.float64)
+        R0, t0 = E0[:3, :3], E0[:3, 3]
+        vnames = [n.decode() if isinstance(n, bytes) else n for n in placer.camera_names]
+        ratios = []
+        for ki, cn in enumerate(vnames):
+            if ki == 0:
+                continue
+            m = re.search(r"\d+", cn)
+            if not m:
+                continue
+            gidx = int(m.group())
+            if gidx >= len(gt_exts_for_scale):
+                continue
+            Ek   = gt_exts_for_scale[gidx].astype(np.float64)
+            tk_gt = Ek[:3, 3] - Ek[:3, :3] @ R0.T @ t0
+            vmask = placer.cam_valid[:, ki]
+            if not vmask.any():
+                continue
+            t_med = np.median(placer.extrinsics[vmask, ki, :3, 3], axis=0)
+            pn    = np.linalg.norm(t_med)
+            gn    = np.linalg.norm(tk_gt)
+            if pn > 1e-6:
+                ratios.append(gn / pn)
+        return float(np.median(ratios)) if ratios else 1.0
+
+    def _build_gt_camera_extrinsics() -> np.ndarray | None:
+        """Return (T, K, 3, 4) GT extrinsics re-rooted to cam_dirs[0], scale 1.0."""
+        if not gt_exts_for_scale:
+            return None
+        E0   = gt_exts_for_scale[_ref_name_idx].astype(np.float64)
+        R0gt = E0[:3, :3];  t0gt = E0[:3, 3]
+        vnames = [n.decode() if isinstance(n, bytes) else n for n in placer.camera_names]
+        K_     = len(vnames)
+        T_     = placer.T
+        exts   = np.zeros((T_, K_, 3, 4), dtype=np.float64)
+        for ki, cn in enumerate(vnames):
+            m = re.search(r"\d+", cn)
+            if not m:
+                continue
+            gidx = int(m.group())
+            if gidx >= len(gt_exts_for_scale):
+                continue
+            Ek   = gt_exts_for_scale[gidx].astype(np.float64)
+            Rk   = Ek[:3, :3] @ R0gt.T           # re-root rotation
+            tk   = Ek[:3, 3] - Ek[:3, :3] @ R0gt.T @ t0gt  # re-root translation
+            P34  = np.hstack([Rk, tk[:, None]])   # (3, 4)
+            exts[:, ki] = P34[None]               # broadcast over T
+        return exts.astype(np.float32)
+
+    def _build_gt_camera_intrinsics() -> np.ndarray | None:
+        """Return (T, K, 3, 3) GT intrinsics converted to VGGT output space.
+
+        GT intrinsics from XML are in original full-res space (_RICH_ORIG_W x _RICH_ORIG_H).
+        original_coords[t, k] = [x1, y1, x2, y2] gives the crop in VGGT output space,
+        so the scale factors are sx = (x2-x1)/_RICH_ORIG_W, sy = (y2-y1)/_RICH_ORIG_H.
+        """
+        if not gt_intrs_for_scale:
+            return None
+        vnames = [n.decode() if isinstance(n, bytes) else n for n in placer.camera_names]
+        K_ = len(vnames)
+        T_ = placer.T
+        intrs = np.zeros((T_, K_, 3, 3), dtype=np.float32)
+        intrs[:, :, 2, 2] = 1.0
+        for ki, cn in enumerate(vnames):
+            m = re.search(r"\d+", cn)
+            if not m:
+                continue
+            gidx = int(m.group())
+            if gidx >= len(gt_intrs_for_scale):
+                continue
+            K_orig = gt_intrs_for_scale[gidx].astype(np.float64)
+            fx_o, fy_o = K_orig[0, 0], K_orig[1, 1]
+            cx_o, cy_o = K_orig[0, 2], K_orig[1, 2]
+            for t in range(T_):
+                x1, y1, x2, y2 = placer.original_coords[t, ki]
+                W_orig = float(placer.original_size[t, ki, 0])
+                H_orig = float(placer.original_size[t, ki, 1])
+                if W_orig < 1 or H_orig < 1:
+                    continue
+                sx = (x2 - x1) / W_orig
+                sy = (y2 - y1) / H_orig
+                intrs[t, ki, 0, 0] = fx_o * sx
+                intrs[t, ki, 1, 1] = fy_o * sy
+                intrs[t, ki, 0, 2] = cx_o * sx + x1
+                intrs[t, ki, 1, 2] = cy_o * sy + y1
+                intrs[t, ki, 2, 2] = 1.0
+        return intrs
+
+    # Pred scale (used by M1) — triangulation-based (more robust than depth-based)
     try:
-        scale_pf = placer.estimate_scale_per_frame(fused_betas_map=fused_betas_map)
-        trans_dict, orient_dict = placer.estimate_procrustes_dlt(
-            scale=scale_pf,
-            all_pids=set(all_pids),
-            pred_betas_by_pid=betas_by_pid,
+        # Build mean SAM3D betas per pid across all cameras and frames
+        sam3d_mean_betas: dict[Path, np.ndarray] = {}
+        for cam_dir in cam_dirs:
+            for pid in all_pids:
+                bf = cam_dir / "body_data" / f"person_{pid}.npz"
+                if not bf.exists():
+                    continue
+                d = np.load(bf, allow_pickle=False)
+                if "smplx_betas" in d.files:
+                    sam3d_mean_betas.setdefault(pid, []).append(d["smplx_betas"].mean(0))
+        # Per-pid SAM3D average betas (used for scale estimation AND FK reference in M1/M2/M3)
+        sam3d_betas_by_pid: dict[int, np.ndarray] = {
+            pid: np.mean(v, axis=0).astype(np.float32)
+            for pid, v in sam3d_mean_betas.items()
+        }
+        sam3d_betas_map: dict[Path, np.ndarray] = {}
+        for cam_dir in cam_dirs:
+            for pid in all_pids:
+                bf = cam_dir / "body_data" / f"person_{pid}.npz"
+                if not bf.exists():
+                    continue
+                if pid in sam3d_betas_by_pid:
+                    sam3d_betas_map[bf] = sam3d_betas_by_pid[pid]
+
+        pred_scale_pf = placer.estimate_scale_triangulated(
             fused_pose_by_pid=fused_pose_by_pid,
+            fused_betas_map=sam3d_betas_map,
             frame_start=frame_start,
         )
     except Exception as e:
-        logger.warning(f"  Placer failed: {e} — skipping")
+        logger.warning(f"  Scale estimation failed: {e} — skipping")
         return None
 
-    # ── 4. Predicted world-frame joints (in VGGT reference frame) ────────────
-    J_body = len(_BODY_JOINT_IDX)
-    pred_joints = np.full((T, P, J_body, 3), np.nan, dtype=np.float32)
-    pred_roots  = np.full((T, P, 3),          np.nan, dtype=np.float32)
-
-    for pid, frames_t in trans_dict.items():
-        if pid not in pid_to_slot:
-            continue
-        p_slot  = pid_to_slot[pid]
-        betas_p = betas_by_pid.get(pid, np.zeros(10, dtype=np.float32))
-
-        for global_t, pelvis_world in sorted(frames_t.items()):
-            t_rel  = int(global_t) - frame_start
-            R_mat  = orient_dict.get(pid, {}).get(global_t)
-            if not (0 <= t_rel < T) or R_mat is None:
-                continue
-
-            # Fused body_pose: joints 1-21 in 6D → axis-angle → (63,)
-            body_pose_aa = _6d_to_aa(fused_pose[t_rel, p_slot, :21])  # (21, 3)
-            body_pose    = body_pose_aa.reshape(63)
-
-            # FK with zero global_orient and zero transl → canonical joints
-            J_can = placer._smplx_fk(
-                betas_p[np.newaxis],
-                body_pose[np.newaxis],
-                np.zeros((1, 3), dtype=np.float32),
-            )[0]  # (55, 3)
-
-            # Apply Procrustes rotation + place pelvis at pelvis_world.
-            # J_world[j] = R @ (J_can[j] - J_can[0]) + pelvis_world
-            J_world = (R_mat @ (J_can - J_can[0]).T).T + pelvis_world   # (55, 3)
-
-            pred_joints[t_rel, p_slot] = J_world[_BODY_JOINT_IDX]
-            pred_roots[t_rel,  p_slot] = J_world[0]  # pelvis
-
-    # ── 5. GT loading and world-to-VGGT-reference transform ─────────────────
+    # ── 4. GT body data + world-to-ref transform (shared) ────────────────────
     gt_body_data = load_gt_body_data(scene_name, rich_root, split=gt_split)
     if not gt_body_data:
         logger.warning(f"  No GT found in {gt_split}_body/ — skipping")
         return None
 
-    # Build R_w2ref, t_w2ref: RICH world frame → VGGT reference frame.
-    # The VGGT reference frame is the first cam_dir (first valid camera).
-    gt_exts = load_gt_extrinsics(scene_name, rich_root)
-    _m_ref  = re.search(r"\d+", cam_dirs[0].name) if cam_dirs else None
-    _ref_idx = int(_m_ref.group()) if _m_ref else 0
+    gt_exts  = gt_exts_for_scale  # already loaded above
+    _ref_idx = _ref_name_idx
     if gt_exts and _ref_idx < len(gt_exts):
-        E_ref    = gt_exts[_ref_idx].astype(np.float64)
-        R_w2ref  = E_ref[:3, :3]
-        t_w2ref  = E_ref[:3, 3]
+        E_ref   = gt_exts[_ref_idx].astype(np.float64)
+        R_w2ref = E_ref[:3, :3]
+        t_w2ref = E_ref[:3, 3]
     else:
         R_w2ref = np.eye(3, dtype=np.float64)
         t_w2ref = np.zeros(3, dtype=np.float64)
 
-    # ── 5b. Camera + scale diagnostics ──────────────────────────────────────
-    cam_rot_err   = float("nan")
-    cam_t_cos     = float("nan")
-    gt_scale_val  = float("nan")
-    pred_scale_val = float("nan")
-    scale_err_pct  = float("nan")
+    # ── 4b. Camera diagnostics (pred vs GT, modality-independent) ───────────
+    cam_rot_err  = float("nan")
+    cam_t_cos    = float("nan")
+    cam_t_err_cm = float("nan")
+    gt_scale_val = float("nan")
+    pred_scale_val_diag = float("nan")
+    scale_err_pct = float("nan")
 
     if gt_exts:
-        E0     = gt_exts[_ref_idx].astype(np.float64)
-        R0_gt  = E0[:3, :3]
-        t0_gt  = E0[:3,  3]
-
-        vggt_names = [n.decode() if isinstance(n, bytes) else n
-                      for n in placer.camera_names]
-        rot_errs, t_coses, gt_scale_vals = [], [], []
-
+        E0 = gt_exts[_ref_idx].astype(np.float64)
+        R0_gt, t0_gt = E0[:3, :3], E0[:3, 3]
+        vggt_names = [n.decode() if isinstance(n, bytes) else n for n in placer.camera_names]
+        rot_errs, t_coses, gt_scale_vals, t_err_cms_list = [], [], [], []
+        _cam_t_data: list[tuple[np.ndarray, np.ndarray]] = []
         for ki, cam_name in enumerate(vggt_names):
             m = re.search(r"\d+", cam_name)
             if not m:
@@ -661,13 +772,9 @@ def evaluate_scene(
             gt_idx = int(m.group())
             if gt_idx >= len(gt_exts):
                 continue
-
-            # GT extrinsic re-rooted to first available camera
             Ek    = gt_exts[gt_idx].astype(np.float64)
             Rk_gt = Ek[:3, :3] @ R0_gt.T
-            tk_gt = Ek[:3,  3] - Ek[:3, :3] @ R0_gt.T @ t0_gt
-
-            # Predicted extrinsic: median over valid frames, re-orthogonalised
+            tk_gt = Ek[:3, 3] - Ek[:3, :3] @ R0_gt.T @ t0_gt
             vmask = placer.cam_valid[:, ki]
             if not vmask.any():
                 continue
@@ -678,142 +785,290 @@ def evaluate_scene(
             R_med = U @ Vt
             if np.linalg.det(R_med) < 0:
                 U[:, -1] *= -1; R_med = U @ Vt
-
-            if ki == 0:   # reference camera — skip (both [I|0] by construction)
+            if ki == 0:
                 continue
-
-            # Rotation error
-            R_err = R_med @ Rk_gt.T
-            angle = float(np.degrees(np.arccos(np.clip((np.trace(R_err) - 1) / 2, -1, 1))))
-            rot_errs.append(angle)
-
-            # Translation direction cosine
+            R_err_m = R_med @ Rk_gt.T
+            rot_errs.append(float(np.degrees(np.arccos(np.clip((np.trace(R_err_m) - 1) / 2, -1, 1)))))
             pn, gn = np.linalg.norm(t_med), np.linalg.norm(tk_gt)
             if pn > 1e-6 and gn > 1e-6:
                 t_coses.append(float(np.dot(t_med / pn, tk_gt / gn)))
-
-            # GT scale: ||t_gt_baseline|| / ||t_pred_baseline||
             if pn > 1e-6:
                 gt_scale_vals.append(gn / pn)
-
+            _cam_t_data.append((t_med, tk_gt))
         if rot_errs:
             cam_rot_err = float(np.mean(rot_errs))
         if t_coses:
             cam_t_cos = float(np.mean(t_coses))
         if gt_scale_vals:
             gt_scale_val = float(np.median(gt_scale_vals))
-
-        valid_scale = scale_pf[scale_pf > 0]
-        if valid_scale.size:
-            pred_scale_val = float(np.mean(valid_scale))
-        if gt_scale_val > 0 and np.isfinite(pred_scale_val):
-            scale_err_pct = (pred_scale_val - gt_scale_val) / gt_scale_val * 100.0
+        valid_spf = pred_scale_pf[pred_scale_pf > 0]
+        if valid_spf.size:
+            pred_scale_val_diag = float(np.mean(valid_spf))
+        if gt_scale_val > 0 and np.isfinite(pred_scale_val_diag):
+            scale_err_pct = (pred_scale_val_diag - gt_scale_val) / gt_scale_val * 100.0
+        if _cam_t_data and np.isfinite(pred_scale_val_diag):
+            t_err_cms_list = [float(np.linalg.norm(tm * pred_scale_val_diag - tg)) * 100.0
+                              for tm, tg in _cam_t_data]
+            cam_t_err_cm = float(np.mean(t_err_cms_list))
+        cam_t_err_gt_scale_cm = float("nan")
+        if _cam_t_data and gt_scale_val > 0:
+            cam_t_err_gt_scale_cm = float(np.mean(
+                [float(np.linalg.norm(tm * gt_scale_val - tg)) * 100.0 for tm, tg in _cam_t_data]
+            ))
 
     logger.info(
-        f"  Cam rot err = {cam_rot_err:.2f}°  |  Cam t_cos = {cam_t_cos:.4f}  |  "
-        f"pred_scale = {pred_scale_val:.4f}  gt_scale = {gt_scale_val:.4f}  "
+        f"  Cam rot err = {cam_rot_err:.2f}°  cam_t_cos = {cam_t_cos:.4f}  "
+        f"cam_t_err(pred_sc) = {cam_t_err_cm:.1f}cm  cam_t_err(gt_sc) = {cam_t_err_gt_scale_cm:.1f}cm  "
+        f"pred_scale = {pred_scale_val_diag:.4f}  gt_scale = {gt_scale_val:.4f}  "
         f"scale_err = {scale_err_pct:+.1f}%"
     )
 
-    # ── 6. Ghost↔GT pid matching ─────────────────────────────────────────────
-    K = len(cam_dirs)
+    # ── 5. Ghost↔GT pid matching (run once with M1 placement) ───────────────
+    K_cams = len(cam_dirs)
     pid_cam_count: dict[int, int] = defaultdict(int)
     for cam_dir in cam_dirs:
         for f in (cam_dir / "body_data").glob("person_*.npz"):
             pid_cam_count[int(f.stem.split("_")[1])] += 1
     foreground_pids: set[int] = {
-        pid for pid, cnt in pid_cam_count.items() if cnt >= max(1, K - 1)
+        pid for pid, cnt in pid_cam_count.items() if cnt >= max(1, K_cams - 1)
     }
 
+    # Run M1 placement to get trans_dict for matching
+    try:
+        trans_dict_m1, _ = placer.estimate_procrustes_dlt(
+            scale=pred_scale_pf,
+            all_pids=set(all_pids),
+            pred_betas_by_pid=betas_by_pid,
+            fused_pose_by_pid=fused_pose_by_pid,
+            frame_start=frame_start,
+        )
+    except Exception as e:
+        logger.warning(f"  Placer (M1) failed: {e} — skipping")
+        return None
+
     pid_match = match_ghost_to_gt(
-        trans_dict, gt_body_data, foreground_pids, R_w2ref, t_w2ref
+        trans_dict_m1, gt_body_data, foreground_pids, R_w2ref, t_w2ref
     )
     if not pid_match:
         logger.warning("  No ghost↔GT pid matches found — skipping")
         return None
-
     n_matched = len(pid_match)
 
-    # ── 7. GT world-frame joints (in RICH world frame, then kept as-is) ──────
-    # Metrics use Sim(3)/SE(3) alignment, which absorbs the VGGT↔RICH coordinate
-    # difference; no explicit frame transform on GT joints is needed.
-    gt_joints  = np.full((T, n_matched, J_body, 3), np.nan, dtype=np.float32)
-    gt_roots   = np.full((T, n_matched, 3),          np.nan, dtype=np.float32)
-    pred_joints_m = np.full_like(gt_joints,  np.nan)
-    pred_roots_m  = np.full_like(gt_roots,   np.nan)
+    # ── 6. Pre-build GT joints (shared, in RICH world frame) ────────────────
+    J_body    = len(_BODY_JOINT_IDX)
+    gt_joints = np.full((T, n_matched, J_body, 3), np.nan, dtype=np.float32)
+    gt_roots  = np.full((T, n_matched, 3),          np.nan, dtype=np.float32)
 
     for slot, (ghost_pid, gt_pid) in enumerate(sorted(pid_match.items())):
-        # Copy matched pred slots
-        g_slot = pid_to_slot[ghost_pid]
-        pred_joints_m[:, slot] = pred_joints[:, g_slot]
-        pred_roots_m[:, slot]  = pred_roots[:,  g_slot]
-
-        # GT joints: run FK with GT params (in RICH world frame)
         gt_pdata = gt_body_data[gt_pid]
         for frame_idx, params in gt_pdata.items():
             t_rel = frame_idx - frame_start
             if not (0 <= t_rel < T):
                 continue
-            J_gt_zero_transl = placer._smplx_fk(
+            J_gt = placer._smplx_fk(
                 params["betas"][np.newaxis],
                 params["body_pose"][np.newaxis],
                 params["global_orient"][np.newaxis],
-            )[0]   # (55, 3), zero transl → add gt_transl below
-            J_gt_world = J_gt_zero_transl + params["transl"]
+            )[0] + params["transl"]
+            gt_joints[t_rel, slot] = J_gt[_BODY_JOINT_IDX]
+            gt_roots[t_rel,  slot] = J_gt[0]
 
-            gt_joints[t_rel, slot] = J_gt_world[_BODY_JOINT_IDX]
-            gt_roots[t_rel,  slot] = J_gt_world[0]
-
-    # ── 7b. Raw root translation error (no alignment) ────────────────────────
-    # Pred roots are in VGGT reference frame; GT roots are in RICH world frame.
-    # Apply R_w2ref / t_w2ref to GT to bring both into the same frame.
-    raw_root_err_cm = float("nan")
-    raw_errs = []
-    for slot, (ghost_pid, gt_pid) in enumerate(sorted(pid_match.items())):
+    # Pre-build GT pose arrays (for M4): (T, P, 54, 6)
+    # Frames without GT data get identity rotations (6D = [1,0,0,0,1,0]) so the
+    # placer doesn't crash; they are excluded from metrics by the valid mask
+    # (gt_joints is NaN for those frames).
+    gt_fused_pose = np.zeros((T, P, 54, 6), dtype=np.float32)
+    gt_fused_pose[..., 0] = 1.0   # r0 = [1,0,0]
+    gt_fused_pose[..., 4] = 1.0   # r1 = [0,1,0]
+    for ghost_pid, gt_pid in pid_match.items():
+        p_slot   = pid_to_slot[ghost_pid]
         gt_pdata = gt_body_data[gt_pid]
         for frame_idx, params in gt_pdata.items():
             t_rel = frame_idx - frame_start
             if not (0 <= t_rel < T):
                 continue
-            if not np.isfinite(pred_roots_m[t_rel, slot]).all():
-                continue
-            gt_root_vggt = R_w2ref @ params["transl"].astype(np.float64) + t_w2ref
-            raw_errs.append(float(np.linalg.norm(pred_roots_m[t_rel, slot] - gt_root_vggt)))
-    if raw_errs:
-        raw_root_err_cm = float(np.median(raw_errs)) * 100.0
+            bp_6d = _aa_to_6d(params["body_pose"].reshape(21, 3))  # (21, 6)
+            gt_fused_pose[t_rel, p_slot, :21] = bp_6d
 
-    logger.info(f"  Raw root error (median, no alignment) = {raw_root_err_cm:.1f} cm")
+    # GT betas for M4 oracle (betas are person-level constants, average over frames)
+    gt_betas_by_pid: dict[int, np.ndarray] = {}
+    for ghost_pid, gt_pid in pid_match.items():
+        gt_pdata = gt_body_data[gt_pid]
+        betas_list = [params["betas"] for params in gt_pdata.values() if "betas" in params]
+        if betas_list:
+            gt_betas_by_pid[ghost_pid] = np.mean(betas_list, axis=0).astype(np.float32)
+        else:
+            gt_betas_by_pid[ghost_pid] = np.zeros(10, dtype=np.float32)
 
-    # ── 8. Validity mask ──────────────────────────────────────────────────────
-    valid = (
-        np.isfinite(pred_joints_m).all((-2, -1)) &
-        np.isfinite(gt_joints).all((-2, -1))
-    )  # (T, n_matched)
-    n_valid = int(valid.sum())
-    if n_valid == 0:
-        logger.warning("  No valid (pred, GT) frame-person pairs — skipping")
-        return None
-    logger.info(f"  Matched persons: {n_matched}  |  valid frames×persons: {n_valid}/{T * n_matched}")
+    # GT camera extrinsics + intrinsics (for M3/M4)
+    gt_cam_exts  = _build_gt_camera_extrinsics()   # (T, K, 3, 4) or None
+    gt_cam_intrs = _build_gt_camera_intrinsics()   # (T, K, 3, 3) or None
+    gt_scale_scalar = _compute_gt_scale()
 
-    # ── 9. Compute CHROMM metrics ─────────────────────────────────────────────
-    wa  = metric_wa_mpjpe(pred_joints_m, gt_joints, valid)
-    w   = metric_w_mpjpe( pred_joints_m, gt_joints, valid)
-    ga  = metric_ga_mpjpe(pred_joints_m, gt_joints, valid)
-    pa  = metric_pa_mpjpe(pred_joints_m, gt_joints, valid)
-    rte = metric_rte(pred_roots_m, gt_roots)
-
-    logger.info(
-        f"  WA-MPJPE = {wa:6.1f} mm   W-MPJPE = {w:6.1f} mm   "
-        f"GA-MPJPE = {ga:6.1f} mm   PA-MPJPE = {pa:6.1f} mm   RTE = {rte:5.2f}%"
-    )
-    return {
-        "wa_mpjpe": wa, "w_mpjpe": w, "ga_mpjpe": ga, "pa_mpjpe": pa, "rte": rte,
-        "n_valid": n_valid,
+    # ── 7. Per-modality evaluation loop ──────────────────────────────────────
+    results: dict[str, float] = {
+        "n_valid": 0,
         "cam_rot_err": cam_rot_err, "cam_t_cos": cam_t_cos,
-        "pred_scale": pred_scale_val, "gt_scale": gt_scale_val,
+        "cam_t_err_cm": cam_t_err_cm, "cam_t_err_gt_scale_cm": cam_t_err_gt_scale_cm,
+        "pred_scale": pred_scale_val_diag, "gt_scale": gt_scale_val,
         "scale_err_pct": scale_err_pct,
-        "raw_root_err_cm": raw_root_err_cm,
     }
+
+    _MODALITY_LABELS = {
+        1: "M1: pred-cam + pred-scale + pred-pose",
+        2: "M2: pred-cam + GT-scale   + pred-pose",
+        3: "M3: GT-cam   + GT-scale   + pred-pose",
+        4: "M4: GT-cam   + GT-scale   + GT-pose  (oracle)",
+    }
+
+    orig_extrinsics = placer.extrinsics    # save original VGGT extrinsics
+    orig_intrinsics = placer.intrinsics   # save original VGGT intrinsics
+    orig_cam_valid  = placer.cam_valid.copy()
+
+    for modality in modalities:
+        label = _MODALITY_LABELS.get(modality, f"M{modality}")
+        logger.info(f"\n  [{label}]")
+
+        # Choose scale
+        use_gt_cams  = modality in (3, 4)
+        use_gt_scale_flag = modality in (2, 3, 4)
+        use_gt_pose  = modality == 4
+
+        if use_gt_scale_flag:
+            scale_pf = np.full(placer.T, gt_scale_scalar, dtype=np.float32)
+        else:
+            scale_pf = pred_scale_pf
+
+        # Patch extrinsics + intrinsics for GT cameras
+        if use_gt_cams and gt_cam_exts is not None:
+            placer.extrinsics = gt_cam_exts.astype(np.float32)
+            # Keep VGGT intrinsics: GT intrinsics are in the full-res calibration
+            # space (e.g. 4332x3008) which differs per scene due to VGGT's
+            # scene-specific preprocessing; converting via original_size is wrong.
+            # With GT cameras metric scale is 1.0
+            scale_pf = np.ones(placer.T, dtype=np.float32)
+            # Cameras with no GT calibration (e.g. cam_10) have all-zero extrinsics
+            # — mark them invalid so DLT doesn't produce NaN from a zero P matrix.
+            filled = np.any(gt_cam_exts != 0, axis=(0, 2, 3))  # (K,) bool
+            placer.cam_valid = orig_cam_valid & filled[np.newaxis, :]
+        else:
+            placer.extrinsics = orig_extrinsics
+            placer.intrinsics = orig_intrinsics
+
+        # Choose pose and betas
+        pose_for_placer = gt_fused_pose if use_gt_pose else fused_pose
+        betas_for_placer = (gt_betas_by_pid if use_gt_pose
+                            else sam3d_betas_by_pid)
+        fused_pose_by_pid_mod: dict[int, np.ndarray] = {
+            pid: pose_for_placer[:, pid_to_slot[pid]] for pid in all_pids
+        }
+
+        try:
+            trans_dict, orient_dict = placer.estimate_procrustes_dlt(
+                scale=scale_pf,
+                all_pids=set(all_pids),
+                pred_betas_by_pid=betas_for_placer,
+                fused_pose_by_pid=fused_pose_by_pid_mod,
+                frame_start=frame_start,
+            )
+        except Exception as e:
+            logger.warning(f"  [{label}] Placer failed: {e}")
+            continue
+        finally:
+            placer.extrinsics = orig_extrinsics  # always restore
+            placer.intrinsics = orig_intrinsics
+            placer.cam_valid  = orig_cam_valid
+
+        # Build pred joints
+        pred_joints = np.full((T, P, J_body, 3), np.nan, dtype=np.float32)
+        pred_roots  = np.full((T, P, 3),          np.nan, dtype=np.float32)
+
+        for pid, frames_t in trans_dict.items():
+            if pid not in pid_to_slot:
+                continue
+            p_slot  = pid_to_slot[pid]
+            betas_p = betas_for_placer.get(pid, np.zeros(10, dtype=np.float32))
+            for global_t, pelvis_world in sorted(frames_t.items()):
+                t_rel = int(global_t) - frame_start
+                R_mat = orient_dict.get(pid, {}).get(global_t)
+                if not (0 <= t_rel < T) or R_mat is None:
+                    continue
+                body_pose_aa = _6d_to_aa(pose_for_placer[t_rel, p_slot, :21])
+                J_can  = placer._smplx_fk(
+                    betas_p[np.newaxis],
+                    body_pose_aa.reshape(63)[np.newaxis],
+                    np.zeros((1, 3), dtype=np.float32),
+                )[0]
+                J_world = (R_mat @ (J_can - J_can[0]).T).T + pelvis_world
+                pred_joints[t_rel, p_slot] = J_world[_BODY_JOINT_IDX]
+                pred_roots[t_rel,  p_slot] = J_world[0]
+
+        # Gather matched-person arrays
+        pred_joints_m = np.full((T, n_matched, J_body, 3), np.nan, dtype=np.float32)
+        pred_roots_m  = np.full((T, n_matched, 3),          np.nan, dtype=np.float32)
+        for slot, (ghost_pid, _) in enumerate(sorted(pid_match.items())):
+            g_slot = pid_to_slot[ghost_pid]
+            pred_joints_m[:, slot] = pred_joints[:, g_slot]
+            pred_roots_m[:, slot]  = pred_roots[:,  g_slot]
+
+        valid = (
+            np.isfinite(pred_joints_m).all((-2, -1)) &
+            np.isfinite(gt_joints).all((-2, -1))
+        )
+        n_valid = int(valid.sum())
+        results["n_valid"] = max(results["n_valid"], n_valid)
+
+        wa  = metric_wa_mpjpe(pred_joints_m, gt_joints, valid)
+        w   = metric_w_mpjpe( pred_joints_m, gt_joints, valid)
+        ga  = metric_ga_mpjpe(pred_joints_m, gt_joints, valid)
+        pa  = metric_pa_mpjpe(pred_joints_m, gt_joints, valid)
+        rte = metric_rte(pred_roots_m, gt_roots)
+
+        # Raw root error (pred in VGGT/GT-cam frame, GT in RICH world)
+        raw_errs = []
+        orient_errs = []
+        for slot, (ghost_pid, gt_pid) in enumerate(sorted(pid_match.items())):
+            for frame_idx, params in gt_body_data[gt_pid].items():
+                t_rel = frame_idx - frame_start
+                if not (0 <= t_rel < T):
+                    continue
+                if np.isfinite(pred_roots_m[t_rel, slot]).all():
+                    # GT pelvis = J[0] + transl (not just transl — canonical J[0] is ~33cm offset)
+                    J_gt_body = placer._smplx_fk(
+                        params["betas"][np.newaxis],
+                        params["body_pose"][np.newaxis],
+                        params["global_orient"][np.newaxis],
+                    )[0]
+                    gt_pelvis_world = J_gt_body[0] + params["transl"].astype(np.float64)
+                    gt_root_ref = R_w2ref @ gt_pelvis_world + t_w2ref
+                    raw_errs.append(float(np.linalg.norm(pred_roots_m[t_rel, slot] - gt_root_ref)))
+                R_pred_mat = orient_dict.get(ghost_pid, {}).get(frame_idx)
+                if R_pred_mat is not None:
+                    R_gt_w = SciR.from_rotvec(params["global_orient"].astype(np.float64)).as_matrix()
+                    R_gt_ref = R_w2ref @ R_gt_w
+                    R_err = R_pred_mat.astype(np.float64) @ R_gt_ref.T
+                    orient_errs.append(float(np.degrees(
+                        np.arccos(np.clip((np.trace(R_err) - 1) / 2, -1, 1))
+                    )))
+
+        raw_root_err_cm     = float(np.median(raw_errs))     * 100.0 if raw_errs     else float("nan")
+        root_orient_err_deg = float(np.median(orient_errs))          if orient_errs  else float("nan")
+
+        logger.info(
+            f"  WA={wa:6.1f}mm  W={w:6.1f}mm  GA={ga:6.1f}mm  PA={pa:6.1f}mm  "
+            f"RTE={rte:5.2f}%  raw_root={raw_root_err_cm:.1f}cm  orient={root_orient_err_deg:.1f}°"
+        )
+
+        pfx = f"m{modality}_"
+        results[pfx + "wa_mpjpe"]           = wa
+        results[pfx + "w_mpjpe"]            = w
+        results[pfx + "ga_mpjpe"]           = ga
+        results[pfx + "pa_mpjpe"]           = pa
+        results[pfx + "rte"]                = rte
+        results[pfx + "raw_root_err_cm"]    = raw_root_err_cm
+        results[pfx + "root_orient_err_deg"] = root_orient_err_deg
+
+    return results if len(results) > 8 else None
 
 
 # ---------------------------------------------------------------------------
@@ -836,8 +1091,19 @@ def main() -> None:
     parser.add_argument("--max_scenes",        type=int, default=None,
                         help="Limit evaluation to first N scenes (for debugging).")
     parser.add_argument("--gt_split",          default="test",
-                        help="GT split to use: 'test' or 'train' (default: test).")
+                        help="GT body split: 'test' or 'train'")
+    parser.add_argument("--scenes",            default="",
+                        help="Comma-separated scene names to evaluate (default: all)")
+    parser.add_argument("--skip_scenes",       default="",
+                        help="Comma-separated scene names to skip")
+    parser.add_argument("--skip_cameras",      default="",
+                        help="Per-scene camera exclusions: 'scene:cam1,cam2;scene2:cam3'")
+    parser.add_argument("--modalities",         default="1",
+                        help="Comma-separated modalities to run: 1,2,3,4 (default: 1). "
+                             "1=pred-cam+pred-scale+pred-pose, 2=pred-cam+GT-scale+pred-pose, "
+                             "3=GT-cam+GT-scale+pred-pose, 4=GT-cam+GT-scale+GT-pose (oracle).")
     args = parser.parse_args()
+    args.modalities = [int(x.strip()) for x in args.modalities.split(",")]
 
     device = torch.device(args.device)
     logger.info(f"Device: {device}")
@@ -845,13 +1111,27 @@ def main() -> None:
     logger.info("Loading fusion model ...")
     fusion_model = load_fusion_model(args.checkpoint, device)
 
+    skip_scenes: set[str] = {s.strip() for s in args.skip_scenes.split(",") if s.strip()}
+
+    # Parse --skip_cameras "scene:cam1,cam2;scene2:cam3" → dict[scene_name, list[cam]]
+    skip_cameras: dict[str, list[str]] = {}
+    for entry in args.skip_cameras.split(";"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        scene_part, _, cams_part = entry.partition(":")
+        skip_cameras[scene_part.strip()] = [c.strip() for c in cams_part.split(",") if c.strip()]
+
+    only_scenes: set[str] = {s.strip() for s in args.scenes.split(",") if s.strip()}
     scenes = sorted(
         d for d in args.ghost_output_root.iterdir()
         if d.is_dir() and (d / "vggt_cameras.npz").exists()
+        and d.name not in skip_scenes
+        and (not only_scenes or d.name in only_scenes)
     )
     if args.max_scenes:
         scenes = scenes[:args.max_scenes]
-    logger.info(f"Found {len(scenes)} scene(s).")
+    logger.info(f"Found {len(scenes)} scene(s) (skipping: {skip_scenes or 'none'}).")
 
     all_results: list[dict] = []
     for scene_dir in scenes:
@@ -863,6 +1143,8 @@ def main() -> None:
             device=device,
             smplx_model_path=args.smplx_model,
             gt_split=args.gt_split,
+            modalities=args.modalities,
+            exclude_cameras=skip_cameras.get(scene_dir.name),
         )
         if result is not None:
             all_results.append(result)
@@ -872,27 +1154,79 @@ def main() -> None:
         return
 
     def agg(key: str) -> float:
-        vals = [r[key] for r in all_results if not np.isnan(r[key])]
+        vals = [r[key] for r in all_results if key in r and np.isfinite(r[key])]
         return float(np.mean(vals)) if vals else float("nan")
+
+    def fmt(v: float, unit: str = "") -> str:
+        if np.isnan(v):
+            return f"{'—':>14}"
+        if unit == "mm":
+            return f"{v:>12.1f}mm"
+        if unit == "%":
+            return f"{v:>13.2f}%"
+        if unit == "deg":
+            return f"{v:>13.1f}°"
+        if unit == "cm":
+            return f"{v:>12.1f}cm"
+        return f"{v:>14.4f}"
+
+    _MOD_HEADERS = {
+        1: "M1 pred-cam+pred-sc",
+        2: "M2 pred-cam+GT-sc  ",
+        3: "M3 GT-cam+GT-sc    ",
+        4: "M4 oracle          ",
+    }
+    modalities_run = sorted(args.modalities)
+    col_w = 20
 
     print(f"\n{'='*65}")
     print(f"AGGREGATE  ({len(all_results)} scenes evaluated)")
     print(f"{'='*65}")
-    print(f"  {'Metric':<26}  {'Ghost (ours)':>14}  {'CHROMM multi':>14}")
-    print(f"  {'-'*26}  {'-'*14}  {'-'*14}")
-    print(f"  {'WA-MPJPE':<26}  {agg('wa_mpjpe'):>12.1f}mm  {'53.1 mm':>14}")
-    print(f"  {'W-MPJPE':<26}  {agg('w_mpjpe'):>12.1f}mm  {'79.0 mm':>14}")
-    print(f"  {'GA-MPJPE':<26}  {agg('ga_mpjpe'):>12.1f}mm  {'—':>14}")
-    print(f"  {'PA-MPJPE':<26}  {agg('pa_mpjpe'):>12.1f}mm  {'—':>14}")
-    print(f"  {'RTE':<26}  {agg('rte'):>13.2f}%  {'1.4 %':>14}")
+
+    # Header row
+    hdr = f"  {'Metric':<26}"
+    for m in modalities_run:
+        hdr += f"  {_MOD_HEADERS[m]:>{col_w}}"
+    hdr += f"  {'CHROMM multi':>{col_w}}"
+    print(hdr)
+    print("  " + "-" * (26 + (col_w + 2) * (len(modalities_run) + 1)))
+
+    chromm = {"wa": "53.1 mm", "w": "79.0 mm", "ga": "—", "pa": "—", "rte": "1.4 %"}
+
+    def mrow(label, key_suffix, unit):
+        row = f"  {label:<26}"
+        for m in modalities_run:
+            v = agg(f"m{m}_{key_suffix}")
+            row += f"  {fmt(v, unit):>{col_w}}"
+        row += f"  {chromm.get(key_suffix.split('_')[0], '—'):>{col_w}}"
+        print(row)
+
+    mrow("WA-MPJPE",  "wa_mpjpe",  "mm")
+    mrow("W-MPJPE",   "w_mpjpe",   "mm")
+    mrow("GA-MPJPE",  "ga_mpjpe",  "mm")
+    mrow("PA-MPJPE",  "pa_mpjpe",  "mm")
+    mrow("RTE",       "rte",       "%")
     print()
-    print(f"  --- Diagnostics ---")
+    print("  --- Diagnostics (shared) ---")
     print(f"  {'Cam rot err (°)':<26}  {agg('cam_rot_err'):>14.2f}")
     print(f"  {'Cam t_cos':<26}  {agg('cam_t_cos'):>14.4f}")
+    print(f"  {'Cam t_err pred-sc (cm)':<26}  {agg('cam_t_err_cm'):>14.1f}")
+    print(f"  {'Cam t_err GT-sc (cm)':<26}  {agg('cam_t_err_gt_scale_cm'):>14.1f}")
     print(f"  {'Pred scale':<26}  {agg('pred_scale'):>14.4f}")
     print(f"  {'GT scale':<26}  {agg('gt_scale'):>14.4f}")
     print(f"  {'Scale err (%)':<26}  {agg('scale_err_pct'):>13.1f}%")
-    print(f"  {'Raw root err (cm)':<26}  {agg('raw_root_err_cm'):>14.1f}")
+    print()
+    print("  --- Per-modality diagnostics ---")
+
+    def drow(label, key_suffix, unit):
+        row = f"  {label:<26}"
+        for m in modalities_run:
+            v = agg(f"m{m}_{key_suffix}")
+            row += f"  {fmt(v, unit):>{col_w}}"
+        print(row)
+
+    drow("Raw root err (cm)",    "raw_root_err_cm",    "cm")
+    drow("Root orient err (°)",  "root_orient_err_deg", "deg")
     print()
 
 
