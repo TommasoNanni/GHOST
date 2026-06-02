@@ -1,33 +1,27 @@
-"""Cross-view person re-identification v2 — combined appearance + SLAM + RANSAC.
+"""Cross-view person re-identification v2 — constrained rigid + per-person scale.
 
-Full algorithm, matching notebooks/reid_geometric.ipynb + combined_reid.ipynb:
+Algorithm per camera pair (vid_a, vid_b):
 
-  0. DROID-SLAM runs on every camera (static or moving) to estimate per-frame
-     camera poses.  A metric scale λ is computed from pred_cam_t disparities.
-     All 3-D keypoints are then projected to a common world frame.
+  0. DROID-SLAM (optional) corrects keypoints to world frame.  Static cameras
+     fall back to abs_j = kpts_cam + pred_cam_t.
 
-  1. Appearance Hungarian gives initial assignment (appearance + shape + pose
-     xcorr) and provides seeds for the geometric RANSAC step.
+  1. Build xcorr delta-score curve over ALL person pairs weighted by appearance
+     similarity × track dynamics.  Extract top-10 local-maxima as δ candidates.
 
-  2. RANSAC with delta search: for each appearance-seeded anchor candidate
-     (high sim ≥ HIGH_APP_THR), integer frame offsets δ in
-     [xcorr_estimate − delta_search, xcorr_estimate + delta_search] are tried.
-     The 12-DOF affine is fitted for each (anchor, δ) and inliers are counted.
-     Prefers dynamic anchors (joint_std ≥ min_anchor_std).  Falls back to all
-     pairs as RANSAC seeds when no high-confidence appearance pair exists.
+  2. For each candidate δ_k run ALS (Alternating Least Squares) to fit the
+     constrained model  abs_a_i ≈ λ_i · R · abs_b_i + t  where R and t are
+     shared across all persons and λ_i is a per-person depth-scale scalar:
+       - Seed assignment from appearance-based Hungarian.
+       - ALS pass 1 → re-run Hungarian on geometric RMSE → ALS pass 2.
+     Select δ* = argmin average RMSE over matched persons.
 
-  3. Joint refinement: iteratively re-fits the affine from the inlier set and
-     searches a ±delta_search neighbourhood around the current best δ, repeating
-     until convergence.
+  3. Hungarian on the full N×M RMSE matrix under (R*, t*) at δ* to produce the
+     final per-pair costs.  Accept pairs with RMSE < match_rmse_thr.
 
-  4. Hungarian on the RMSE matrix under the refined affine + δ to produce the
-     final assignment.
+  4. Union-Find merges accepted pairs with same-camera conflict guard.
 
-  5. Pairs with RMSE < match_rmse_thr are merged.  Same-camera conflict guard
-     is enforced via Union-Find.
-
-  6. Per-camera-pair frame offsets (best δ) are saved to cross_view_reid.json
-     for downstream temporal synchronisation.
+  5. Per-camera-pair frame offsets (δ*) are saved to cross_view_reid.json for
+     downstream temporal synchronisation.
 """
 
 from __future__ import annotations
@@ -83,7 +77,7 @@ class CrossVideoReidentifierV2:
     _POSE_WEIGHT: float = 0.3
     _HIGH_APP_THR: float = 0.60
     _LOW_APP_THR: float = 0.35
-    _MATCH_RMSE_THR: float = 0.25
+    _MATCH_RMSE_THR: float = 0.60
     _MIN_ANCHOR_STD: float = 0.05
     _RANSAC_ANCHOR_THR: float = 0.20
     _INLIER_THR: float = 0.25
@@ -145,6 +139,7 @@ class CrossVideoReidentifierV2:
         video_dirs: dict[str, Path],
         frames_dirs: dict[str, Path] | None = None,
         intrinsics_map: dict[str, np.ndarray] | None = None,
+        dry_run: bool = False,
     ) -> None:
         """Assign consistent global person IDs across all camera views in a scene.
 
@@ -156,11 +151,13 @@ class CrossVideoReidentifierV2:
         intrinsics_map : dict[str, np.ndarray], optional
             Per-camera 3×3 intrinsic matrix K.  Falls back to default_intrinsics
             when not provided.
+        dry_run : bool
+            If True, skip all file writes and only print the would-be remappings.
         """
         scene_id = scene.scene_id
         scene_dir = Path(next(iter(video_dirs.values()))).parent
 
-        if (scene_dir / "cross_view_reid.json").exists():
+        if not dry_run and (scene_dir / "cross_view_reid.json").exists():
             logging.info(f"  Scene {scene_id}: cross-view ReID v2 already done, skipping")
             return
 
@@ -192,6 +189,7 @@ class CrossVideoReidentifierV2:
             frames_dirs=frames_dirs,
             intrinsics_map=intrinsics_map or {},
             slam_cams=self.slam_cams,
+            dry_run=dry_run,
         )
 
     # ── apply_reid_remap (identical to v1) ────────────────────────────────────
@@ -294,9 +292,11 @@ class CrossVideoReidentifierV2:
         frames_dirs: dict[str, Path],
         intrinsics_map: dict[str, np.ndarray],
         slam_cams: set[str] | None,
+        dry_run: bool = False,
     ) -> None:
 
         MIN_OVERLAP = 30
+        MIN_DELTA_OVERLAP_FRAMES = 100  # minimum video-level frame overlap to consider a δ candidate
         MIN_A_SINGULAR_VALUE = 0.3
 
         video_ids = list(video_dirs.keys())
@@ -456,6 +456,7 @@ class CrossVideoReidentifierV2:
             img_files = sorted(p for p in frames_dir.iterdir()
                                if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"})
             if not img_files:
+                logging.warning(f"DROID-SLAM: no images found in {frames_dir}, skipping")
                 return None
             first = cv2.imread(str(img_files[0]))
             H_orig, W_orig = first.shape[:2]
@@ -553,6 +554,18 @@ class CrossVideoReidentifierV2:
                     logging.warning(f"  {vid_id}: SLAM returned no poses, skipping correction")
                     continue
                 poses, disps, tstamp, orig_hw, _ = result
+
+                # Reject SLAM result for cameras with negligible motion — DROID-SLAM
+                # occasionally succeeds on static cameras with very few keyframes,
+                # producing arbitrary poses.  If the translation std across all poses
+                # is below 0.05 m the camera is treated as static.
+                traj_std = float(np.std(poses[:, :3]))
+                if traj_std < 0.05:
+                    logging.warning(
+                        f"  {vid_id}: SLAM poses show negligible motion "
+                        f"(traj_std={traj_std:.4f} m) — treating as static, skipping correction"
+                    )
+                    continue
 
                 kpts_data = person_kpts3d.get(vid_id, {})
                 if not kpts_data:
@@ -721,18 +734,6 @@ class CrossVideoReidentifierV2:
 
         # ── Geometric helpers ──────────────────────────────────────────────────
 
-        def _affine_fit(src: np.ndarray, dst: np.ndarray):
-            X = np.concatenate([src, np.ones((len(src), 1), dtype=src.dtype)], axis=1)
-            valid = np.isfinite(X).all(axis=1) & np.isfinite(dst).all(axis=1)
-            if valid.sum() < 12:
-                return np.eye(3, dtype=np.float64), np.zeros(3, dtype=np.float64)
-            M, _, _, _ = np.linalg.lstsq(X[valid], dst[valid], rcond=None)
-            return M[:3].T, M[3]
-
-        def _apply_T(A, t_vec, kpts):
-            shape = kpts.shape
-            return (A @ kpts.reshape(-1, 3).T).T.reshape(shape) + t_vec
-
         def _get_aligned_flat(pid_b, vid_b, pid_a, vid_a, delta):
             """Common-frame keypoints, flat (N*70, 3), or (None, None)."""
             kb = person_kpts3d.get(vid_b, {})
@@ -750,70 +751,6 @@ class CrossVideoReidentifierV2:
             ia = [fa2i[f + delta] for f in common]
             return kpts_b[ib].reshape(-1, 3), kpts_a[ia].reshape(-1, 3)
 
-        def _direct_rmse(A, t_vec, pid_b, vid_b, pid_a, vid_a, delta) -> float:
-            src, dst = _get_aligned_flat(pid_b, vid_b, pid_a, vid_a, delta)
-            if src is None:
-                return float("inf")
-            pred = (A @ src.T).T + t_vec
-            valid = np.isfinite(pred).all(axis=1) & np.isfinite(dst).all(axis=1)
-            if valid.sum() == 0:
-                return float("inf")
-            r = float(np.sqrt(((pred[valid] - dst[valid]) ** 2).sum(1).mean()))
-            return r if np.isfinite(r) else float("inf")
-
-        def _fit_pair_delta(pid_b, vid_b, pid_a, vid_a, delta):
-            """Fit affine for one anchor pair + delta. Returns (A, t, rmse) or None."""
-            src, dst = _get_aligned_flat(pid_b, vid_b, pid_a, vid_a, delta)
-            if src is None:
-                return None
-            A, t = _affine_fit(src, dst)
-            if np.linalg.svd(A, compute_uv=False).min() < MIN_A_SINGULAR_VALUE:
-                return None
-            pred = (A @ src.T).T + t
-            valid = np.isfinite(pred).all(axis=1) & np.isfinite(dst).all(axis=1)
-            if valid.sum() == 0:
-                return None
-            rmse = float(np.sqrt(((pred[valid] - dst[valid]) ** 2).sum(1).mean()))
-            return (A, t, rmse) if np.isfinite(rmse) else None
-
-        def _fit_two_pairs_delta(pb1, vid_b, pa1, vid_a, pb2, pa2, delta):
-            """Fit affine jointly from two anchor pairs. Returns (A, t, rmse) or None."""
-            src1, dst1 = _get_aligned_flat(pb1, vid_b, pa1, vid_a, delta)
-            src2, dst2 = _get_aligned_flat(pb2, vid_b, pa2, vid_a, delta)
-            if src1 is None or src2 is None:
-                return None
-            src = np.concatenate([src1, src2])
-            dst = np.concatenate([dst1, dst2])
-            A, t = _affine_fit(src, dst)
-            if np.linalg.svd(A, compute_uv=False).min() < MIN_A_SINGULAR_VALUE:
-                return None
-            pred = (A @ src.T).T + t
-            valid = np.isfinite(pred).all(axis=1) & np.isfinite(dst).all(axis=1)
-            if valid.sum() == 0:
-                return None
-            rmse = float(np.sqrt(((pred[valid] - dst[valid]) ** 2).sum(1).mean()))
-            return (A, t, rmse) if np.isfinite(rmse) else None
-
-        def _get_inlier_pairs(A, t_vec, delta, vid_b, vid_a, exclude_pids_b):
-            """For each pid_b (except anchors), find best pid_a by RMSE."""
-            inliers = []
-            for pid_b in person_pids.get(vid_b, []):
-                if pid_b in exclude_pids_b:
-                    continue
-                # Skip static persons — same guard as anchor selection and joint refine.
-                if (_track_std(vid_b, pid_b) < min_anchor_std
-                        and all(_track_std(vid_a, pa) < min_anchor_std
-                                for pa in person_pids.get(vid_a, []))):
-                    continue
-                best_rmse, best_pa = float("inf"), None
-                for pid_a in person_pids.get(vid_a, []):
-                    r = _direct_rmse(A, t_vec, pid_b, vid_b, pid_a, vid_a, delta)
-                    if r < best_rmse:
-                        best_rmse, best_pa = r, pid_a
-                if best_pa is not None and best_rmse < inlier_thr:
-                    inliers.append((pid_b, best_pa, best_rmse))
-            return inliers
-
         def _track_std(vid: str, pid: int) -> float:
             kd = person_kpts3d.get(vid, {})
             if pid not in kd:
@@ -822,62 +759,101 @@ class CrossVideoReidentifierV2:
             valid = kpts[np.isfinite(kpts).all(axis=(1, 2))]
             return float(valid.std(axis=0).mean()) if len(valid) > 0 else 0.0
 
-        def _joint_refine(assignment, vid_b, vid_a, delta_init):
-            """Iteratively refit affine + search delta neighbourhood."""
-            delta = delta_init
-            A, t_vec = np.eye(3, dtype=np.float64), np.zeros(3, dtype=np.float64)
-            prev_rmse = float("inf")
+        def _get_top_k_peaks(scores: dict, k: int = 10) -> list:
+            """Return up to k delta values at local maxima of the scores dict."""
+            if not scores:
+                return [0]
+            deltas = sorted(scores)
+            vals = [scores[d] for d in deltas]
+            peaks = []
+            for i, (d, v) in enumerate(zip(deltas, vals)):
+                left = vals[i - 1] if i > 0 else -1.0
+                right = vals[i + 1] if i < len(vals) - 1 else -1.0
+                if v >= left and v >= right and v > 0:
+                    peaks.append((v, d))
+            peaks.sort(reverse=True)
+            if not peaks:
+                ranked = sorted(scores.items(), key=lambda x: -x[1])
+                return [d for d, _ in ranked[:k]]
+            return [d for _, d in peaks[:k]]
 
-            # Prefer dynamic pairs for fitting; fall back to all pairs if all static.
-            fit_pairs = [
-                (pb, pa) for pb, pa in assignment
-                if (_track_std(vid_b, pb) >= min_anchor_std
-                    or _track_std(vid_a, pa) >= min_anchor_std)
-            ]
-            if not fit_pairs:
-                fit_pairs = list(assignment)
+        def _constrained_fit(assignment, vid_b, vid_a, delta, max_iter=10):
+            """ALS for abs_a_i ≈ λ_i * (R @ abs_b_i + t) (shared R, t; per-person λ_i).
 
-            best_d_rmse = float("inf")
-            for _ in range(20):
-                # Refit affine from all pairs at current delta.
-                all_src, all_dst = [], []
-                for pb, pa in fit_pairs:
-                    src, dst = _get_aligned_flat(pb, vid_b, pa, vid_a, delta)
-                    if src is not None:
-                        all_src.append(src)
-                        all_dst.append(dst)
-                if not all_src:
-                    break
-                A, t_vec = _affine_fit(
-                    np.concatenate(all_src), np.concatenate(all_dst)
-                )
+            The λ_i multiplies the full transform (rotation + translation), which is
+            physically correct: monocular depth error scales the entire predicted 3D
+            position, including the camera-frame translation component.
 
-                # Search delta in ±delta_search neighbourhood.
-                best_d, best_d_rmse = delta, float("inf")
-                for d in range(delta - delta_search, delta + delta_search + 1):
-                    sl_pred, sl_dst = [], []
-                    for pb, pa in fit_pairs:
-                        src, dst = _get_aligned_flat(pb, vid_b, pa, vid_a, d)
-                        if src is None:
-                            continue
-                        sl_pred.append((_apply_T(A, t_vec, src)))
-                        sl_dst.append(dst)
-                    if not sl_pred:
-                        continue
-                    rmse = float(np.sqrt(
-                        ((np.concatenate(sl_pred) - np.concatenate(sl_dst)) ** 2)
-                        .sum(1).mean()
-                    ))
-                    if np.isfinite(rmse) and rmse < best_d_rmse:
-                        best_d_rmse, best_d = rmse, d
+            assignment: list of (pid_b, pid_a).
+            Returns (R, t, lambdas_dict, avg_rmse) or None.
+            """
+            pairs = []
+            for pb, pa in assignment:
+                src, dst = _get_aligned_flat(pb, vid_b, pa, vid_a, delta)
+                if src is None:
+                    continue
+                valid = np.isfinite(src).all(axis=1) & np.isfinite(dst).all(axis=1)
+                if valid.sum() < MIN_OVERLAP:
+                    continue
+                pairs.append((pb, src[valid], dst[valid]))
+            if not pairs:
+                return None
 
-                if abs(prev_rmse - best_d_rmse) < 1e-5:
-                    break
-                prev_rmse, delta = best_d_rmse, best_d
+            R = np.eye(3, dtype=np.float64)
+            t = np.zeros(3, dtype=np.float64)
+            lambdas = {pb: 1.0 for pb, _, _ in pairs}
 
-            return A, t_vec, delta, best_d_rmse
+            for _ in range(max_iter):
+                # Step A: fix {λ_i}, solve (R, t) via Procrustes.
+                # Model: λ_i * (R @ src_i + t) = dst_i
+                #   →  R @ src_i + t = dst_i / λ_i
+                # So run Procrustes on (src_i, dst_i / λ_i).
+                all_s = np.concatenate([src for _, src, _ in pairs])
+                all_d = np.concatenate([dst / lambdas[pb] for pb, _, dst in pairs])
+                mu_s = all_s.mean(0)
+                mu_d = all_d.mean(0)
+                H = (all_s - mu_s).T @ (all_d - mu_d)
+                U, _, Vt = np.linalg.svd(H)
+                d_sign = np.linalg.det(Vt.T @ U.T)
+                R = Vt.T @ np.diag([1.0, 1.0, d_sign]) @ U.T
+                t = mu_d - R @ mu_s
 
-        # ── Combined matching: appearance seed → RANSAC+δ → joint refine → Hungarian
+                # Step B: fix (R, t), solve each λ_i via 1-D least squares.
+                # λ_i = (R @ src_i + t)ᵀ dst_i / ‖R @ src_i + t‖²
+                for pb, src, dst in pairs:
+                    rsrc = (R @ src.T).T + t
+                    num = float(np.sum(rsrc * dst))
+                    den = float(np.sum(rsrc * rsrc))
+                    lambdas[pb] = max(0.1, min(10.0, num / den)) if den > 1e-10 else 1.0
+
+            rmses = []
+            for pb, src, dst in pairs:
+                rsrc = (R @ src.T).T + t
+                pred = lambdas[pb] * rsrc
+                rmses.append(float(np.sqrt(((pred - dst) ** 2).sum(1).mean())))
+            return R, t, lambdas, float(np.mean(rmses))
+
+        def _pair_rmse_with_Rt(R, t, pid_b, vid_b, pid_a, vid_a, delta) -> tuple[float, float]:
+            """RMSE and optimal λ for one pair given fixed R, t.
+
+            Model: pred = λ * (R @ src + t).
+            Returns (rmse, lambda).  rmse=inf, lambda=1.0 when no common frames.
+            """
+            src, dst = _get_aligned_flat(pid_b, vid_b, pid_a, vid_a, delta)
+            if src is None:
+                return float("inf"), 1.0
+            valid = np.isfinite(src).all(axis=1) & np.isfinite(dst).all(axis=1)
+            if valid.sum() < MIN_OVERLAP:
+                return float("inf"), 1.0
+            src, dst = src[valid], dst[valid]
+            rsrc = (R @ src.T).T + t
+            den = float(np.sum(rsrc * rsrc))
+            lam = max(0.1, min(10.0, float(np.sum(rsrc * dst)) / den)) if den > 1e-10 else 1.0
+            pred = lam * rsrc
+            r = float(np.sqrt(((pred - dst) ** 2).sum(1).mean()))
+            return (r if np.isfinite(r) else float("inf")), lam
+
+        # ── Combined matching: xcorr peaks → ALS per candidate → Hungarian ──────
 
         def _match_with_combined_approach(
             vid_a: str, vid_b: str
@@ -886,244 +862,191 @@ class CrossVideoReidentifierV2:
             pids_a = person_pids[vid_a]
             pids_b = person_pids[vid_b]
 
-            # Step 1: appearance sim matrix + xcorr offset estimation.
-            sim_mat, off_mat = _weighted_sim_mat(
+            # Stage 1: appearance sim matrix + full xcorr delta-score curve.
+            # ALL person pairs contribute, weighted by appearance sim × track std.
+            sim_mat, _ = _weighted_sim_mat(
                 pids_a, pids_b,
                 person_descs[vid_a], person_descs[vid_b],
                 appearance_weight, shape_weight, pose_weight,
                 vid_a=vid_a, vid_b=vid_b,
             )
-            row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
-            app_assignment = [
-                (pids_a[r], pids_b[c], float(sim_mat[r, c]), int(off_mat[r, c]))
-                for r, c in zip(row_ind, col_ind)
-            ]
 
-            # Estimate camera frame offset by accumulating xcorr score curves
-            # from all high-confidence dynamic pairs in camera-δ space.
-            # Each pair contributes its full curve; the true δ is reinforced
-            # across pairs while spurious individual peaks average out.
             from collections import defaultdict as _dd
             delta_scores: dict[int, float] = _dd(float)
-            n_contrib = 0
-            for pa, pb, sim, _ in app_assignment:
-                if sim < high_app_thr:
-                    continue
+            kd_a = person_kpts3d.get(vid_a, {})
+            kd_b = person_kpts3d.get(vid_b, {})
+            for i, pa in enumerate(pids_a):
                 pose_a = person_descs[vid_a][pa][2]
-                pose_b = person_descs[vid_b][pb][2]
-                if pose_a is None or pose_b is None:
+                if pose_a is None or pa not in kd_a:
                     continue
-                std_a = _track_std(vid_a, pa)
-                std_b = _track_std(vid_b, pb)
-                if std_a < min_anchor_std and std_b < min_anchor_std:
-                    continue
-                kd_a = person_kpts3d.get(vid_a, {})
-                kd_b = person_kpts3d.get(vid_b, {})
-                if pa not in kd_a or pb not in kd_b:
-                    continue
-                offset = int(kd_a[pa][0][0]) - int(kd_b[pb][0][0])
-                w = max(std_a, std_b) * float(sim)
-                fva = pose_a - pose_a.mean(axis=0)
-                fvb = pose_b - pose_b.mean(axis=0)
-                na = np.linalg.norm(fva, axis=1, keepdims=True)
-                nb = np.linalg.norm(fvb, axis=1, keepdims=True)
-                fva = np.where(na > 1e-6, fva / na, fva)
-                fvb = np.where(nb > 1e-6, fvb / nb, fvb)
-                S = fva @ fvb.T
-                T_a, T_b = S.shape
-                for tau in range(-(T_b - 1), T_a):
-                    diag = np.diagonal(S, offset=-tau)
-                    if len(diag) < MIN_OVERLAP:
+                for j, pb in enumerate(pids_b):
+                    pose_b = person_descs[vid_b][pb][2]
+                    if pose_b is None or pb not in kd_b:
                         continue
-                    score = float(diag.mean())
-                    if score > 0:
-                        delta_scores[offset + tau] += w * score
-                n_contrib += 1
-            if delta_scores:
-                xcorr_delta = max(delta_scores, key=lambda d: delta_scores[d])
+                    w = (max(_track_std(vid_a, pa), _track_std(vid_b, pb))
+                         * max(float(sim_mat[i, j]), 0.05))
+                    if w < 1e-6:
+                        continue
+                    offset = int(kd_a[pa][0][0]) - int(kd_b[pb][0][0])
+                    fva = pose_a - pose_a.mean(axis=0)
+                    fvb = pose_b - pose_b.mean(axis=0)
+                    na = np.linalg.norm(fva, axis=1, keepdims=True)
+                    nb = np.linalg.norm(fvb, axis=1, keepdims=True)
+                    fva = np.where(na > 1e-6, fva / na, fva)
+                    fvb = np.where(nb > 1e-6, fvb / nb, fvb)
+                    S = fva @ fvb.T
+                    T_a_len, T_b_len = S.shape
+                    for tau in range(-(T_b_len - 1), T_a_len):
+                        diag = np.diagonal(S, offset=-tau)
+                        if len(diag) < MIN_OVERLAP:
+                            continue
+                        score = float(diag.mean())
+                        if score > 0:
+                            delta_scores[offset + tau] += w * score
+
+            delta_candidates = _get_top_k_peaks(delta_scores, k=10)
+
+            # Filter out δ values where the two videos share fewer than MIN_DELTA_OVERLAP_FRAMES.
+            # Without this, a short-overlap δ can produce a lower ALS RMSE than the true δ
+            # simply because fewer frames are easier to fit.
+            frames_a_all: set[int] = set()
+            for _pa2 in kd_a:
+                frames_a_all.update(int(_f) for _f in kd_a[_pa2][0])
+            frames_b_all: set[int] = set()
+            for _pb2 in kd_b:
+                frames_b_all.update(int(_f) for _f in kd_b[_pb2][0])
+            filtered = [
+                dk for dk in delta_candidates
+                if sum(1 for _f in frames_b_all if _f + dk in frames_a_all) >= MIN_DELTA_OVERLAP_FRAMES
+            ]
+            if filtered:
+                delta_candidates = filtered
             else:
-                xcorr_delta = 0
+                logging.warning(
+                    f"  [{vid_a}↔{vid_b}] all δ candidates have <{MIN_DELTA_OVERLAP_FRAMES} "
+                    f"overlap frames — filter skipped"
+                )
+
             logging.info(
-                f"  [{vid_a}↔{vid_b}] xcorr frame offset estimate: {xcorr_delta:+d}"
-                f"  (from {n_contrib} pairs)"
+                f"  [{vid_a}↔{vid_b}] δ candidates ({len(delta_candidates)}): {delta_candidates}"
             )
 
-            # Step 2: RANSAC with full delta search.
-            # Use high-confidence appearance pairs as anchor candidates.
-            # Fall back to all pairs when no high-confidence pair exists.
-            high_conf = [(pa, pb) for pa, pb, sim, _ in app_assignment if sim >= high_app_thr]
-            anchor_candidates = high_conf if high_conf else [
-                (pa, pb) for pa, pb, _, _ in app_assignment
+            # Best single appearance pair — used to seed ALS pass 1.
+            # Using only the most confident pair ensures (R, t) is anchored on a
+            # reliable match and is not corrupted by uncertain / wrong pairs.
+            # The geometric re-assignment (between pass 1 and pass 2) then places
+            # all remaining persons under this clean (R, t).
+            best_sim_i, best_sim_j = np.unravel_index(sim_mat.argmax(), sim_mat.shape)
+            best_seed = [(pids_b[best_sim_j], pids_a[best_sim_i])]
+
+            # Full appearance Hungarian — kept for the appearance-only fallback.
+            row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
+            app_assignment = [
+                (pids_b[col_ind[k]], pids_a[row_ind[k]])
+                for k in range(len(row_ind))
             ]
 
-            _empty = dict(A=None, t=None, delta=xcorr_delta, rmse=float("inf"),
-                          inliers=-1, pa=None, pb=None, is_dyn=False,
-                          init_asgn=[], pbs=set())
-            best_dyn = {**_empty}
-            best_any = {**_empty}
+            # Stage 2: ALS evaluation for each candidate δ.
+            best_delta = delta_candidates[0] if delta_candidates else 0
+            best_R = np.eye(3, dtype=np.float64)
+            best_t = np.zeros(3, dtype=np.float64)
+            best_rmse = float("inf")
 
-            def _better(cand, ref):
-                if cand["is_dyn"] and not ref["is_dyn"]:
-                    return True
-                if cand["is_dyn"] == ref["is_dyn"]:
-                    return (cand["inliers"] > ref["inliers"] or
-                            (cand["inliers"] == ref["inliers"]
-                             and cand["rmse"] < ref["rmse"]))
-                return False
+            pids_b_s = sorted(pids_b)
+            pids_a_s = sorted(pids_a)
 
-            d_lo = xcorr_delta - delta_search
-            d_hi = xcorr_delta + delta_search
-
-            # Step 2a: 1-pair RANSAC — baseline single-anchor search.
-            for pa, pb in anchor_candidates:
-                std_a = _track_std(vid_a, pa)
-                std_b = _track_std(vid_b, pb)
-                is_dyn = std_a >= min_anchor_std or std_b >= min_anchor_std
-
-                best_for = {**_empty}
-                for delta in range(d_lo, d_hi + 1):
-                    res = _fit_pair_delta(pb, vid_b, pa, vid_a, delta)
-                    if res is None:
-                        continue
-                    A_c, t_c, rmse_c = res
-                    n_in = len(_get_inlier_pairs(A_c, t_c, delta, vid_b, vid_a, {pb}))
-                    if (n_in > best_for["inliers"] or
-                            (n_in == best_for["inliers"] and rmse_c < best_for["rmse"])):
-                        best_for = dict(A=A_c, t=t_c, delta=delta, rmse=rmse_c,
-                                        inliers=n_in, pa=pa, pb=pb, is_dyn=is_dyn,
-                                        init_asgn=[(pb, pa)], pbs={pb})
-
-                if best_for["A"] is None:
+            for dk in delta_candidates:
+                # First ALS pass: seed with only the best appearance pair so that
+                # (R, t) is anchored on the most certain match alone.
+                res = _constrained_fit(best_seed, vid_b, vid_a, dk)
+                if res is None:
                     continue
-                if _better(best_for, best_any):
-                    best_any = best_for
-                if is_dyn and _better(best_for, best_dyn):
-                    best_dyn = best_for
+                R_k, t_k, _, _ = res
 
-            best_1 = best_dyn if best_dyn["A"] is not None else best_any
-
-            # Step 2b: 2-pair RANSAC — fit affine jointly from pairs of anchor candidates.
-            # Gives better depth coverage and more robust Z estimation.
-            from itertools import combinations as _comb
-            best_2_dyn = {**_empty}
-            best_2_any = {**_empty}
-
-            for (pa1, pb1), (pa2, pb2) in _comb(anchor_candidates, 2):
-                is_dyn = (
-                    _track_std(vid_a, pa1) >= min_anchor_std or
-                    _track_std(vid_b, pb1) >= min_anchor_std or
-                    _track_std(vid_a, pa2) >= min_anchor_std or
-                    _track_std(vid_b, pb2) >= min_anchor_std
-                )
-                best_for = {**_empty}
-                for delta in range(d_lo, d_hi + 1):
-                    res = _fit_two_pairs_delta(pb1, vid_b, pa1, vid_a, pb2, pa2, delta)
-                    if res is None:
-                        continue
-                    A_c, t_c, rmse_c = res
-                    n_in = len(_get_inlier_pairs(
-                        A_c, t_c, delta, vid_b, vid_a, {pb1, pb2}))
-                    if (n_in > best_for["inliers"] or
-                            (n_in == best_for["inliers"] and rmse_c < best_for["rmse"])):
-                        best_for = dict(A=A_c, t=t_c, delta=delta, rmse=rmse_c,
-                                        inliers=n_in, pa=pa1, pb=pb1, is_dyn=is_dyn,
-                                        init_asgn=[(pb1, pa1), (pb2, pa2)],
-                                        pbs={pb1, pb2})
-
-                if best_for["A"] is None:
-                    continue
-                if _better(best_for, best_2_any):
-                    best_2_any = best_for
-                if is_dyn and _better(best_for, best_2_dyn):
-                    best_2_dyn = best_for
-
-            best_2 = best_2_dyn if best_2_dyn["A"] is not None else best_2_any
-
-            # Prefer 2-pair when it is geometrically valid (meets the RMSE threshold)
-            # and is at least as dynamic as the 1-pair winner.  We do NOT compare RMSE
-            # across the two types because a 2-pair joint fit is constrained by two
-            # independent trajectories and will naturally have a higher combined RMSE
-            # than a 1-pair fit that overfits to a single person's data.
-            if (best_2["A"] is not None
-                    and best_2["rmse"] <= ransac_anchor_thr
-                    and (best_2["is_dyn"] or not best_1["is_dyn"])):
-                best = best_2
-            else:
-                best = best_1
-
-            if best["A"] is None or best["rmse"] > ransac_anchor_thr:
-                # RANSAC failed: fall back to pure appearance threshold.
-                logging.info(
-                    f"  [{vid_a}↔{vid_b}] RANSAC failed (best RMSE={best['rmse']:.3f}) "
-                    f"— appearance-only fallback"
-                )
-                accepted = [
-                    (pa, pb, sim) for pa, pb, sim, _ in app_assignment
-                    if sim >= cross_view_reid_threshold
+                # Re-assignment: Hungarian on the geometric RMSE matrix.
+                rm = np.full((len(pids_b_s), len(pids_a_s)), 1e6)
+                for ii, pb in enumerate(pids_b_s):
+                    for jj, pa in enumerate(pids_a_s):
+                        r, _ = _pair_rmse_with_Rt(R_k, t_k, pb, vid_b, pa, vid_a, dk)
+                        rm[ii, jj] = r if np.isfinite(r) else 1e6
+                ri, ci = linear_sum_assignment(rm)
+                geo_assignment = [
+                    (pids_b_s[ri[k2]], pids_a_s[ci[k2]]) for k2 in range(len(ri))
                 ]
-                return accepted, xcorr_delta
 
-            if len(best["init_asgn"]) == 2:
-                (pb1, pa1), (pb2, pa2) = best["init_asgn"]
-                logging.info(
-                    f"  [{vid_a}↔{vid_b}] 2-pair anchor: "
-                    f"P{pb1}+P{pb2}→P{pa1}+P{pa2}  δ={best['delta']}  "
-                    f"RMSE={best['rmse']:.3f}  inliers={best['inliers']}"
-                )
-            else:
-                logging.info(
-                    f"  [{vid_a}↔{vid_b}] RANSAC anchor: "
-                    f"P{best['pb']}→P{best['pa']}  δ={best['delta']}  "
-                    f"RMSE={best['rmse']:.3f}  inliers={best['inliers']}"
-                )
-
-            # Step 3: joint refinement.
-            inlier_pairs = _get_inlier_pairs(
-                best["A"], best["t"], best["delta"], vid_b, vid_a, best["pbs"]
-            )
-            init_asgn = best["init_asgn"] + [(pb, pa) for pb, pa, _ in inlier_pairs]
-            A, t_vec, delta, ref_rmse = _joint_refine(init_asgn, vid_b, vid_a, best["delta"])
-            logging.info(
-                f"  [{vid_a}↔{vid_b}] after refinement: δ={delta}  RMSE={ref_rmse:.3f}"
-            )
-
-            # Step 4: Hungarian on full RMSE matrix under refined affine + delta.
-            pids_b_s = sorted(person_pids.get(vid_b, []))
-            pids_a_s = sorted(person_pids.get(vid_a, []))
-            rmse_mat = np.full((len(pids_b_s), len(pids_a_s)), 1e6, dtype=np.float64)
-            for i, pb in enumerate(pids_b_s):
-                for j, pa in enumerate(pids_a_s):
-                    r = _direct_rmse(A, t_vec, pb, vid_b, pa, vid_a, delta)
-                    rmse_mat[i, j] = r if np.isfinite(r) else 1e6
-                    n_fr = 0
-                    if pb in (person_kpts3d.get(vid_b) or {}):
-                        src, dst = _get_aligned_flat(pb, vid_b, pa, vid_a, delta)
-                        if src is not None:
-                            n_fr = len(src) // 70
-                    logging.info(
-                        f"    {vid_b}:P{pb} → {vid_a}:P{pa}  frames={n_fr}  RMSE={r:.3f}"
-                    )
-
-            row_ind, col_ind = linear_sum_assignment(rmse_mat)
-
-            # Step 5: accept pairs below threshold.
-            accepted: list[tuple[int, int, float]] = []
-            for r, c in zip(row_ind, col_ind):
-                pb, pa = pids_b_s[r], pids_a_s[c]
-                rmse_val = rmse_mat[r, c]
-                if rmse_val < match_rmse_thr:
-                    logging.info(
-                        f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
-                        f"RMSE={rmse_val:.3f} → accepted"
-                    )
-                    accepted.append((pa, pb, float(1.0 - rmse_val / match_rmse_thr)))
+                # Second ALS pass on geometric assignment.
+                res2 = _constrained_fit(geo_assignment, vid_b, vid_a, dk)
+                if res2 is not None:
+                    R_k, t_k, _, rmse_k = res2
                 else:
+                    _, _, _, rmse_k = res[0], res[1], res[2], res[3]
+
+                if rmse_k < best_rmse:
+                    best_rmse, best_delta = rmse_k, dk
+                    best_R, best_t = R_k, t_k
+
+            logging.info(
+                f"  [{vid_a}↔{vid_b}] best δ*={best_delta}  RMSE={best_rmse:.3f}"
+            )
+
+            # Fallback to pure appearance when geometry fails.
+            if best_rmse > match_rmse_thr * 3:
+                logging.info(
+                    f"  [{vid_a}↔{vid_b}] geometry failed — appearance-only fallback"
+                )
+                row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
+                return [
+                    (pids_a[r], pids_b[c], float(sim_mat[r, c]))
+                    for r, c in zip(row_ind, col_ind)
+                    if sim_mat[r, c] >= cross_view_reid_threshold
+                ], 0
+
+            # Stage 4: greedy assignment by RMSE under (R*, t*) at δ*.
+            # All (pb, pa) pairs are evaluated; those below match_rmse_thr are
+            # candidates. We sort by RMSE ascending and greedily assign: take the
+            # cheapest valid pair, mark both persons as used, repeat.
+            # This maximises the number of accepted pairs without letting a
+            # cheap-but-wrong global assignment (lower total cost) block correct
+            # low-RMSE pairs — which is the failure mode of pure Hungarian here.
+            all_pairs: list[tuple[float, float, int, int]] = []  # (rmse, lam, pb, pa)
+            for pb in pids_b_s:
+                for pa in pids_a_s:
+                    r, lam = _pair_rmse_with_Rt(best_R, best_t, pb, vid_b, pa, vid_a, best_delta)
+                    n_fr = 0
+                    src, _ = _get_aligned_flat(pb, vid_b, pa, vid_a, best_delta)
+                    if src is not None:
+                        n_fr = len(src) // 70
                     logging.info(
-                        f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
-                        f"RMSE={rmse_val:.3f} → rejected"
+                        f"    {vid_b}:P{pb} → {vid_a}:P{pa}  frames={n_fr}  RMSE={r:.3f}  λ={lam:.3f}"
+                    )
+                    all_pairs.append((r if np.isfinite(r) else float("inf"), lam, pb, pa))
+
+            all_pairs.sort(key=lambda x: x[0])
+            used_b: set[int] = set()
+            used_a: set[int] = set()
+            accepted: list[tuple[int, int, float]] = []
+            for rmse_val, lam, pb, pa in all_pairs:
+                if rmse_val >= match_rmse_thr:
+                    break  # sorted, so no more valid pairs
+                if pb in used_b or pa in used_a:
+                    continue
+                used_b.add(pb)
+                used_a.add(pa)
+                logging.info(
+                    f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_val:.3f} → accepted"
+                )
+                accepted.append((pa, pb, float(1.0 - rmse_val / match_rmse_thr)))
+
+            # Log rejected pairs (assigned persons that didn't make the cut).
+            for rmse_val, lam, pb, pa in all_pairs:
+                if pb in used_b or pa in used_a:
+                    continue
+                if np.isfinite(rmse_val):
+                    logging.info(
+                        f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_val:.3f} → rejected"
                     )
 
-            return accepted, delta
+            return accepted, best_delta
 
         # ── All-pairs matching ─────────────────────────────────────────────────
         camera_pair_offsets: dict[str, int] = {}
@@ -1207,114 +1130,6 @@ class CrossVideoReidentifierV2:
 
         _resolve_conflicts()
 
-        # ── Consolidation pass (identical to v1) ───────────────────────────────
-        consolidation_threshold = max(0.15, cross_view_reid_threshold - 0.15)
-        comps = _get_components()
-        multi_view_comps = {
-            root: members
-            for root, members in comps.items()
-            if len({v for v, _ in members}) >= 2
-        }
-        isolated = [
-            (vid, pid)
-            for root, members in comps.items()
-            if root not in multi_view_comps
-            for vid, pid in members
-        ]
-        comp_centroids: dict[tuple, tuple] = {}
-        for root, members in multi_view_comps.items():
-            app_vecs = [
-                person_descs[vid][pid][0]
-                for vid, pid in members
-                if vid in person_descs and pid in person_descs.get(vid, {})
-                and person_descs[vid][pid][0] is not None
-            ]
-            shape_vecs = [
-                person_descs[vid][pid][1]
-                for vid, pid in members
-                if vid in person_descs and pid in person_descs.get(vid, {})
-                and person_descs[vid][pid][1] is not None
-            ]
-            app_c: np.ndarray | None = None
-            shape_c: np.ndarray | None = None
-            if app_vecs:
-                af = np.concatenate([f for f, _ in app_vecs])
-                ac = np.concatenate([c for _, c in app_vecs])
-                tw = ac.sum()
-                m = (ac[:, None] * af).sum(0) / tw if tw > 0 else af.mean(0)
-                n = np.linalg.norm(m)
-                app_c = (m / n if n > 0 else m).astype(np.float32)
-            if shape_vecs:
-                m = np.mean(np.stack(shape_vecs), 0).astype(np.float32)
-                n = np.linalg.norm(m)
-                shape_c = m / n if n > 0 else m
-            if app_c is not None or shape_c is not None:
-                comp_centroids[root] = (app_c, shape_c)
-
-        def _sim_to_centroid(feat, centroid, w_app, w_shape) -> float:
-            sim, weight = 0.0, 0.0
-            if feat[0] is not None and centroid[0] is not None:
-                feats, confs = feat[0]
-                tw = confs.sum()
-                mf = (confs[:, None] * feats).sum(0) / tw if tw > 0 else feats.mean(0)
-                sim += w_app * float(np.dot(mf, centroid[0]))
-                weight += w_app
-            if feat[1] is not None and centroid[1] is not None:
-                sim += w_shape * float(np.dot(feat[1], centroid[1]))
-                weight += w_shape
-            return sim / weight if weight > 0 else 0.0
-
-        consolidation_edges_added = False
-        for vid, pid in isolated:
-            if vid not in person_descs or pid not in person_descs.get(vid, {}):
-                continue
-            feat = person_descs[vid][pid]
-            best_root, best_sim = None, -1.0
-            for root, centroid in comp_centroids.items():
-                if any(v == vid for v, _ in multi_view_comps[root]):
-                    continue
-                s = _sim_to_centroid(feat, centroid, appearance_weight, shape_weight)
-                if s > best_sim:
-                    best_sim, best_root = s, root
-            if best_root is not None and best_sim >= consolidation_threshold:
-                cm = multi_view_comps[best_root][0]
-                edges.append((best_sim, (vid, pid), cm))
-                _union((vid, pid), cm)
-                consolidation_edges_added = True
-                logging.info(
-                    f"Scene {scene_id}: consolidation linked "
-                    f"{vid}/P{pid} → component {best_root} (sim={best_sim:.3f})"
-                )
-
-        if consolidation_edges_added:
-            for _ in range(len(edges) + 1):
-                comps = _get_components()
-                conflict_found = False
-                for members in comps.values():
-                    v2n: dict[str, list] = {}
-                    for node in members:
-                        v2n.setdefault(node[0], []).append(node)
-                    for vid_id, nodes in v2n.items():
-                        if len(nodes) < 2:
-                            continue
-                        conflict_found = True
-                        cr = _find(nodes[0])
-                        ws, wi = float("inf"), -1
-                        for ei, (s, na, nb) in enumerate(edges):
-                            if _find(na) == cr and s < ws:
-                                ws, wi = s, ei
-                        if wi >= 0:
-                            edges.pop(wi)
-                            parent.clear(); rank_uf.clear()
-                            for _v in active_vids:
-                                for _p in person_pids[_v]:
-                                    _find((_v, _p))
-                            for _s, _na, _nb in edges:
-                                _union(_na, _nb)
-                        break
-                if not conflict_found:
-                    break
-
         # ── Global ID assignment ────────────────────────────────────────────────
         comps = _get_components()
         global_remap: dict[str, dict[int, int]] = {v: {} for v in active_vids}
@@ -1343,7 +1158,18 @@ class CrossVideoReidentifierV2:
             f"across {len(active_vids)} view(s)"
         )
 
-        # ── Apply remaps (identical to v1) ─────────────────────────────────────
+        if dry_run:
+            # Print would-be remappings without touching any files.
+            print(f"\n[DRY RUN] Scene {scene_id}: {len(comps)} global persons, "
+                  f"camera pair offsets: {camera_pair_offsets}")
+            for vid_id, remap in global_remap.items():
+                if remap:
+                    print(f"  {vid_id}: would remap {remap}")
+                else:
+                    print(f"  {vid_id}: no remaps needed")
+            return
+
+        # ── Apply remaps ───────────────────────────────────────────────────────
         for vid_id, remap in global_remap.items():
             if not remap:
                 continue
