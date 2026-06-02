@@ -18,5 +18,6 @@ manual_reid_yaml/
 renders/
 media/
 debug_outputs/
-DROID-SLAM/
 results/
+easy_ViTPose/
+checkpoints
