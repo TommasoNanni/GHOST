@@ -1,6 +1,6 @@
 data:
   egoexo_data_root: null
-  rich_data_root: "/tmp/rich_train"
+  rich_data_root: "/capstor/scratch/cscs/tnanni/datasets/rich/centered_train"
   rich_gt_dir: "/capstor/scratch/cscs/tnanni/datasets/rich"
   egohumans_data_root: "/capstor/scratch/cscs/tnanni/datasets/egohumans"
   rich_max_side: 1440  # resize RICH frames so longest side <= this before SAM3; null to skip
