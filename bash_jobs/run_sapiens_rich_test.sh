@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=vggt_rich_train_centered
+#SBATCH --job-name=sapiens_rich_test
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --partition=debug
@@ -23,9 +23,10 @@ echo "========================="
 echo "Job ID: $SLURM_JOB_ID  |  Start: $(date)"
 echo ""
 
-# Process all 62 train scenes; skips any that already have vggt_*_centered.npz
-pixi run python scripts/rerun_vggt_only.py \
-    --vggt-weights checkpoints/vggt_omega/vggt_omega_1b_512.pt
+pixi run python scripts/run_sapiens_all_scenes.py \
+    --ghost_output_root /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test \
+    --rich_root         /capstor/scratch/cscs/tnanni/datasets/rich/centered_test \
+    --model_size        0.3b
 
 echo ""
 echo "Done: $(date)"

@@ -14,10 +14,7 @@
 
 set -euo pipefail
 
-# Mount RICH train squashfs on compute node
-mkdir -p /tmp/rich_train
-squashfuse /capstor/scratch/cscs/tnanni/datasets/rich/train_dataset.sqsh /tmp/rich_train
-
+# Mount RICH train squashfs on compute node (unmount stale mount if present)
 cd /users/tnanni/ghost
 ulimit -c 0
 
@@ -29,7 +26,7 @@ echo ""
 
 pixi run python preprocessing/run_mapanything.py \
     --ghost_output_root /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train \
-    --rich_root         /tmp/rich_train \
+    --rich_root         /capstor/scratch/cscs/tnanni/datasets/rich/centered_train \
     --batch_size        8 \
     --device            cuda
 

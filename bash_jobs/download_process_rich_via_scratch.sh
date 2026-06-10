@@ -27,7 +27,7 @@ echo "Node:    $SLURMD_NODENAME"
 echo "Start:   $(date)"
 echo ""
 
-RICH_TRAIN_ROOT="/capstor/scratch/cscs/tnanni/datasets/rich/train"
+RICH_TRAIN_ROOT="/capstor/scratch/cscs/tnanni/datasets/rich/full_size_sample"
 SCRATCH_DIR="/capstor/scratch/cscs/tnanni/rich_staging"
 GHOST_DIR="/users/tnanni/ghost"
 
@@ -56,7 +56,7 @@ PASSWORD=$(urle "$PASSWORD")
 
 # ── Scenes to download ───────────────────────────────────────────────────────
 SCENES=(
-    # "BBQ_001_guitar.tar.gz"
+    "BBQ_001_guitar.tar.gz"
     # "BBQ_001_juggle.tar.gz" # DOWNLOADED
     # "LectureHall_018_wipingchairs1.tar.gz" # DOWNLOADED
     # "LectureHall_018_wipingspray1.tar.gz" # DOWNLOADED
@@ -147,53 +147,17 @@ for tarfile in "${SCENES[@]}"; do
     rm "$SCRATCH_DIR/$tarfile"
 
     # ── 3a. Convert BMP → JPEG on scratch ─────────────────
-    echo "[$(date '+%H:%M:%S')] Converting BMP → JPEG ..."
-    CONDA_OVERRIDE_CUDA=12.6 pixi run python -m utilities.convert_rich_bmp_to_jpeg \
-        --root "$scratch_scene" \
-        --quality 92 \
-        --workers 16
+    # echo "[$(date '+%H:%M:%S')] Converting BMP → JPEG ..."
+    # CONDA_OVERRIDE_CUDA=12.6 pixi run python -m utilities.convert_rich_bmp_to_jpeg \
+    #     --root "$scratch_scene" \
+    #     --quality 92 \
+    #     --workers 16
 
     # ── 3b. Convert PNG → JPEG on scratch ─────────────────
-    echo "[$(date '+%H:%M:%S')] Converting PNG → JPEG ..."
-    SCENE_DIR="$scratch_scene" CONDA_OVERRIDE_CUDA=12.6 pixi run python - <<'PYEOF'
-import os, sys
-from pathlib import Path
-from multiprocessing import Pool
-
-root = Path(os.environ["SCENE_DIR"])
-png_files = sorted(root.rglob("*.png"))
-
-if not png_files:
-    print("No .png files found — skipping.")
-    sys.exit(0)
-
-print(f"Found {len(png_files)} PNG files")
-
-def convert_one(p):
-    from PIL import Image
-    jpg = p.with_suffix(".jpg")
-    try:
-        Image.open(p).save(jpg, "JPEG", quality=92, subsampling=0)
-        p.unlink()
-        return str(p), True, ""
-    except Exception as e:
-        return str(p), False, str(e)
-
-ok = fail = 0
-with Pool(processes=16) as pool:
-    for i, (path, success, err) in enumerate(pool.imap_unordered(convert_one, png_files, chunksize=20), 1):
-        if success:
-            ok += 1
-        else:
-            fail += 1
-            print(f"  FAILED {path}: {err}")
-        if i % 500 == 0 or i == len(png_files):
-            print(f"  {i}/{len(png_files)}  ok={ok}  fail={fail}")
-
-print(f"\nDone. Converted: {ok}  Failed: {fail}")
-if fail:
-    sys.exit(1)
-PYEOF
+    # echo "[$(date '+%H:%M:%S')] Converting PNG → JPEG ..."
+    # SCENE_DIR="$scratch_scene" CONDA_OVERRIDE_CUDA=12.6 pixi run python - <<'PYEOF'
+    # ... (PNG→JPEG conversion omitted — keeping full-size originals)
+    # PYEOF
 
     # ── 4. Move to final destination ───────────────────────
     echo "[$(date '+%H:%M:%S')] Moving $scene_name to $RICH_TRAIN_ROOT ..."

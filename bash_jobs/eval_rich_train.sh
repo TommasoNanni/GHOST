@@ -30,9 +30,8 @@ pixi run python evaluation/evaluate_on_rich_test.py \
     --smplx_model       body_models/SMPLX_NEUTRAL.pkl \
     --device            cuda \
     --gt_split          train \
-    --modalities        1 \
-    --skip_scenes       "Pavallion_013_plankjack,Pavallion_013_phonesiteat" \
-    --skip_cameras      "Pavallion_003_018_tossball:cam_06;ParkingLot2_008_pushup2:cam_03;ParkingLot2_014_takingphotos2:cam_01"
+    --modalities        3 \
+    --scenes            "BBQ_001_juggle,ParkingLot1_002_overfence1,ParkingLot1_002_overfence2,ParkingLot1_002_pushup1,ParkingLot1_004_pushup2,ParkingLot1_004_takingphotos1,ParkingLot1_005_overfence1,ParkingLot2_015_pushup1,Pavallion_000_plankjack,Pavallion_006_sidebalancerun"
 
 echo ""
 echo "Done: $(date)"
