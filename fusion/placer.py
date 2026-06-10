@@ -97,6 +97,24 @@ _COCO_SMPLX_ALIGN = {
     20: 9, 21: 10,  # left/right wrist
 }
 
+# SMPL-X → Sapiens Goliath-308 joint mapping.
+# Goliath body: 0-14 (no wrists); wrists are the last joints of the hand ranges
+# (41 = right wrist, 62 = left wrist).
+_GOLIATH_SMPLX_ALIGN: dict[int, int] = {
+    1:  9,   # left hip
+    2:  10,  # right hip
+    4:  11,  # left knee
+    5:  12,  # right knee
+    7:  13,  # left ankle
+    8:  14,  # right ankle
+    16: 5,   # left shoulder
+    17: 6,   # right shoulder
+    18: 7,   # left elbow
+    19: 8,   # right elbow
+    20: 62,  # left wrist  (end of left-hand range 42-62)
+    21: 41,  # right wrist (end of right-hand range 21-41)
+}
+
 
 class BodyPlacer:
     """Estimate the metric scale factor of VGGT depth maps.
@@ -136,21 +154,23 @@ class BodyPlacer:
         _regressor = _repo_root / "mappings" / "mhr_smplx_regressor.npy"
         self._mapper = Mapper.load(_regressor)
 
-        import smplx as smplx_lib
-        smplx_path = Path(smplx_model_path)
-        create_kwargs: dict = {"model_type": "smplx"}
-        if smplx_path.is_file():
-            create_kwargs["ext"] = smplx_path.suffix.lstrip(".")
-        self._smplx_model = smplx_lib.create(
-            str(smplx_model_path),
-            **create_kwargs,
-            use_pca=False,
-            flat_hand_mean=True,
-            batch_size=1,
-        ).eval()
+        # smplx_model_path may be:
+        #   str / Path           — single model for all persons (gender-agnostic)
+        #   dict[int, str/Path]  — per-person models keyed by RICH person ID;
+        #                          improves FK joint positions and Procrustes alignment
+        if isinstance(smplx_model_path, dict):
+            self._smplx_models: dict[int, object] = {
+                int(pid): self._load_smplx_model(path)
+                for pid, path in smplx_model_path.items()
+            }
+            self._smplx_model = next(iter(self._smplx_models.values()))
+        else:
+            self._smplx_models = {}
+            self._smplx_model = self._load_smplx_model(smplx_model_path)
+
         self._smplx_device = torch.device("cpu")
 
-        cam_npz = np.load(self.scene_dir / "vggt_cameras.npz")
+        cam_npz = np.load(self.scene_dir / "vggt_cameras_centered.npz")
 
         # (T, K, 3, 4) float32 — camera-from-world, OpenCV convention
         self.extrinsics = cam_npz["extrinsics"]
@@ -181,10 +201,17 @@ class BodyPlacer:
 
         self.T, self.K = self.cam_valid.shape
 
-        # Camera dirs sorted in the same order as the K axis
+        # Camera dirs sorted in the same order as the K axis.
+        # Filter to only cameras present in the npz (e.g. centered VGGT may
+        # exclude cameras that were missing calibration).
+        _npz_names = {
+            (n.decode() if isinstance(n, bytes) else n)
+            for n in self.camera_names
+        }
         self._cam_dirs: list[Path] = sorted(
             d for d in self.scene_dir.iterdir()
             if d.is_dir() and (d / "body_data").is_dir()
+            and d.name in _npz_names
         )
 
     # ------------------------------------------------------------------
@@ -196,7 +223,7 @@ class BodyPlacer:
 
         Returns ``(T,)`` float32 or None when the file is absent or mismatched.
         """
-        path = self.scene_dir / "mapanything_scale.npy"
+        path = self.scene_dir / "mapanything_scale_centered.npy"
         if not path.exists():
             return None
         scale = np.load(path).astype(np.float32)
@@ -341,7 +368,7 @@ class BodyPlacer:
                     ).reshape(len(valid), 63)
                 _, verts = self._smplx_fk(betas, body_pose_arr,
                                           np.zeros((len(betas), 3), dtype=np.float32),
-                                          return_verts=True)
+                                          return_verts=True, pid=pid)
                 kp_smplx = self._mapper.map(verts)  # (T_local, N_kps, 3)
 
                 gt_map = {int(gt): lt for lt, gt in enumerate(d["frame_indices"])}
@@ -632,6 +659,7 @@ class BodyPlacer:
                     body_pose_frame[np.newaxis],
                     np.zeros((1, 3), dtype=np.float32),
                     return_verts=True,
+                    pid=pid,
                 )
                 J_can   = fk[0]                        # (55, 3) — still needed for pelvis (joint 0)
                 kp_can  = self._mapper.map(verts[0])   # (N_kps, 3) — mapper-corrected landmarks
@@ -667,9 +695,382 @@ class BodyPlacer:
 
         return translations, orientations
 
+    def estimate_procrustes_dlt_fk(
+        self,
+        scale: float | np.ndarray,
+        all_pids: set[int],
+        pred_betas_by_pid: dict[int, np.ndarray],
+        fused_pose_by_pid: dict[int, np.ndarray] | None = None,
+        frame_start: int = 0,
+        min_cams: int = 2,
+        min_joints: int = 3,
+    ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
+        """Estimate root translation + orient via multi-camera DLT on SMPL-X FK projections.
+
+        Same interface as estimate_procrustes_dlt but replaces SAM3D's
+        pred_keypoints_2d (MHR70 landmarks) with SMPL-X FK joints (all 22
+        body joints) projected using smplx_transl + smplx_global_orient and
+        SAM3D's focal_length. Projection follows the same pipeline as M1:
+        original-image space → _orig_to_vggt → DLT with K_vggt @ E_scaled.
+
+        Returns:
+            translations : {pid: {global_frame_idx: pelvis_world (3,)}}
+            orientations : {pid: {global_frame_idx: R (3,3)}}
+        """
+        cam_data_all: list[dict[int, dict]] = []
+        for cam_dir in self._cam_dirs:
+            cam_map: dict[int, dict] = {}
+            for pid in sorted(all_pids):
+                bf = cam_dir / "body_data" / f"person_{pid}.npz"
+                if not bf.exists():
+                    continue
+                d = np.load(bf, allow_pickle=False)
+                required = {"smplx_transl", "smplx_global_orient",
+                            "smplx_body_pose", "frame_indices", "focal_length"}
+                if not required.issubset(d.files):
+                    continue
+                fi = d["frame_indices"].astype(int)
+                cam_map[pid] = {
+                    "local_t":      {int(g): int(l) for l, g in enumerate(fi)},
+                    "transl":       d["smplx_transl"].astype(np.float64),        # (T_local, 3)
+                    "orient":       d["smplx_global_orient"].astype(np.float64), # (T_local, 3) aa
+                    "body_pose":    d["smplx_body_pose"],                         # (T_local, 63)
+                    "focal_length": d["focal_length"].astype(np.float64),         # (T_local,) or scalar
+                }
+            cam_data_all.append(cam_map)
+
+        _JOINTS = list(range(22))  # all 22 SMPL-X body joints
+
+        translations: dict[int, dict[int, np.ndarray]] = {}
+        orientations: dict[int, dict[int, np.ndarray]] = {}
+
+        for pid in sorted(all_pids):
+            betas = pred_betas_by_pid.get(pid, np.zeros(10, dtype=np.float32))
+
+            all_frames: set[int] = set()
+            for cm in cam_data_all:
+                if pid in cm:
+                    all_frames.update(cm[pid]["local_t"].keys())
+
+            trans_out: dict[int, np.ndarray] = {}
+            orient_out: dict[int, np.ndarray] = {}
+
+            for global_t in sorted(all_frames):
+                vggt_t = global_t - frame_start
+                if vggt_t < 0 or vggt_t >= self.T:
+                    continue
+
+                s = float(scale[vggt_t]) if isinstance(scale, np.ndarray) else float(scale)
+
+                # ── FK canonical joints (zero orient, so Procrustes recovers R) ──
+                if fused_pose_by_pid is not None and pid in fused_pose_by_pid:
+                    t_local = global_t - frame_start
+                    fused_arr = fused_pose_by_pid[pid]
+                    if not (0 <= t_local < len(fused_arr)):
+                        continue
+                    body_pose_frame = _6d_to_aa_batch(
+                        fused_arr[t_local, :21]
+                    ).reshape(63)
+                else:
+                    body_pose_frame = None
+                    for cm in cam_data_all:
+                        if pid in cm and global_t in cm[pid]["local_t"]:
+                            lt = cm[pid]["local_t"][global_t]
+                            body_pose_frame = cm[pid]["body_pose"][lt]
+                            break
+                if body_pose_frame is None:
+                    continue
+
+                J_can = self._smplx_fk(
+                    betas[np.newaxis],
+                    body_pose_frame[np.newaxis],
+                    np.zeros((1, 3), dtype=np.float32),
+                    pid=pid,
+                )[0]  # (55, 3)
+
+                # ── DLT: triangulate each SMPL-X joint from FK projections ────
+                joint_world: dict[int, np.ndarray] = {}
+                for smplx_j in _JOINTS:
+                    obs:   list[tuple[float, float]] = []
+                    pmats: list[np.ndarray] = []
+
+                    for k, cm in enumerate(cam_data_all):
+                        if pid not in cm or global_t not in cm[pid]["local_t"]:
+                            continue
+                        if not self.cam_valid[vggt_t, k]:
+                            continue
+
+                        lt = cm[pid]["local_t"][global_t]
+                        transl = cm[pid]["transl"][lt]   # (3,) metres, camera frame
+                        orient = cm[pid]["orient"][lt]   # (3,) axis-angle, camera frame
+                        fl     = float(cm[pid]["focal_length"][lt])
+
+                        R_o   = SciR.from_rotvec(orient).as_matrix()
+                        # SMPL-X convention: rotation pivots around J_can[0] (pelvis),
+                        # which is NOT at the origin when transl=0.
+                        j_cam = (R_o @ (J_can[smplx_j] - J_can[0]).astype(np.float64)
+                                 + J_can[0].astype(np.float64) + transl)
+                        if j_cam[2] <= 0.0:
+                            continue
+
+                        oc  = self.original_coords[vggt_t, k]
+                        os_ = self.original_size[vggt_t, k]
+                        W_orig, H_orig = float(os_[0]), float(os_[1])
+
+                        # Project in original image space (SAM3D convention)
+                        u_orig = fl * j_cam[0] / j_cam[2] + W_orig / 2.0
+                        v_orig = fl * j_cam[1] / j_cam[2] + H_orig / 2.0
+
+                        # Convert to VGGT pixel space (same pipeline as M1)
+                        u, v = self._orig_to_vggt(
+                            np.array([u_orig, v_orig]), oc, W_orig, H_orig
+                        )
+                        if not self._in_bounds(u, v, oc[2], oc[3]):
+                            continue
+
+                        K_mat = self.intrinsics[vggt_t, k].astype(np.float64)
+                        ext = self.extrinsics[vggt_t, k].astype(np.float64).copy()
+                        ext[:3, 3] *= s
+                        pmats.append(K_mat @ ext)
+                        obs.append((u, v))
+
+                    if len(obs) >= min_cams:
+                        joint_world[smplx_j] = self._triangulate_dlt(obs, pmats)
+
+                if len(joint_world) < min_joints:
+                    continue
+
+                # ── Procrustes: R, t s.t. R @ J_can + t ≈ J_world ───────────
+                vis = sorted(joint_world.keys())
+                A = np.stack([joint_world[j] for j in vis]).astype(np.float64)
+                B = np.stack([J_can[j]       for j in vis]).astype(np.float64)
+
+                A_m, B_m = A.mean(0), B.mean(0)
+                H = (B - B_m).T @ (A - A_m)
+                U, _, Vt = np.linalg.svd(H)
+                d_sign = np.linalg.det(Vt.T @ U.T)
+                R = (Vt.T @ np.diag([1.0, 1.0, d_sign]) @ U.T).astype(np.float32)
+                t = (A_m - R.astype(np.float64) @ B_m).astype(np.float32)
+
+                pelvis_world = (
+                    R.astype(np.float64) @ J_can[0].astype(np.float64) + t.astype(np.float64)
+                ).astype(np.float32)
+
+                trans_out[global_t] = pelvis_world
+                orient_out[global_t] = R
+
+            translations[pid] = trans_out
+            orientations[pid] = orient_out
+
+        return translations, orientations
+
+    def estimate_procrustes_dlt_sapiens(
+        self,
+        scale: float | np.ndarray,
+        all_pids: set[int],
+        pred_betas_by_pid: dict[int, np.ndarray],
+        fused_pose_by_pid: dict[int, np.ndarray] | None = None,
+        frame_start: int = 0,
+        conf_thr: float = 0.3,
+        min_cams: int = 2,
+        min_joints: int = 3,
+    ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
+        """Estimate root translation + orient via DLT on Sapiens Goliath-308 keypoints.
+
+        Loads ``sapiens_centered_kps_person_{pid}.npz`` from each camera directory
+        (array key ``keypoints``, shape ``(T_local, 308, 3)`` — [x, y, conf] in
+        original image pixels).  Triangulates each joint with confidence-weighted
+        DLT; cameras k > 0 are additionally down-weighted by sin(angle) between
+        their optical axis and cam0's optical axis (baseline geometry weight).
+        Then runs the same Procrustes as the other estimate_procrustes_dlt_* methods
+        to recover global orientation and pelvis world position.
+
+        Args:
+            scale: Metric scale (metres per VGGT unit). Scalar or ``(T,)`` array.
+            all_pids: Ghost person IDs to process.
+            pred_betas_by_pid: ``{pid: (10,)}`` shape coefficients for FK.
+            fused_pose_by_pid: ``{pid: (T_scene, 54, 6)}`` fused body pose (6D,
+                joints 1-54, indexed from ``frame_start``).
+            frame_start: Global frame index corresponding to index 0 of fused arrays.
+            conf_thr: Minimum Sapiens confidence to include an observation.
+            min_cams: Minimum cameras needed to triangulate a joint.
+            min_joints: Minimum triangulated joints needed to run Procrustes.
+
+        Returns:
+            translations : ``{pid: {global_frame_idx: pelvis_world (3,)}}``
+            orientations : ``{pid: {global_frame_idx: R (3,3)}}``
+        """
+        smplx_joints = sorted(_GOLIATH_SMPLX_ALIGN)
+        zero_orient  = np.zeros((1, 3), dtype=np.float32)
+
+        # ── Load Sapiens data per (cam, pid) ──────────────────────────────────
+        # cam_data_all[k][pid] = {"local_t": {global_t→local_t}, "kps": (T_local,308,3)}
+        cam_data_all: list[dict[int, dict]] = []
+        for cam_dir in self._cam_dirs:
+            cam_map: dict[int, dict] = {}
+            for pid in sorted(all_pids):
+                bf = cam_dir / "body_data" / f"person_{pid}.npz"
+                sp = cam_dir / f"sapiens_centered_kps_person_{pid}.npz"
+                if not bf.exists() or not sp.exists():
+                    continue
+                bd = np.load(bf, allow_pickle=False)
+                if "frame_indices" not in bd.files:
+                    continue
+                fi = bd["frame_indices"].astype(int)
+                kps = np.load(sp)["keypoints"]   # (T_local, 308, 3)
+                cam_map[pid] = {
+                    "local_t": {int(g): int(l) for l, g in enumerate(fi)},
+                    "kps":     kps,
+                }
+            cam_data_all.append(cam_map)
+
+        translations: dict[int, dict[int, np.ndarray]] = {}
+        orientations: dict[int, dict[int, np.ndarray]] = {}
+
+        for pid in sorted(all_pids):
+            betas = pred_betas_by_pid.get(pid, np.zeros(10, dtype=np.float32))
+
+            all_frames: set[int] = set()
+            for cm in cam_data_all:
+                if pid in cm:
+                    all_frames.update(cm[pid]["local_t"].keys())
+
+            trans_out:  dict[int, np.ndarray] = {}
+            orient_out: dict[int, np.ndarray] = {}
+
+            for global_t in sorted(all_frames):
+                vggt_t = global_t - frame_start
+                if vggt_t < 0 or vggt_t >= self.T:
+                    continue
+
+                s = float(scale[vggt_t]) if isinstance(scale, np.ndarray) else float(scale)
+
+                # ── Step 1: DLT-triangulate each Sapiens joint ────────────────
+                joint_world: dict[int, np.ndarray] = {}
+                for smplx_j in smplx_joints:
+                    goliath_j = _GOLIATH_SMPLX_ALIGN[smplx_j]
+                    obs:     list[tuple[float, float]] = []
+                    pmats:   list[np.ndarray]          = []
+                    weights: list[float]               = []
+
+                    for k, cm in enumerate(cam_data_all):
+                        if pid not in cm or global_t not in cm[pid]["local_t"]:
+                            continue
+                        if not self.cam_valid[vggt_t, k]:
+                            continue
+
+                        lt  = cm[pid]["local_t"][global_t]
+                        kp  = cm[pid]["kps"][lt, goliath_j]   # (3,) [x, y, conf]
+                        x, y, conf = float(kp[0]), float(kp[1]), float(kp[2])
+                        if conf < conf_thr:
+                            continue
+
+                        oc       = self.original_coords[vggt_t, k]
+                        os_      = self.original_size[vggt_t, k]
+                        W_orig, H_orig = float(os_[0]), float(os_[1])
+                        u, v = self._orig_to_vggt(np.array([x, y]), oc, W_orig, H_orig)
+                        if not self._in_bounds(u, v, oc[2], oc[3]):
+                            continue
+
+                        intr = self.intrinsics[vggt_t, k].astype(np.float64)
+                        ext  = self.extrinsics[vggt_t, k].astype(np.float64).copy()
+                        ext[:3, 3] *= s
+                        pmats.append(intr @ ext)
+                        obs.append((u, v))
+
+                        # sin(angle between cam_k and cam0 optical axes).
+                        # cam0 is the world origin so its R ≈ I; ext[2,2] = R_k[2,2] = cos(θ).
+                        # For k==0 cos≈1, sin≈0 → treat as weight 1 to keep the reference view.
+                        if k > 0:
+                            cos_a = float(np.clip(ext[2, 2], -1.0, 1.0))
+                            sin_w = float(np.sqrt(max(1.0 - cos_a ** 2, 0.0)))
+                        else:
+                            sin_w = 1.0
+                        weights.append(conf * sin_w)
+
+                    if len(obs) >= min_cams:
+                        joint_world[smplx_j] = self._triangulate_dlt(obs, pmats, weights)
+
+                if len(joint_world) < min_joints:
+                    continue
+
+                # ── Step 2: FK with fused body_pose ──────────────────────────
+                if fused_pose_by_pid is not None and pid in fused_pose_by_pid:
+                    t_local   = global_t - frame_start
+                    fused_arr = fused_pose_by_pid[pid]
+                    if not (0 <= t_local < len(fused_arr)):
+                        continue
+                    body_pose_frame = _6d_to_aa_batch(
+                        fused_arr[t_local, :21]
+                    ).reshape(63)
+                else:
+                    body_pose_frame = None
+                    for k_fb, cm in enumerate(cam_data_all):
+                        if pid in cm and global_t in cm[pid]["local_t"]:
+                            # Sapiens files don't carry body_pose; fall back to body_data
+                            bf = self._cam_dirs[k_fb] / "body_data" / f"person_{pid}.npz"
+                            if bf.exists():
+                                d_bp = np.load(bf, allow_pickle=False)
+                                if "smplx_body_pose" in d_bp.files:
+                                    lt = cm[pid]["local_t"][global_t]
+                                    body_pose_frame = d_bp["smplx_body_pose"][lt]
+                            break
+                if body_pose_frame is None:
+                    continue
+
+                J_can = self._smplx_fk(
+                    betas[np.newaxis],
+                    body_pose_frame[np.newaxis],
+                    zero_orient,
+                    pid=pid,
+                )[0]   # (55, 3)
+
+                # ── Step 3: Procrustes — R, t s.t. R @ J_can[j] + t ≈ joint_world[j] ──
+                vis = sorted(joint_world)
+                A   = np.stack([joint_world[j] for j in vis]).astype(np.float64)
+                B   = np.stack([J_can[j]        for j in vis]).astype(np.float64)
+
+                A_m, B_m = A.mean(0), B.mean(0)
+                H = (B - B_m).T @ (A - A_m)
+                U, _, Vt = np.linalg.svd(H)
+                d_sign = np.linalg.det(Vt.T @ U.T)
+                R = (Vt.T @ np.diag([1.0, 1.0, d_sign]) @ U.T).astype(np.float32)
+                t = (A_m - R.astype(np.float64) @ B_m).astype(np.float32)
+
+                # pelvis_world = R @ J_can[0] + t
+                pelvis_world = (
+                    R.astype(np.float64) @ J_can[0].astype(np.float64)
+                    + t.astype(np.float64)
+                ).astype(np.float32)
+
+                trans_out[global_t]  = pelvis_world
+                orient_out[global_t] = R
+
+            translations[pid] = trans_out
+            orientations[pid] = orient_out
+
+        return translations, orientations
+
     # ------------------------------------------------------------------
     # SMPL-X FK helper
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_smplx_model(model_path: str | Path) -> object:
+        import smplx as smplx_lib
+        p = Path(model_path)
+        kwargs: dict = {"model_type": "smplx"}
+        if p.is_file():
+            kwargs["ext"] = p.suffix.lstrip(".")
+        return smplx_lib.create(
+            str(model_path), **kwargs,
+            use_pca=False, flat_hand_mean=True, batch_size=1,
+        ).eval()
+
+    def _get_smplx_model(self, pid: int | None = None) -> object:
+        if pid is not None and pid in self._smplx_models:
+            return self._smplx_models[pid]
+        return self._smplx_model
 
     def _smplx_fk(
         self,
@@ -679,6 +1080,7 @@ class BodyPlacer:
         left_hand_pose: np.ndarray | None = None,   # (T_local, 45) optional
         right_hand_pose: np.ndarray | None = None,  # (T_local, 45) optional
         return_verts: bool = False,
+        pid: int | None = None,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """Run SMPL-X FK and return joints (and optionally vertices).
 
@@ -690,13 +1092,14 @@ class BodyPlacer:
             verts:  (T_local, 10475, 3) float32 — only when return_verts=True.
         """
         T = betas.shape[0]
-        num_expr = self._smplx_model.num_expression_coeffs
+        model = self._get_smplx_model(pid)
+        num_expr = model.num_expression_coeffs
         lhp = (torch.tensor(left_hand_pose,  dtype=torch.float32)
                if left_hand_pose  is not None else torch.zeros(T, 45, dtype=torch.float32))
         rhp = (torch.tensor(right_hand_pose, dtype=torch.float32)
                if right_hand_pose is not None else torch.zeros(T, 45, dtype=torch.float32))
         with torch.no_grad():
-            out = self._smplx_model(
+            out = model(
                 betas=torch.tensor(betas, dtype=torch.float32),
                 body_pose=torch.tensor(body_pose, dtype=torch.float32),
                 global_orient=torch.tensor(global_orient, dtype=torch.float32),

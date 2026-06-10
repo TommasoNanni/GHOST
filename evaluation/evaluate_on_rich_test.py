@@ -52,6 +52,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from fusion.fusion_module_v2 import FusionWithBetas, PoseFusionModule, BetasAggregator
 from fusion.placer import BodyPlacer
+from utilities.rich_gender_plugin import resolve_smplx_models
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -585,7 +586,12 @@ def evaluate_scene(
 
     # ── 3. Procrustes DLT ────────────────────────────────────────────────────
     try:
-        placer = BodyPlacer(scene_dir, smplx_model_path)
+        _gender_json = _REPO_ROOT / "resource" / "rich_gender.json"
+        _smplx_arg = (
+            resolve_smplx_models(scene_name, smplx_model_path.parent, _gender_json)
+            if _gender_json.exists() else smplx_model_path
+        )
+        placer = BodyPlacer(scene_dir, _smplx_arg)
     except Exception as e:
         logger.warning(f"  BodyPlacer init failed: {e} — skipping")
         return None
@@ -726,11 +732,16 @@ def evaluate_scene(
                 if pid in sam3d_betas_by_pid:
                     sam3d_betas_map[bf] = sam3d_betas_by_pid[pid]
 
-        pred_scale_pf = placer.estimate_scale_triangulated(
-            fused_pose_by_pid=fused_pose_by_pid,
-            fused_betas_map=sam3d_betas_map,
-            frame_start=frame_start,
-        )
+        pred_scale_pf = placer.load_mapanything_scale()
+        if pred_scale_pf is not None:
+            logger.info(f"  [scale] using MapAnything  median={float(np.median(pred_scale_pf)):.4f}")
+        else:
+            pred_scale_pf = placer.estimate_scale_triangulated(
+                fused_pose_by_pid=fused_pose_by_pid,
+                fused_betas_map=sam3d_betas_map,
+                frame_start=frame_start,
+            )
+            logger.info(f"  [scale] using triangulated  median={float(np.median(pred_scale_pf)):.4f}")
     except Exception as e:
         logger.warning(f"  Scale estimation failed: {e} — skipping")
         return None
@@ -919,6 +930,9 @@ def evaluate_scene(
         2: "M2: pred-cam + GT-scale   + pred-pose",
         3: "M3: GT-cam   + GT-scale   + pred-pose",
         4: "M4: GT-cam   + GT-scale   + GT-pose  (oracle)",
+        5: "M5: FK-DLT   + pred-scale + pred-pose",
+        6: "M6: pred-cam + pred-scale + pred-pose + GT-transl",
+        7: "M7: pred-ray + GT-depth (depth oracle)",
     }
 
     orig_extrinsics = placer.extrinsics    # save original VGGT extrinsics
@@ -964,7 +978,9 @@ def evaluate_scene(
         }
 
         try:
-            trans_dict, orient_dict = placer.estimate_procrustes_dlt(
+            placer_fn = (placer.estimate_procrustes_dlt_fk
+                         if modality == 5 else placer.estimate_procrustes_dlt)
+            trans_dict, orient_dict = placer_fn(
                 scale=scale_pf,
                 all_pids=set(all_pids),
                 pred_betas_by_pid=betas_for_placer,
@@ -978,6 +994,47 @@ def evaluate_scene(
             placer.extrinsics = orig_extrinsics  # always restore
             placer.intrinsics = orig_intrinsics
             placer.cam_valid  = orig_cam_valid
+
+        # M6: replace predicted translations with GT pelvis positions in VGGT ref frame.
+        # orient_dict (pred orientations) is kept unchanged; only the root position is GT.
+        if modality == 6:
+            trans_dict = {}
+            for ghost_pid, gt_pid in pid_match.items():
+                frames_t: dict[int, np.ndarray] = {}
+                for frame_idx, params in gt_body_data[gt_pid].items():
+                    J_can = placer._smplx_fk(
+                        params["betas"][np.newaxis],
+                        params["body_pose"][np.newaxis],
+                        np.zeros((1, 3), dtype=np.float32),
+                    )[0]
+                    gt_pelvis_world = J_can[0].astype(np.float64) + params["transl"].astype(np.float64)
+                    frames_t[frame_idx] = (R_w2ref @ gt_pelvis_world + t_w2ref).astype(np.float32)
+                trans_dict[ghost_pid] = frames_t
+
+        # M7: keep predicted ray direction from cam-0, replace depth with GT.
+        # t_new = d_gt * (t_pred / ||t_pred||)  — isolates depth error vs image-plane error.
+        if modality == 7:
+            trans_dict_pred = trans_dict  # placer output: pred positions in cam-0 metric frame
+            trans_dict = {}
+            for ghost_pid, gt_pid in pid_match.items():
+                frames_t: dict[int, np.ndarray] = {}
+                pred_frames = trans_dict_pred.get(ghost_pid, {})
+                for frame_idx, params in gt_body_data[gt_pid].items():
+                    J_can = placer._smplx_fk(
+                        params["betas"][np.newaxis],
+                        params["body_pose"][np.newaxis],
+                        np.zeros((1, 3), dtype=np.float32),
+                    )[0]
+                    gt_pelvis_world = J_can[0].astype(np.float64) + params["transl"].astype(np.float64)
+                    gt_pelvis_cam0 = R_w2ref @ gt_pelvis_world + t_w2ref
+                    d_gt = float(np.linalg.norm(gt_pelvis_cam0))
+                    t_pred = pred_frames.get(frame_idx)
+                    if t_pred is None or float(np.linalg.norm(t_pred)) < 1e-8:
+                        frames_t[frame_idx] = gt_pelvis_cam0.astype(np.float32)
+                    else:
+                        ray_dir = t_pred.astype(np.float64) / float(np.linalg.norm(t_pred))
+                        frames_t[frame_idx] = (d_gt * ray_dir).astype(np.float32)
+                trans_dict[ghost_pid] = frames_t
 
         # Build pred joints
         pred_joints = np.full((T, P, J_body, 3), np.nan, dtype=np.float32)
@@ -1175,6 +1232,8 @@ def main() -> None:
         2: "M2 pred-cam+GT-sc  ",
         3: "M3 GT-cam+GT-sc    ",
         4: "M4 oracle          ",
+        6: "M6 GT-transl       ",
+        7: "M7 GT-depth        ",
     }
     modalities_run = sorted(args.modalities)
     col_w = 20

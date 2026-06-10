@@ -33,6 +33,7 @@ from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from fusion.fusion_module_v2 import BetasAggregator, FusionWithBetas, PoseFusionModule
 from fusion.placer import BodyPlacer
+from utilities.rich_gender_plugin import resolve_smplx_models
 
 # Import PnP placement helpers from inference.py (same scripts/ dir)
 _SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -220,6 +221,12 @@ def main(
             cam_persons[pid_num] = {k: d[k] for k in d.files}
         raw_body.append(cam_persons)
 
+    _gender_json = Path(__file__).resolve().parent.parent / "resource" / "rich_gender.json"
+    _smplx_arg = (
+        resolve_smplx_models(scene_dir.name, Path(CONFIG.data.smplx_model_path).parent, _gender_json)
+        if _gender_json.exists() else Path(CONFIG.data.smplx_model_path)
+    )
+
     logger.info("Running BodyPlacer (Procrustes DLT) …")
     root_translation, orient_R, vggt_cameras = _run_placer(
         scene_dir      = scene_dir,
@@ -228,7 +235,7 @@ def main(
         all_pids       = all_pids_ordered,
         frame_start    = dp._frame_start,
         T              = T_scene,
-        smplx_model_path = Path(CONFIG.data.smplx_model_path),
+        smplx_model_path = _smplx_arg,
         fused_betas    = pred_shape,     # (P, 10) fused betas for FK
         fused_pose     = pred_pose_54,   # (T, P, 54, 6) fused pose for Procrustes FK
     )

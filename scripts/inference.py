@@ -54,6 +54,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from fusion.fusion_module_v2 import FusionWithBetas, PoseFusionModule, BetasAggregator
 from fusion.placer import BodyPlacer
+from utilities.rich_gender_plugin import resolve_smplx_models
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -327,7 +328,14 @@ def _run_placer(
     orient_R          : (T, P, 3, 3) float32, NaN where invisible
     vggt_cameras      : (T, K, 8) float32, visualizer camera format
     """
-    placer = BodyPlacer(scene_dir, smplx_model_path)
+    _gender_json = _REPO_ROOT / "resource" / "rich_gender.json"
+    if isinstance(smplx_model_path, dict):
+        _smplx_arg = smplx_model_path
+    elif _gender_json.exists():
+        _smplx_arg = resolve_smplx_models(scene_dir.name, Path(smplx_model_path).parent, _gender_json)
+    else:
+        _smplx_arg = smplx_model_path
+    placer = BodyPlacer(scene_dir, _smplx_arg)
     P = len(all_pids)
     pid_to_slot = {pid: i for i, pid in enumerate(all_pids)}
 
@@ -369,8 +377,8 @@ def _run_placer(
     del placer.depth_mm, placer.depth_conf
     placer.depth_mm = placer.depth_conf = None
 
-    logger.info("Running Procrustes DLT translation + orientation ...")
-    trans_dict, orient_dict = placer.estimate_procrustes_dlt(
+    logger.info("Running Procrustes DLT translation + orientation (Sapiens) ...")
+    trans_dict, orient_dict = placer.estimate_procrustes_dlt_sapiens(
         scale=scale_per_frame,
         all_pids=set(all_pids),
         pred_betas_by_pid=betas_by_pid,
@@ -398,6 +406,18 @@ def _run_placer(
             t_rel = int(global_t) - frame_start
             if 0 <= t_rel < T:
                 orient_R[t_rel, p] = R_mat
+
+    # placer returns pelvis_world = R @ J_can[0] + t, but downstream code
+    # (visualizer, evaluator) expects SMPL-X transl = t = pelvis_world - J_can[0].
+    # J_can[0] depends only on betas, so compute once per person.
+    _zero_pose   = np.zeros((1, 63), dtype=np.float32)
+    _zero_orient = np.zeros((1,  3), dtype=np.float32)
+    for i, pid in enumerate(all_pids):
+        J0 = placer._smplx_fk(
+            betas_by_pid[pid][np.newaxis], _zero_pose, _zero_orient
+        )[0, 0]  # (3,) canonical pelvis offset
+        valid = np.isfinite(root_translation[:, i, 0])
+        root_translation[valid, i] -= J0
 
     vggt_cameras = _build_vggt_cameras(placer, scale_per_frame)
 
