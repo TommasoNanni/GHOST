@@ -229,15 +229,15 @@ class MapAnythingScaleEstimator:
         Returns
         -------
         float32 (T,) scale array, or None if prerequisites are missing.
-        Also saves the array to {scene_dir}/mapanything_scale.npy.
+        Also saves the array to {scene_dir}/mapanything_scale_centered.npy.
         """
-        out_path = scene_dir / "mapanything_scale.npy"
+        out_path = scene_dir / "mapanything_scale_centered.npy"
         if out_path.exists() and not self.force:
             logger.info(f"{scene_dir.name}: already done, loading from disk")
             return np.load(out_path)
 
-        cam_path   = scene_dir / "vggt_cameras.npz"
-        depth_path = scene_dir / "vggt_depth.npz"
+        cam_path   = scene_dir / "vggt_cameras_centered.npz"
+        depth_path = scene_dir / "vggt_depth_centered.npz"
         if not cam_path.exists() or not depth_path.exists():
             logger.warning(f"{scene_dir.name}: missing vggt_cameras or vggt_depth — skip")
             return None
@@ -351,7 +351,7 @@ def main():
     else:
         scene_dirs = sorted(
             d for d in output_root.iterdir()
-            if d.is_dir() and (d / "vggt_cameras.npz").exists()
+            if d.is_dir() and (d / "vggt_cameras_centered.npz").exists()
         )
 
     estimator = MapAnythingScaleEstimator(

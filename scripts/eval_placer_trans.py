@@ -1096,12 +1096,12 @@ def _run_fusion_fwd(
 
 
 def run() -> None:
-    if (SCENE_ROOT / "vggt_cameras.npz").exists():
+    if (SCENE_ROOT / "vggt_cameras_centered.npz").exists():
         scenes = [SCENE_ROOT]
     else:
         scenes = sorted(
             d for d in SCENE_ROOT.iterdir()
-            if d.is_dir() and (d / "vggt_cameras.npz").exists()
+            if d.is_dir() and (d / "vggt_cameras_centered.npz").exists()
         )
 
     if MAX_SCENES is not None:
@@ -1125,23 +1125,27 @@ def run() -> None:
         cam_dirs = placer._cam_dirs
 
         if CAMERAS_ONLY:
-            fwd_c = _run_fusion_fwd(cam_dirs, FUSION_MODEL, FUSION_DEVICE)
-            if fwd_c is not None:
-                _fa, _fb, _mp, _fs = fwd_c
-                _pts = {pid: _fa[:, i] for i, pid in enumerate(_mp)}
-                _bm = {
-                    cam_dir / "body_data" / f"person_{pid}.npz": _fb[i]
-                    for i, pid in enumerate(_mp)
-                    for cam_dir in placer._cam_dirs
-                    if (cam_dir / "body_data" / f"person_{pid}.npz").exists()
-                }
-                _scale_c = placer.estimate_scale_triangulated(
-                    fused_betas_map=_bm, fused_pose_by_pid=_pts, frame_start=_fs,
-                )
+            _scale_cameras = 1.0  # default: show unscaled VGGT translations
+            if FUSION_MODEL is not None:
+                fwd_c = _run_fusion_fwd(cam_dirs, FUSION_MODEL, FUSION_DEVICE)
+                if fwd_c is not None:
+                    _fa, _fb, _mp, _fs = fwd_c
+                    _pts = {pid: _fa[:, i] for i, pid in enumerate(_mp)}
+                    _bm = {
+                        cam_dir / "body_data" / f"person_{pid}.npz": _fb[i]
+                        for i, pid in enumerate(_mp)
+                        for cam_dir in placer._cam_dirs
+                        if (cam_dir / "body_data" / f"person_{pid}.npz").exists()
+                    }
+                    _scale_c = placer.estimate_scale_triangulated(
+                        fused_betas_map=_bm, fused_pose_by_pid=_pts, frame_start=_fs,
+                    )
+                    _scale_cameras = float(np.median(_scale_c))
+                else:
+                    print("  [fusion] forward pass failed — using scale=1.0")
             else:
-                print("  [fusion] forward pass failed — skipping cameras eval")
-                continue
-            eval_cameras(placer, float(np.median(_scale_c)), scene_name, cam_dirs)
+                print("  [cameras_only] no fusion model — translations shown at raw VGGT scale")
+            eval_cameras(placer, _scale_cameras, scene_name, cam_dirs)
             continue
 
         gt_trans_raw = load_gt_trans(scene_name)
@@ -1208,16 +1212,21 @@ def run() -> None:
             print("  [fusion] forward pass failed — skipping scene")
             continue
 
-        # ── Scale estimation (fused betas + fused pose) ───────────────────────
-        try:
-            scale = placer.estimate_scale_triangulated(
-                fused_betas_map=fused_betas_file_map,
-                fused_pose_by_pid=fused_pose_by_pid_arr,
-                frame_start=fwd_frame_start,
-            )  # (T,) per-frame scale
-        except RuntimeError as e:
-            print(f"  [scale] failed: {e} — skipping scene")
-            continue
+        # ── Scale estimation: MapAnything preferred, triangulated as fallback ──
+        scale = placer.load_mapanything_scale()
+        if scale is not None:
+            print(f"  [scale] using MapAnything  median={float(np.median(scale)):.4f}")
+        else:
+            try:
+                scale = placer.estimate_scale_triangulated(
+                    fused_betas_map=fused_betas_file_map,
+                    fused_pose_by_pid=fused_pose_by_pid_arr,
+                    frame_start=fwd_frame_start,
+                )  # (T,) per-frame scale
+                print(f"  [scale] using triangulated  median={float(np.median(scale)):.4f}")
+            except RuntimeError as e:
+                print(f"  [scale] failed: {e} — skipping scene")
+                continue
         scale_median = float(np.median(scale))  # scalar for display / eval_cameras
 
         # GT scale from camera baseline ratios (isolates scale error).

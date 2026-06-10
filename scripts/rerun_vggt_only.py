@@ -60,6 +60,10 @@ def main():
                         help="Path to VGGT-Omega weights .pt file.")
     parser.add_argument("--vggt-devices", nargs="+", default=None,
                         help="CUDA device strings, e.g. cuda:0 cuda:1.")
+    parser.add_argument("--rich-data-root", type=str, default=None,
+                        help="Override CONFIG.data.rich_data_root.")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Override CONFIG.data.output_directory.")
     args = parser.parse_args()
 
     if args.vggt_devices:
@@ -70,8 +74,8 @@ def main():
         vggt_devices = ["cpu"]
     logger.info(f"VGGT devices: {vggt_devices}")
 
-    rich_data_root = CONFIG.data.rich_data_root
-    output_dir     = Path(CONFIG.data.output_directory)
+    rich_data_root = args.rich_data_root or CONFIG.data.rich_data_root
+    output_dir     = Path(args.output_dir or CONFIG.data.output_directory)
 
     ds = RichDataset(
         data_root=rich_data_root,
@@ -86,8 +90,8 @@ def main():
 
     for scene in scenes:
         scene_out = output_dir / scene.scene_id
-        cam_path  = scene_out / "vggt_cameras.npz"
-        dep_path  = scene_out / "vggt_depth.npz"
+        cam_path  = scene_out / "vggt_cameras_centered.npz"
+        dep_path  = scene_out / "vggt_depth_centered.npz"
 
         if cam_path.exists() and dep_path.exists():
             logger.info(f"[{scene.scene_id}] already done — skipping.")

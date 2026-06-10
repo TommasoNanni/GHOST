@@ -439,8 +439,8 @@ class VGGTPreprocessor:
         valid:           np.ndarray,
     ) -> None:
         """Write vggt_cameras.npz and vggt_depth.npz to output_dir."""
-        cam_path   = output_dir / "vggt_cameras.npz"
-        depth_path = output_dir / "vggt_depth.npz"
+        cam_path   = output_dir / "vggt_cameras_centered.npz"
+        depth_path = output_dir / "vggt_depth_centered.npz"
 
         np.savez_compressed(
             str(cam_path),
