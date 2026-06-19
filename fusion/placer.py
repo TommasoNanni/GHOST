@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from scipy.ndimage import map_coordinates
+from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation as SciR
 
 
@@ -141,9 +142,24 @@ class BodyPlacer:
               same order as the K dimension in the VGGT arrays.
         smplx_model_path: Path to SMPLX_NEUTRAL.pkl.  Required for FK-based
             scale estimation and root translation.
+        crop_meta_path: Optional path to the ``crop_meta.json`` written by
+            ``center_images.py`` for this scene (lives next to the centered
+            images, e.g. ``<rich_root>/centered_<split>/<scene>/crop_meta.json``).
+            VGGT cameras are calibrated in centered-crop pixel space, whereas
+            SAM3D ``pred_keypoints_2d`` (MHR70) are in uncropped source pixels.
+            When provided, the per-camera crop offset ``(off_x, off_y)`` is
+            subtracted from those keypoints before projecting into VGGT space,
+            removing the systematic reprojection bias on cameras whose principal
+            point deviates from the image centre.  When ``None`` (no centering,
+            or file absent) all offsets are ``(0, 0)`` — behaviour is unchanged.
     """
 
-    def __init__(self, scene_output_dir: str | Path, smplx_model_path: str | Path) -> None:
+    def __init__(
+        self,
+        scene_output_dir: str | Path,
+        smplx_model_path: str | Path,
+        crop_meta_path: str | Path | None = None,
+    ) -> None:
         self.scene_dir = Path(scene_output_dir)
 
         import sys
@@ -187,8 +203,36 @@ class BodyPlacer:
         # (K,) bytes
         self.camera_names = cam_npz["camera_names"]
 
+        # Per-camera crop offset (off_x, off_y) in SOURCE pixels, mapping the
+        # uncropped SAM3D pred_keypoints_2d into the centered-crop space the
+        # VGGT cameras live in:  u_crop = u_src - off_x,  v_crop = v_src - off_y.
+        # Defaults to (0, 0) for every camera when no crop_meta is supplied.
+        self._cam_offsets: dict[str, tuple[float, float]] = {}
+        if crop_meta_path is not None:
+            crop_meta_path = Path(crop_meta_path)
+            if crop_meta_path.exists():
+                import json
+                import logging
+                with open(crop_meta_path) as f:
+                    _meta = json.load(f)
+                for cam_name, info in _meta.get("cameras", {}).items():
+                    self._cam_offsets[cam_name] = (
+                        float(info.get("off_x", 0.0)),
+                        float(info.get("off_y", 0.0)),
+                    )
+                logging.getLogger(__name__).info(
+                    f"[placer] loaded crop offsets for {len(self._cam_offsets)} "
+                    f"cameras from {crop_meta_path}"
+                )
+            else:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"[placer] crop_meta_path {crop_meta_path} not found — "
+                    f"SAM3D kp2d offset correction disabled (offsets = 0)"
+                )
+
         # Depth is optional (legacy; not used by estimate_scale_triangulated).
-        depth_path = self.scene_dir / "vggt_depth.npz"
+        depth_path = self.scene_dir / "vggt_depth_centered.npz"
         if depth_path.exists():
             depth_npz = np.load(depth_path, mmap_mode="r")
             self.depth_mm    = depth_npz["depth"]
@@ -439,9 +483,10 @@ class BodyPlacer:
                         os_ = self.original_size[vggt_t, k]
                         W_orig, H_orig = float(os_[0]), float(os_[1])
                         x1, y1, x2, y2 = oc
+                        off_x, off_y = self._cam_offset(k)
 
-                        u_a, v_a = self._orig_to_vggt(bd["kp2d"][local_t, mhr_a], oc, W_orig, H_orig)
-                        u_b, v_b = self._orig_to_vggt(bd["kp2d"][local_t, mhr_b], oc, W_orig, H_orig)
+                        u_a, v_a = self._orig_to_vggt(bd["kp2d"][local_t, mhr_a], oc, W_orig, H_orig, off_x, off_y)
+                        u_b, v_b = self._orig_to_vggt(bd["kp2d"][local_t, mhr_b], oc, W_orig, H_orig, off_x, off_y)
                         if not (x1 <= u_a < x2 and y1 <= v_a < y2
                                 and x1 <= u_b < x2 and y1 <= v_b < y2):
                             continue
@@ -499,7 +544,7 @@ class BodyPlacer:
                   f"frames_with_bones={len(counts)}/{self.T}")
         return result
 
-    def estimate_procrustes_dlt(
+    def estimate_procrustes_dlt_mhr(
         self,
         scale: float | np.ndarray,
         all_pids: set[int],
@@ -508,6 +553,7 @@ class BodyPlacer:
         frame_start: int = 0,
         min_cams: int = 2,
         min_joints: int = 3,
+        smooth_window: int = 15,
     ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
         """Estimate root translation + global orient via multi-camera DLT + Procrustes.
 
@@ -615,8 +661,9 @@ class BodyPlacer:
                         oc  = self.original_coords[vggt_t, k]
                         os_ = self.original_size[vggt_t, k]
                         W_orig, H_orig = float(os_[0]), float(os_[1])
+                        off_x, off_y = self._cam_offset(k)
 
-                        u, v = self._orig_to_vggt(kp2d[local_t, joint_idx], oc, W_orig, H_orig)
+                        u, v = self._orig_to_vggt(kp2d[local_t, joint_idx], oc, W_orig, H_orig, off_x, off_y)
                         if not self._in_bounds(u, v, oc[2], oc[3]):
                             continue
 
@@ -625,7 +672,12 @@ class BodyPlacer:
                         ext[:3, 3] *= s
                         pmats.append(intr @ ext)
                         obs.append((u, v))
-                        weights.append(conf)
+                        if k > 0:
+                            cos_a = float(np.clip(ext[2, 2], -1.0, 1.0))
+                            sin_w = float(np.sqrt(max(1.0 - cos_a ** 2, 0.0))) ** 2
+                        else:
+                            sin_w = 1.0
+                        weights.append(conf * sin_w)
 
                     if len(obs) >= min_cams:
                         joint_world[smplx_j] = self._triangulate_dlt(obs, pmats, weights)
@@ -693,6 +745,17 @@ class BodyPlacer:
             translations[pid] = trans_out
             orientations[pid] = orient_out
 
+        if smooth_window > 0:
+            w = smooth_window if smooth_window % 2 == 1 else smooth_window + 1
+            for pid, frames in translations.items():
+                sorted_f = sorted(frames)
+                if len(sorted_f) < w:
+                    continue
+                traj = np.stack([frames[f] for f in sorted_f])   # (N, 3)
+                traj_s = savgol_filter(traj, window_length=w, polyorder=2, axis=0)
+                translations[pid] = {f: traj_s[i].astype(np.float32)
+                                     for i, f in enumerate(sorted_f)}
+
         return translations, orientations
 
     def estimate_procrustes_dlt_fk(
@@ -707,7 +770,7 @@ class BodyPlacer:
     ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
         """Estimate root translation + orient via multi-camera DLT on SMPL-X FK projections.
 
-        Same interface as estimate_procrustes_dlt but replaces SAM3D's
+        Same interface as estimate_procrustes_dlt_mhr but replaces SAM3D's
         pred_keypoints_2d (MHR70 landmarks) with SMPL-X FK joints (all 22
         body joints) projected using smplx_transl + smplx_global_orient and
         SAM3D's focal_length. Projection follows the same pipeline as M1:
@@ -874,6 +937,7 @@ class BodyPlacer:
         conf_thr: float = 0.3,
         min_cams: int = 2,
         min_joints: int = 3,
+        smooth_window: int = 15,
     ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
         """Estimate root translation + orient via DLT on Sapiens Goliath-308 keypoints.
 
@@ -978,12 +1042,12 @@ class BodyPlacer:
                         pmats.append(intr @ ext)
                         obs.append((u, v))
 
-                        # sin(angle between cam_k and cam0 optical axes).
+                        # sin²(angle between cam_k and cam0 optical axes).
                         # cam0 is the world origin so its R ≈ I; ext[2,2] = R_k[2,2] = cos(θ).
-                        # For k==0 cos≈1, sin≈0 → treat as weight 1 to keep the reference view.
+                        # Down-weights cameras with a shallow baseline relative to cam0.
                         if k > 0:
                             cos_a = float(np.clip(ext[2, 2], -1.0, 1.0))
-                            sin_w = float(np.sqrt(max(1.0 - cos_a ** 2, 0.0)))
+                            sin_w = float(np.sqrt(max(1.0 - cos_a ** 2, 0.0))) ** 2
                         else:
                             sin_w = 1.0
                         weights.append(conf * sin_w)
@@ -1048,6 +1112,17 @@ class BodyPlacer:
 
             translations[pid] = trans_out
             orientations[pid] = orient_out
+
+        if smooth_window > 0:
+            w = smooth_window if smooth_window % 2 == 1 else smooth_window + 1
+            for pid, frames in translations.items():
+                sorted_f = sorted(frames)
+                if len(sorted_f) < w:
+                    continue
+                traj = np.stack([frames[f] for f in sorted_f])   # (N, 3)
+                traj_s = savgol_filter(traj, window_length=w, polyorder=2, axis=0)
+                translations[pid] = {f: traj_s[i].astype(np.float32)
+                                     for i, f in enumerate(sorted_f)}
 
         return translations, orientations
 
@@ -1255,6 +1330,7 @@ class BodyPlacer:
             oc = self.original_coords[vggt_t, k]
             os = self.original_size[vggt_t, k]
             W_orig, H_orig = float(os[0]), float(os[1])
+            off_x, off_y = self._cam_offset(k)
 
             for j_a, j_b in _LONG_BONES:
                 mhr_a = _SMPLX_TO_MHR70.get(j_a)
@@ -1264,8 +1340,8 @@ class BodyPlacer:
                 if mhr_a >= kp2d.shape[1] or mhr_b >= kp2d.shape[1]:
                     continue
 
-                u_a, v_a = self._orig_to_vggt(kp2d[local_t, mhr_a], oc, W_orig, H_orig)
-                u_b, v_b = self._orig_to_vggt(kp2d[local_t, mhr_b], oc, W_orig, H_orig)
+                u_a, v_a = self._orig_to_vggt(kp2d[local_t, mhr_a], oc, W_orig, H_orig, off_x, off_y)
+                u_b, v_b = self._orig_to_vggt(kp2d[local_t, mhr_b], oc, W_orig, H_orig, off_x, off_y)
 
                 if not (self._in_bounds(u_a, v_a, oc[2], oc[3]) and self._in_bounds(u_b, v_b, oc[2], oc[3])):
                     continue
@@ -1319,21 +1395,37 @@ class BodyPlacer:
         oc: np.ndarray,
         W_orig: float,
         H_orig: float,
+        off_x: float = 0.0,
+        off_y: float = 0.0,
     ) -> tuple[float, float]:
         """Map a 2D keypoint from original-image pixels to VGGT output space.
 
         Args:
-            kp: Keypoint [u, v, ...] in original image pixels.
+            kp: Keypoint [u, v, ...] in original (uncropped source) image pixels.
             oc: [0, 0, W_vggt, H_vggt] from vggt_cameras.npz.
-            W_orig, H_orig: Original image dimensions in pixels.
+            W_orig, H_orig: Centered-crop image dimensions in pixels (the frame
+                the VGGT camera was actually calibrated on).
+            off_x, off_y: Crop top-left offset in source pixels.  Subtracted from
+                ``kp`` to move it from uncropped source space into the centered
+                crop space before scaling into VGGT output space.  Default (0, 0).
 
         Returns:
             (u_vggt, v_vggt) in VGGT output pixel coordinates.
         """
         x1, y1, x2, y2 = oc
-        u_vggt = x1 + float(kp[0]) * (x2 - x1) / W_orig
-        v_vggt = y1 + float(kp[1]) * (y2 - y1) / H_orig
+        u_vggt = x1 + (float(kp[0]) - off_x) * (x2 - x1) / W_orig
+        v_vggt = y1 + (float(kp[1]) - off_y) * (y2 - y1) / H_orig
         return u_vggt, v_vggt
+
+    def _cam_offset(self, k: int) -> tuple[float, float]:
+        """Crop (off_x, off_y) in source pixels for camera index ``k``.
+
+        Returns (0.0, 0.0) when no crop_meta was loaded or the camera is absent.
+        """
+        name = self.camera_names[k]
+        if isinstance(name, bytes):
+            name = name.decode()
+        return self._cam_offsets.get(name, (0.0, 0.0))
 
     @staticmethod
     def _in_bounds(u: float, v: float, w_max: float, h_max: float) -> bool:

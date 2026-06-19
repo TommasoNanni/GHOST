@@ -1023,7 +1023,7 @@ def _run_fusion_fwd(
     model: "Any",
     device: "Any",
 ) -> "tuple[np.ndarray, np.ndarray | None, list[int], int] | None":
-    """Build input tensors from cam_dirs, run model, return (fused_pose, fused_betas, all_pids, frame_start)."""
+    """Build input tensors from cam_dirs, run model, return (fused_pose, all_pids, frame_start)."""
     import torch
 
     J = model.pose_module.joint_id_embedding.weight.shape[0]  # root-excluded (e.g. 54)
@@ -1090,9 +1090,8 @@ def _run_fusion_fwd(
     with torch.no_grad():
         pose_aggr, betas_out = model(pose_t, mask_t, shape=shape_t)
 
-    fused_pose  = pose_aggr[0].cpu().numpy()                                    # (T, P, J, 6)
-    fused_betas = betas_out[0].cpu().numpy() if betas_out is not None else None  # (P, 10)
-    return fused_pose, fused_betas, all_pids, frame_start
+    fused_pose  = pose_aggr[0].cpu().numpy()   # (T, P, J, 6)
+    return fused_pose, all_pids, frame_start
 
 
 def run() -> None:
@@ -1129,13 +1128,15 @@ def run() -> None:
             if FUSION_MODEL is not None:
                 fwd_c = _run_fusion_fwd(cam_dirs, FUSION_MODEL, FUSION_DEVICE)
                 if fwd_c is not None:
-                    _fa, _fb, _mp, _fs = fwd_c
+                    _fa, _mp, _fs = fwd_c
                     _pts = {pid: _fa[:, i] for i, pid in enumerate(_mp)}
+                    _sam3d_b = load_pred_betas(cam_dirs)
                     _bm = {
-                        cam_dir / "body_data" / f"person_{pid}.npz": _fb[i]
-                        for i, pid in enumerate(_mp)
+                        cam_dir / "body_data" / f"person_{pid}.npz": _sam3d_b[pid]
+                        for pid in _mp
                         for cam_dir in placer._cam_dirs
-                        if (cam_dir / "body_data" / f"person_{pid}.npz").exists()
+                        if pid in _sam3d_b
+                        and (cam_dir / "body_data" / f"person_{pid}.npz").exists()
                     }
                     _scale_c = placer.estimate_scale_triangulated(
                         fused_betas_map=_bm, fused_pose_by_pid=_pts, frame_start=_fs,
@@ -1169,6 +1170,13 @@ def run() -> None:
         assert all_pids, f"No body_data found under {scene_dir}"
 
         pred_betas_map_by_pid = load_pred_betas(cam_dirs)
+        fused_betas_file_map: dict[Path, np.ndarray] = {
+            cam_dir / "body_data" / f"person_{pid}.npz": pred_betas_map_by_pid[pid]
+            for cam_dir in cam_dirs
+            for pid in all_pids
+            if pid in pred_betas_map_by_pid
+            and (cam_dir / "body_data" / f"person_{pid}.npz").exists()
+        }
 
         # Optional GT intrinsics (upper-bound check, not used at test time).
         gt_intrinsics = load_gt_intrinsics(scene_name) if USE_GT_INTRINSICS else None
@@ -1180,11 +1188,10 @@ def run() -> None:
         assert FUSION_MODEL is not None, "A --checkpoint is required (fused pose needed for scale)"
         fused_body_pose_by_ghost: dict[int, dict[int, np.ndarray]] | None = None
         fused_pose_by_pid_arr: dict[int, np.ndarray] = {}
-        fused_betas_file_map: dict[Path, np.ndarray] = {}
         fwd_frame_start = 0
         fwd = _run_fusion_fwd(cam_dirs, FUSION_MODEL, FUSION_DEVICE)
         if fwd is not None:
-            fused_pose_arr, fused_betas_arr, model_pids, fwd_frame_start = fwd
+            fused_pose_arr, model_pids, fwd_frame_start = fwd
             pid_to_slot = {pid: i for i, pid in enumerate(model_pids)}
             T_fused = fused_pose_arr.shape[0]
             fused_body_pose_by_ghost = {}
@@ -1199,15 +1206,6 @@ def run() -> None:
                     aa = _6d_to_aa(fused_pose_arr[t_local, slot, :21])
                     frames_dict[global_t] = aa.reshape(63).astype(np.float32)
                 fused_body_pose_by_ghost[ghost_pid] = frames_dict
-            if fused_betas_arr is not None:
-                for ghost_pid in all_pids:
-                    if ghost_pid in pid_to_slot:
-                        pred_betas_map_by_pid[ghost_pid] = fused_betas_arr[pid_to_slot[ghost_pid]]
-                for k, cam_dir in enumerate(cam_dirs):
-                    for ghost_pid in all_pids:
-                        body_file = cam_dir / "body_data" / f"person_{ghost_pid}.npz"
-                        if body_file.exists() and ghost_pid in pid_to_slot:
-                            fused_betas_file_map[body_file] = fused_betas_arr[pid_to_slot[ghost_pid]]
         else:
             print("  [fusion] forward pass failed — skipping scene")
             continue
