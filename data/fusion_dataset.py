@@ -89,6 +89,12 @@ class FusionDatapoint(Dataset, ABC):
         super().__init__()
         self.scene_dir = Path(scene_dir)
         self.num_joints = num_joints
+        # When False, GT matching is still performed (for evaluation overlays)
+        # but does NOT restrict the batch to GT-matched persons: all foreground
+        # ghost pids are kept (e.g. to visualize background people).
+        self._restrict_to_gt_persons: bool = bool(
+            kwargs.pop("restrict_to_gt_persons", True)
+        )
 
         # _cam_dirs[cam_idx] = Path to each camera directory
         self._cam_dirs: list[Path] = []
@@ -117,11 +123,13 @@ class FusionDatapoint(Dataset, ABC):
                 f"No camera directories found in {self.scene_dir}"
             )
 
+        # Person slots are global: slot p maps to the same ghost pid in every
+        # camera, so max_persons = number of distinct (kept) pids scene-wide.
         self.max_persons: int = (
-            max(
-                sum(1 for pid in cam if self._gt_matched_ghost_pids is None or pid in self._gt_matched_ghost_pids)
-                for cam in self._raw
-            ) if self._raw else 0
+            len({
+                pid for cam in self._raw for pid in cam
+                if self._gt_matched_ghost_pids is None or pid in self._gt_matched_ghost_pids
+            }) if self._raw else 0
         )
 
         self._frame_start: int = 0
@@ -349,19 +357,25 @@ class FusionDatapoint(Dataset, ABC):
         self._frame_end = int(hi) + 1 if hi != float("-inf") else 0
 
     def _build_lookup(self) -> None:
-        """Pre-build per-camera per-person frame -> local-npz-index maps."""
+        """Pre-build per-camera per-person frame -> local-npz-index maps.
+
+        Person slots are GLOBAL: slot p corresponds to the same ghost pid in
+        every camera; cameras that never see that pid get an empty lookup
+        (person_mask stays False there).
+        """
+        global_pids = sorted({
+            pid for cam in self._raw for pid in cam
+            if self._gt_matched_ghost_pids is None or pid in self._gt_matched_ghost_pids
+        })
         for cam_idx, cam_persons in enumerate(self._raw):
-            pids = [
-                pid for pid in sorted(cam_persons.keys())
-                if self._gt_matched_ghost_pids is None or pid in self._gt_matched_ghost_pids
-            ]
-            self._pid_order.append(pids)
+            self._pid_order.append(global_pids)
             cam_lookups: list[dict[int, int]] = []
-            for pid in pids:
-                fi = cam_persons[pid]["frame_indices"]
-                cam_lookups.append({int(f): i for i, f in enumerate(fi)})
-            while len(cam_lookups) < self.max_persons:
-                cam_lookups.append({})
+            for pid in global_pids:
+                if pid in cam_persons:
+                    fi = cam_persons[pid]["frame_indices"]
+                    cam_lookups.append({int(f): i for i, f in enumerate(fi)})
+                else:
+                    cam_lookups.append({})
             self._lookup.append(cam_lookups)
 
     def _build_sample(
@@ -406,6 +420,8 @@ class FusionDatapoint(Dataset, ABC):
             for p_slot, pid in enumerate(pids):
                 if p_slot >= P:
                     break
+                if pid not in cam_persons:
+                    continue   # this camera never sees this person
                 pdata = cam_persons[pid]
                 lut = self._lookup[k][p_slot]
 
@@ -576,11 +592,47 @@ class FusionDatapoint(Dataset, ABC):
 # EgoExo subclass (ghost pipeline output, no GT)
 # ======================================================================
 
-class EgoExoFusionDatapoint(FusionDatapoint):
-    """Loads body data from the ghost segmentation pipeline output.
+# ======================================================================
+# EgoExo4D GT-aware subclass
+# ======================================================================
 
-    Self-supervised -- no GT available, targets mirror predictions.
-    Camera params come from SAM3D's ``pred_cam_t``.
+_EGOEXO4D_COCO17 = [
+    "nose", "left-eye", "right-eye", "left-ear", "right-ear",
+    "left-shoulder", "right-shoulder", "left-elbow", "right-elbow",
+    "left-wrist", "right-wrist", "left-hip", "right-hip",
+    "left-knee", "right-knee", "left-ankle", "right-ankle",
+]
+
+
+class EgoExo4DGTFusionDatapoint(FusionDatapoint):
+    """GT-aware EgoExo4D fusion datapoint.
+
+    Data sources (produced by ``utilities/download_egoexo4d_gt.py``)::
+
+        gt_dir/<take_name>/keypoints_gt.json
+            {frame_idx_str: {joint_name: {x, y, z}, ...}, ...}
+            One annotated person (the ego/aria wearer); keypoints in world frame.
+
+        gt_dir/<take_name>/gopro_calibs.csv
+            Camera calibration.  Each row covers a frame range.  Relevant cols:
+              cam_uid, tx_world_cam, ty_world_cam, tz_world_cam,
+              qx_world_cam, qy_world_cam, qz_world_cam, qw_world_cam,
+              intrinsics_0 (fx), intrinsics_1 (fy), intrinsics_2 (cx), intrinsics_3 (cy)
+            Convention: T_world_cam (camera-to-world); we invert to get extrinsics.
+
+    Ghost pipeline output (scene_dir)::
+
+        scene_dir/
+            cam01/body_data/person_*.npz
+            cam02/body_data/person_*.npz
+            ...
+
+    Constructor kwargs
+    ------------------
+    gt_dir : str | Path
+        Base directory whose sub-folders are take names.
+    take_name : str, optional
+        Override the take name (default: ``scene_dir.name``).
     """
 
     def load_body_data(self, **kwargs: Any) -> None:
@@ -595,20 +647,9 @@ class EgoExoFusionDatapoint(FusionDatapoint):
             for npz_path in sorted(body_dir.glob("person_*.npz")):
                 pid = int(npz_path.stem.split("_")[1])
                 data = dict(np.load(str(npz_path), allow_pickle=False))
-                persons[pid] = {
-                    k: data[k] for k in self._NPZ_FIELDS if k in data
-                }
+                persons[pid] = {k: data[k] for k in self._NPZ_FIELDS if k in data}
             self._raw.append(persons)
             logger.debug(f"  {cam_dir.name}: loaded {len(persons)} person(s)")
-
-    def load_cameras(self, **kwargs: Any) -> None:
-        # No external calibration -- camera is derived per-frame from
-        # SAM3D's pred_cam_t inside convert_camera.
-        self._cameras = [{} for _ in self._cam_dirs]
-
-    def load_ground_truth(self, **kwargs: Any) -> None:
-        # Self-supervised: no GT.
-        self._gt = [{} for _ in self._cam_dirs]
 
     def convert_pose(
         self,
@@ -616,56 +657,349 @@ class EgoExoFusionDatapoint(FusionDatapoint):
         hand_pose_params: np.ndarray | None,
         global_rot: np.ndarray,
     ) -> np.ndarray:
-        """Convert SMPL-X axis-angle params to ``[J, 6]`` (6-D rotation).
-
-        Joint layout (matches SMPL-X full_pose ordering):
-            0        : global_orient   (3,)
-            1 – 21   : body_pose       (63,)  = 21 joints
-            22 – 36  : left_hand_pose  (45,)  = 15 joints  ─┐ from
-            37 – 51  : right_hand_pose (45,)  = 15 joints  ─┘ hand_pose_params
-            52 – 54  : jaw / leye / reye       — zeros (not estimated)
-
-        Parameters
-        ----------
-        body_pose_params : (63,) float32
-            21 body joints × 3 axis-angle.
-        hand_pose_params : (90,) | (45,) | None
-            Left+right hand concatenated (90,), left only (45,), or None.
-        global_rot : (3,) float32
-            Global orientation axis-angle.
-        """
-        J = self.num_joints  # 55
+        J = self.num_joints
         out = np.zeros((J, 6), dtype=np.float32)
         if body_pose_params is None or global_rot is None:
             return out
-
         try:
             from scipy.spatial.transform import Rotation as SciR
         except Exception:
             return out
-
-        go = np.asarray(global_rot, dtype=np.float32).reshape(1, 3)   # (1, 3)
-        bp = np.asarray(body_pose_params, dtype=np.float32).reshape(-1, 3)  # (21, 3)
-        parts = [go, bp]  # (22, 3)
+        go = np.asarray(global_rot, dtype=np.float32).reshape(1, 3)
+        bp = np.asarray(body_pose_params, dtype=np.float32).reshape(-1, 3)
+        parts = [go, bp]
         if hand_pose_params is not None:
-            hp = np.asarray(hand_pose_params, dtype=np.float32).reshape(-1, 3)
-            parts.append(hp)  # (30, 3) when both hands present
-        aa = np.concatenate(parts, axis=0)  # (22,) or (52,) joints
-
-        # Pad remaining slots (face joints) with identity = zero axis-angle.
+            parts.append(np.asarray(hand_pose_params, dtype=np.float32).reshape(-1, 3))
+        aa = np.concatenate(parts, axis=0)
         if aa.shape[0] < J:
-            aa = np.concatenate(
-                [aa, np.zeros((J - aa.shape[0], 3), dtype=np.float32)], axis=0
-            )
-
+            aa = np.concatenate([aa, np.zeros((J - aa.shape[0], 3), dtype=np.float32)], axis=0)
         try:
             mats = SciR.from_rotvec(aa).as_matrix()
         except Exception:
             return out
-
         sixd = np.concatenate([mats[:, 0, :], mats[:, 1, :]], axis=1)
         out[:J] = sixd[:J]
         return out
+
+    def load_cameras(self, **kwargs: Any) -> None:
+        """Parse ``gopro_calibs.csv`` → per-camera extrinsics + K.
+
+        Builds ``self._cameras`` (list of calibration dicts, one per cam_dir)
+        and ``self._gt_camera_vecs`` (8-vectors relative to cam-0).
+        """
+        import csv
+        from scipy.spatial.transform import Rotation as SciR
+
+        gt_dir = Path(kwargs.get("gt_dir", ""))
+        take_name = kwargs.get("take_name", self.scene_dir.name)
+        calib_csv = gt_dir / take_name / "gopro_calibs.csv"
+
+        # Parse CSV into per-cam-uid list of calibration rows.
+        cam_rows: dict[str, list[dict]] = {}
+        if calib_csv.exists():
+            with open(calib_csv, newline="") as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    uid = row["cam_uid"].strip()
+                    cam_rows.setdefault(uid, []).append(row)
+        else:
+            logger.warning(f"gopro_calibs.csv not found at {calib_csv}")
+
+        def _best_row(rows: list[dict], frame_idx: int) -> dict:
+            """Pick the calibration row whose time range covers frame_idx."""
+            for r in rows:
+                try:
+                    s = int(r.get("start_frame_idx", 0) or 0)
+                    e = int(r.get("end_frame_idx", 10**9) or 10**9)
+                    if s <= frame_idx <= e:
+                        return r
+                except (ValueError, KeyError):
+                    pass
+            return rows[0]  # fall back to first row
+
+        def _parse_extrinsics(row: dict) -> tuple[np.ndarray, np.ndarray]:
+            """Camera-to-world T_world_cam → world-to-cam extrinsics (4×4)."""
+            tx = float(row["tx_world_cam"])
+            ty = float(row["ty_world_cam"])
+            tz = float(row["tz_world_cam"])
+            qx = float(row["qx_world_cam"])
+            qy = float(row["qy_world_cam"])
+            qz = float(row["qz_world_cam"])
+            qw = float(row["qw_world_cam"])
+            t_c2w = np.array([tx, ty, tz], dtype=np.float64)
+            R_c2w = SciR.from_quat([qx, qy, qz, qw]).as_matrix()
+            R_w2c = R_c2w.T
+            t_w2c = -R_w2c @ t_c2w
+            ext = np.eye(4, dtype=np.float64)
+            ext[:3, :3] = R_w2c
+            ext[:3, 3] = t_w2c
+            return ext, R_c2w
+
+        def _parse_intrinsics(row: dict) -> np.ndarray:
+            fx = float(row["intrinsics_0"])
+            fy = float(row["intrinsics_1"])
+            cx = float(row["intrinsics_2"])
+            cy = float(row["intrinsics_3"])
+            return np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+
+        # Derive the target frame index from the GT keypoints file (frame key).
+        # Used only for calibration row selection; falls back to 0.
+        gt_dir_path = gt_dir / take_name
+        gt_frame_idx = 0
+        kp_file = gt_dir_path / "keypoints_gt.json"
+        if kp_file.exists():
+            with open(kp_file) as fh:
+                kp_data = json.load(fh)
+            if kp_data:
+                gt_frame_idx = int(next(iter(kp_data)))
+
+        # Match each ghost cam_dir to a CSV cam_uid (strip non-alphanumeric to be safe).
+        import re as _re
+        self._cameras = []
+        self._gt_camera_vecs: list[np.ndarray] = []
+        valid_indices: list[int] = []
+
+        for i, cam_dir in enumerate(self._cam_dirs):
+            cam_name = cam_dir.name  # e.g. "cam01", "gp01"
+            rows = cam_rows.get(cam_name)
+            if rows is None:
+                # Try stripping leading zeros / normalising
+                for uid, r in cam_rows.items():
+                    if _re.sub(r"[^a-z0-9]", "", uid) == _re.sub(r"[^a-z0-9]", "", cam_name):
+                        rows = r
+                        break
+            if rows is None:
+                logger.warning(f"No calibration for {cam_name} — skipping camera")
+                continue
+
+            row = _best_row(rows, gt_frame_idx)
+            ext, _ = _parse_extrinsics(row)
+            K = _parse_intrinsics(row)
+            calib = {"extrinsics": ext.astype(np.float32), "intrinsics": K}
+            self._cameras.append(calib)
+            valid_indices.append(i)
+
+            vec = np.zeros(8, dtype=np.float32)
+            q_xyzw = SciR.from_matrix(ext[:3, :3]).as_quat()
+            vec[:4] = q_xyzw[[3, 0, 1, 2]]   # [qw, qx, qy, qz]
+            vec[4:7] = ext[:3, 3].astype(np.float32)
+            vec[7] = float(K[0, 0])
+            self._gt_camera_vecs.append(vec)
+
+        # Drop cam_dirs with no calibration match.
+        if len(valid_indices) < len(self._cam_dirs):
+            self._cam_dirs = [self._cam_dirs[i] for i in valid_indices]
+            self._raw = [self._raw[i] for i in valid_indices]
+
+        # Re-express camera vecs relative to cam-0.
+        if self._cameras:
+            ext0 = self._cameras[0]["extrinsics"].astype(np.float64)
+            R0, t0 = ext0[:3, :3], ext0[:3, 3]
+            self._gt_camera_vecs[0][:4] = np.array([1., 0., 0., 0.], dtype=np.float32)
+            self._gt_camera_vecs[0][4:7] = np.zeros(3, dtype=np.float32)
+            for i in range(1, len(self._cameras)):
+                ext_i = self._cameras[i]["extrinsics"].astype(np.float64)
+                R_i, t_i = ext_i[:3, :3], ext_i[:3, 3]
+                R_rel = R_i @ R0.T
+                t_rel = t_i - R_rel @ t0
+                q_xyzw = SciR.from_matrix(R_rel).as_quat()
+                self._gt_camera_vecs[i][:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)
+                self._gt_camera_vecs[i][4:7] = t_rel.astype(np.float32)
+
+    def load_ground_truth(self, **kwargs: Any) -> None:
+        """Load 17 COCO keypoints from ``keypoints_gt.json``.
+
+        Stores the single annotated person (GT person ID 0) with
+        ``keypoints_3d`` shape ``(1, 17, 3)`` in world frame.
+        After ``_match_persons_to_gt`` the key will be remapped to the
+        matching ghost pid.
+        """
+        gt_dir = Path(kwargs.get("gt_dir", ""))
+        take_name = kwargs.get("take_name", self.scene_dir.name)
+        kp_file = gt_dir / take_name / "keypoints_gt.json"
+
+        self._gt = [{}]
+        self._gt_frame_lut: dict[int, dict[int, int]] = {}
+        self._gt_kp_world: np.ndarray | None = None  # (17, 3) world frame
+
+        if not kp_file.exists():
+            logger.warning(f"keypoints_gt.json not found at {kp_file}")
+            return
+
+        with open(kp_file) as fh:
+            raw = json.load(fh)
+
+        if not raw:
+            return
+
+        frame_key, ann = next(iter(raw.items()))
+        frame_idx = int(frame_key)
+
+        kp = np.zeros((17, 3), dtype=np.float32)
+        for j, name in enumerate(_EGOEXO4D_COCO17):
+            if name in ann:
+                entry = ann[name]
+                kp[j] = [entry["x"], entry["y"], entry["z"]]
+
+        # Store raw world-frame keypoints for use in _transform_to_world_frame.
+        self._gt_kp_world = kp
+
+        # GT person id = 0 (single ego person).
+        self._gt = [
+            {0: {"frame_indices": np.array([frame_idx], dtype=np.int64),
+                 "keypoints_3d": kp[np.newaxis].copy()}}  # (1, 17, 3) world frame
+        ]
+        self._gt_frame_lut = {0: {frame_idx: 0}}
+
+    def _transform_to_world_frame(self) -> None:
+        """Convert GT keypoints from EgoExo4D world frame to cam-0 frame.
+
+        Called by the base class after ``load_ground_truth`` and ``load_cameras``.
+        Modifies ``self._gt[0][pid]["keypoints_3d"]`` in-place.
+        """
+        if not self._gt or not self._gt[0]:
+            return
+        if not self._cameras:
+            return
+
+        ext0 = self._cameras[0]["extrinsics"].astype(np.float64)
+        R0, t0 = ext0[:3, :3], ext0[:3, 3]
+
+        # x_cam0 = R0 @ x_world + t0
+        for pid, pdata in self._gt[0].items():
+            kp = pdata.get("keypoints_3d")
+            if kp is None:
+                continue
+            # kp: (N, 17, 3) — transform each frame
+            kp_world = kp.reshape(-1, 3).T.astype(np.float64)  # (3, N*17)
+            kp_cam0 = (R0 @ kp_world + t0[:, None]).T.astype(np.float32)
+            pdata["keypoints_3d"] = kp_cam0.reshape(kp.shape)
+
+    def _match_persons_to_gt(self) -> None:
+        """Match the single GT person to the closest ghost-detected person.
+
+        Uses mean GT keypoint position (cam-0 frame) vs mean ghost position
+        (``smplx_transl`` or ``pred_cam_t``, transformed to cam-0 frame).
+        """
+        from scipy.spatial.transform import Rotation as SciR
+
+        if not self._gt or not self._gt[0] or not self._cameras:
+            return
+
+        ext0 = self._cameras[0]["extrinsics"].astype(np.float64)
+        R0, t0 = ext0[:3, :3], ext0[:3, 3]
+
+        # GT person center in cam-0 frame (mean of 17 joints).
+        gt_data = self._gt[0].get(0)
+        if gt_data is None:
+            return
+        kp3 = gt_data.get("keypoints_3d")
+        if kp3 is None:
+            return
+        gt_center = kp3.reshape(-1, 3).mean(axis=0).astype(np.float64)  # (3,)
+
+        # Collect ghost person mean positions in cam-0 frame.
+        all_ghost_pids: set[int] = set()
+        for cam_persons in self._raw:
+            all_ghost_pids.update(cam_persons.keys())
+        ghost_pids = sorted(all_ghost_pids)
+        if not ghost_pids:
+            return
+
+        ghost_centers: dict[int, list[np.ndarray]] = {gpid: [] for gpid in ghost_pids}
+        for cam_idx, cam_persons in enumerate(self._raw):
+            if cam_idx >= len(self._cameras):
+                continue
+            ext_i = self._cameras[cam_idx]["extrinsics"].astype(np.float64)
+            R_i, t_i = ext_i[:3, :3], ext_i[:3, 3]
+            # cam-i → world → cam-0
+            R_i2w = R0 @ R_i.T
+            d_i = t0 - R_i2w @ t_i
+
+            for gpid, pdata in cam_persons.items():
+                tr = pdata.get("smplx_transl") if pdata.get("smplx_transl") is not None \
+                    else pdata.get("pred_cam_t")
+                if tr is None:
+                    continue
+                tr_cam0 = (tr.astype(np.float64) @ R_i2w.T + d_i)
+                ghost_centers[gpid].append(tr_cam0.mean(axis=0))
+
+        # Match closest.
+        best_gpid: int | None = None
+        best_dist = float("inf")
+        for gpid in ghost_pids:
+            pts = ghost_centers[gpid]
+            if not pts:
+                continue
+            center = np.mean(pts, axis=0)
+            dist = float(np.linalg.norm(gt_center - center))
+            if dist < best_dist:
+                best_dist = dist
+                best_gpid = gpid
+
+        if best_gpid is None:
+            logger.warning(f"No ghost person found for GT in {self.scene_dir.name}")
+            self._gt = [{}]
+            return
+
+        logger.info(
+            f"{self.scene_dir.name}: GT ego person → ghost pid {best_gpid} "
+            f"(dist={best_dist:.3f} m)"
+        )
+        # Remap GT person 0 → matched ghost pid.
+        self._gt = [{best_gpid: self._gt[0][0]}]
+        self._gt_frame_lut = {best_gpid: self._gt_frame_lut[0]}
+        if self._restrict_to_gt_persons:
+            self._gt_matched_ghost_pids = {best_gpid}
+
+    def build_gt_targets(
+        self,
+        cam_idx: int,
+        person_slot: int,
+        pid: int,
+        local_idx: int,
+        t: int,
+        pose_out: np.ndarray,
+        shape_out: np.ndarray,
+        camera_out: np.ndarray,
+        kp3d_out: np.ndarray,
+        transl_out: np.ndarray,
+    ) -> None:
+        """Fill GT camera token and 17 COCO keypoints.
+
+        Camera token: static COLMAP/gopro_calibs extrinsic (same for all frames).
+        Keypoints: 17 COCO joints written to ``kp3d_out[..., :17, :]``.
+        Pose/shape/betas: not available from EgoExo4D — left at zero.
+        """
+        if cam_idx < len(self._gt_camera_vecs) and camera_out is not None:
+            camera_out[:] = self._gt_camera_vecs[cam_idx]
+
+        # Keypoints only stored in cam-0.
+        if cam_idx != 0:
+            return
+
+        if cam_idx >= len(self._gt) or pid not in self._gt[cam_idx]:
+            return
+
+        # Map local_idx → global frame → GT array index.
+        raw_fi = (
+            self._raw[cam_idx].get(pid, {}).get("frame_indices")
+            if cam_idx < len(self._raw)
+            else None
+        )
+        if raw_fi is None or local_idx >= len(raw_fi):
+            return
+
+        global_frame = int(raw_fi[local_idx])
+        gt_lut = self._gt_frame_lut.get(pid, {})
+        gt_idx = gt_lut.get(global_frame)
+        if gt_idx is None:
+            return
+
+        kp3 = self._gt[cam_idx][pid].get("keypoints_3d")
+        if kp3 is not None and kp3d_out is not None:
+            n = min(kp3d_out.shape[-2], kp3[gt_idx].shape[0])
+            kp3d_out[..., :n, :] = kp3[gt_idx][:n]
 
 
 # ======================================================================
@@ -811,7 +1145,9 @@ class RICHFusionDatapoint(FusionDatapoint):
         # so they never pollute the GT matching step.
         if self._raw:
             num_cams = len(self._raw)
-            min_cams = max(1, num_cams - 1)
+            min_cams = kwargs.get("min_foreground_cams")
+            if min_cams is None:
+                min_cams = max(1, num_cams - 1)
             cam_count: dict[int, int] = {}
             for cam in self._raw:
                 for pid in cam:
@@ -1245,7 +1581,8 @@ class RICHFusionDatapoint(FusionDatapoint):
         }
         self._gt = [new_gt_dict]
         self._gt_frame_lut = new_lut
-        self._gt_matched_ghost_pids = set(new_gt_dict.keys())
+        if self._restrict_to_gt_persons:
+            self._gt_matched_ghost_pids = set(new_gt_dict.keys())
         self._rich_to_ghost: dict[int, int] = rich_to_ghost  # rich_pid → ghost_pid
 
         unmatched = set(ghost_pids) - set(rich_to_ghost.values())
@@ -2081,7 +2418,8 @@ class EgoHumansFusionDatapoint(FusionDatapoint):
         }
         self._gt = [new_gt]
         self._gt_frame_lut = new_lut
-        self._gt_matched_ghost_pids = set(new_gt.keys())
+        if self._restrict_to_gt_persons:
+            self._gt_matched_ghost_pids = set(new_gt.keys())
 
         unmatched = set(ghost_pids) - set(ego_to_ghost.values())
         if unmatched:
@@ -2493,7 +2831,7 @@ def build_fusion_dataloader(
         RICH requires ``rich_data_root`` (path to the RICH split root).
     """
     _REGISTRY: dict[str, type[FusionDatapoint]] = {
-        "egoexo": EgoExoFusionDatapoint,
+        "egoexo4d_gt": EgoExo4DGTFusionDatapoint,
         "rich": RICHFusionDatapoint,
         "dna": DNARenderingFusionDatapoint,
     }

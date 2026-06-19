@@ -500,111 +500,49 @@ class Scene:
 # Dataset
 # ======================================================================
 
-class EgoExoSceneDataset(Dataset):
-    """PyTorch dataset where each item is one EgoExo4D scene.
+class EgoExo4DSceneDataset(Dataset):
+    """Dataset for EgoExo4D single-frame extractions.
 
-    All ``Scene`` and ``Video`` objects are built at init time so that
-    metadata (fps, resolution, frame count, etc.) is immediately available.
-    Actual frame pixels are still decoded lazily — nothing heavy is loaded
-    until you explicitly request frames from a ``Video``.
+    Expected layout (produced by ``utilities/extract_egoexo4d_frames.py``)::
 
-    If *frames_root* is provided, frames are extracted for every video
-    during ``__init__`` (skipped if already present) and each
-    ``Video.frames_dir`` is set to the extraction target.  Downstream
-    consumers (e.g. ``PersonSegmenter``) will then find pre-extracted
-    frames immediately without doing any extraction themselves.  This also
-    makes the pipeline work with image-only datasets that never had a
-    video file.
+        frames_root/
+            cmu_soccer06_3/
+                cam01/
+                    frame_001426.jpg
+                cam02/
+                    frame_001426.jpg
+            ...
+
+    Each take directory becomes one :class:`Scene`; each ``cam*/`` sub-directory
+    becomes one :class:`Video` (image-sequence mode, single frame).
 
     Parameters
     ----------
-    data_root : str | Path
-        Root directory containing one sub-folder per scene.
-    resolution : tuple[int, int] | None
-        (H, W) to resize frames during decoding.  None keeps original.
-    video_extensions : tuple[str, ...]
-        File extensions treated as video files.
-    preextract_frames : bool
-        If ``True``, extract frames for every video during ``__init__``
-        (skipped if already present).  Frames are always written to the
-        canonical co-located path ``<data_root>/<scene>/<video_id>/frames/``.
+    frames_root : str | Path
+        Root directory containing one sub-folder per take.
+    slice : int | None
+        Keep only the first *slice* takes (for quick debugging).
     """
 
-    def __init__(
-        self,
-        data_root: str | Path,
-        resolution: tuple[int, int] | None = None,
-        video_extensions: tuple[str, ...] = (".mp4", ".mkv", ".avi"),
-        slice: int | None = None,
-        exclude_ego: bool = True,
-        preextract_frames: bool = True,
-    ):
-        self.data_root = Path(data_root)
-        self.resolution = resolution
-        self.video_extensions = video_extensions
-        self.exclude_ego = exclude_ego
-
-        # Discover scene directories and build Scene objects up front.
-        scene_dirs = sorted(
-            p for p in self.data_root.iterdir()
-            if p.is_dir() and self._has_videos(p)
-        )
+    def __init__(self, frames_root: str | Path, slice: int | None = None):
+        self.frames_root = Path(frames_root)
+        take_dirs = sorted(p for p in self.frames_root.iterdir() if p.is_dir())
         if slice is not None:
-            scene_dirs = scene_dirs[:slice]
+            take_dirs = take_dirs[:slice]
 
-        if len(scene_dirs) == 0:
-            raise FileNotFoundError(
-                f"No scene folders with videos found under {self.data_root}"
-            )
-
-        # Collect all (scene_dir, video_path) pairs for parallel loading.
-        scene_video_paths: list[tuple[Path, list[Path]]] = []
-        for scene_dir in scene_dirs:
-            vid_paths = [
-                p for p in self._list_videos(scene_dir)
-                if not (self.exclude_ego and p.stem.startswith("aria"))
-                and not p.stem.startswith("ego_preview")
-            ]
-            scene_video_paths.append((scene_dir, vid_paths))
-
-        total_videos = sum(len(vps) for _, vps in scene_video_paths)
-        print(f"Loading metadata for {total_videos} videos across {len(scene_dirs)} scenes...")
-
-        # Load all Video objects in parallel using threads (I/O-bound).
-        # Maps video_path -> Video object.
-        all_video_paths = [
-            vp for _, vps in scene_video_paths for vp in vps
-        ]
-        video_map: dict[Path, Video] = {}
-        with ThreadPoolExecutor(max_workers=min(32, len(all_video_paths) or 1)) as pool:
-            futures = {
-                pool.submit(Video, p, self.resolution): p
-                for p in all_video_paths
-            }
-            for future in tqdm.tqdm(
-                as_completed(futures), total=len(futures), desc="Loading videos"
-            ):
-                path = futures[future]
-                video_map[path] = future.result()
-
-        # Assemble scenes in the original order.
         self.scenes: list[Scene] = []
-        for scene_dir, vid_paths in scene_video_paths:
-            videos = [video_map[p] for p in vid_paths]
-            self.scenes.append(Scene(scene_id=scene_dir.name, videos=videos))
+        for take_dir in take_dirs:
+            cam_dirs = sorted(
+                p for p in take_dir.iterdir()
+                if p.is_dir() and any(p.glob("*.jpg"))
+            )
+            if not cam_dirs:
+                continue
+            videos = [Video(path=cam_dir) for cam_dir in cam_dirs]
+            self.scenes.append(Scene(scene_id=take_dir.name, videos=videos))
 
-        print(f"Dataset created: {len(self.scenes)} scenes, "
-              f"{sum(len(s) for s in self.scenes)} videos total")
-
-        # Pre-extract frames to the canonical co-located path if requested.
-        if preextract_frames:
-            total_vids = sum(len(s) for s in self.scenes)
-            print(f"Pre-extracting frames for {total_vids} videos (co-located with data) ...")
-            for scene in tqdm.tqdm(self.scenes, desc="Scenes"):
-                for video in tqdm.tqdm(scene.videos, desc=f"  {scene.scene_id}", leave=False):
-                    actual_dir, _ = video.extract_frames(video.frames_home)
-                    video.frames_dir = actual_dir
-            print("Frame extraction complete.")
+        print(f"EgoExo4DSceneDataset: {len(self.scenes)} takes, "
+              f"{sum(len(s) for s in self.scenes)} camera views total")
 
     def __len__(self) -> int:
         return len(self.scenes)
@@ -614,19 +552,6 @@ class EgoExoSceneDataset(Dataset):
 
     def get_scene_ids(self) -> list[str]:
         return [s.scene_id for s in self.scenes]
-
-    def _list_videos(self, directory: Path) -> list[Path]:
-        return sorted(
-            p for p in directory.rglob("*")
-            if p.is_file() and p.suffix.lower() in self.video_extensions
-        )
-
-    def _has_videos(self, directory: Path) -> bool:
-        return any(
-            p.suffix.lower() in self.video_extensions
-            for p in directory.rglob("*")
-            if p.is_file()
-        )
 
 
 class RichDataset(Dataset):
