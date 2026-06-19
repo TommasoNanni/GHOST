@@ -46,6 +46,8 @@ def _build_scene(
     for cam_dir in sorted(scene_dir.iterdir()):
         if not cam_dir.is_dir():
             continue
+        if cam_dir.name == "cam_10":
+            continue
         body_dir = cam_dir / "body_data"
         if not body_dir.exists():
             continue

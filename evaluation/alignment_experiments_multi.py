@@ -14,6 +14,8 @@ dropping the whole scene (e.g. a camera with track-stealing artefacts).
 
 Usage (GPU node):
     pixi run python evaluation/alignment_experiments_multi.py
+    pixi run python evaluation/alignment_experiments_multi.py --scene Pavallion_002_plankjack
+    pixi run python evaluation/alignment_experiments_multi.py --scene BBQ_001_juggle ParkingLot1_005_pushup3
 """
 
 from __future__ import annotations
@@ -32,8 +34,8 @@ import torch
 from synchronize_videos.synchronizer import Synchronizer
 from utilities.body_data import load_person_smplx_pose, load_person_smplx_joints
 
-VERBOSE     = True     # set True to see per-person DTW offsets and shift distributions
-SCENES_ROOT = Path("/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich11_segmentation_test")
+VERBOSE     = False     # set True to see per-person DTW offsets and shift distributions
+SCENES_ROOT = Path("/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train")
 # Scene folder names (relative to SCENES_ROOT) to skip entirely.
 # Add scenes here when you know cross-view re-ID is bad on them.
 SKIP_SCENES: list[str] = [
@@ -42,12 +44,13 @@ SKIP_SCENES: list[str] = [
 # When non-empty, only these scenes are evaluated (overrides SKIP_SCENES).
 # Useful for focused diagnosis on specific failing cases.
 ONLY_SCENES: list[str] = [
-    # "BBQ_001_juggle",              # MAE=35.00 — periodic (juggle)
-    # "ParkingLot1_005_pushup3",     # MAE=40.12 — very periodic (pushup)
-    # "ParkingLot1_002_overfence2",  # MAE=18.62 — transient motion, unclear why bad
-    # "Pavallion_002_plankjack",     # MAE=5.94  — mixed: some pairs fine, some badly wrong
-    # "Pavallion_003_018_tossball",  # MAE=45.53 — catastrophic (brief motion in long static)
-    # "LectureHall_018_wipingchairs1",  # MAE=0.29 — control (should be perfect)
+    "BBQ_001_guitar",
+    "BBQ_001_juggle",
+    "ParkingLot1_002_burpee3",
+    "ParkingLot1_002_overfence1",
+    "ParkingLot1_002_overfence2",
+    "ParkingLot1_002_pushup1",
+    "ParkingLot1_002_stretching1",
 ]
 # Per-scene cameras to exclude (e.g. track-stealing artefacts).
 # The scene is still evaluated with its remaining cameras.
@@ -429,17 +432,26 @@ def run_scene(
     }
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--scene", nargs="+", metavar="SCENE",
+                        help="One or more scene names to evaluate (default: all)")
+    args = parser.parse_args()
+
+    cli_scenes: list[str] = args.scene or []
+    effective_only = cli_scenes or ONLY_SCENES
+
     logger.info(f"Scenes root: {SCENES_ROOT}")
     logger.info(f"Device: {DEVICE}  |  trials per scene: {N_TRIALS}  |  max_shift: {MAX_SHIFT}")
-    if ONLY_SCENES:
-        logger.info(f"Running only scenes: {ONLY_SCENES}")
+    if effective_only:
+        logger.info(f"Running only scenes: {effective_only}")
     elif SKIP_SCENES:
         logger.info(f"Skipping scenes: {SKIP_SCENES}")
 
     scene_dirs = sorted(
         d for d in SCENES_ROOT.iterdir()
         if d.is_dir() and (
-            d.name in ONLY_SCENES if ONLY_SCENES
+            d.name in effective_only if effective_only
             else d.name not in SKIP_SCENES
         )
     )

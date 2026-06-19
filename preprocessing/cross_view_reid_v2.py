@@ -54,6 +54,28 @@ class CrossVideoReidentifierV2:
         When no affine is available, pairs below this threshold are rejected.
     match_rmse_thr : float
         Maximum world-frame RMSE (m) to accept a final matched pair.
+        Compared against the overlap-adjusted RMSE (see overlap_penalty_k).
+    overlap_penalty_k : float
+        Small-sample evidence penalty. Pair/δ RMSEs are multiplied by
+        (1 + k/√N) / (1 + k/√overlap_ref_frames), clamped to ≥1, where N is the
+        number of overlapping frames. Short overlaps are easier to fit (same
+        parameter count, fewer constraints), so their RMSE is inflated to make
+        candidates with different overlap sizes comparable.
+    overlap_ref_frames : int
+        Overlap length at which the penalty factor is exactly 1 (no inflation).
+    delta_prior_weight, delta_prior_scale : float
+        Prior over the camera-pair time offset δ: candidate δs pay an evidence
+        cost of delta_prior_weight metres per delta_prior_scale frames of |δ|.
+        A large δ can still win, but must beat small-δ candidates by this
+        margin. Set delta_prior_scale to the physically expected sync error of
+        the dataset (small for hardware-synced data such as RICH).
+    weak_overlap_frames, strong_reject_factor : int, float
+        A geometric rejection is *final* only when backed by strong evidence:
+        overlap ≥ weak_overlap_frames AND adjusted RMSE ≥ match_rmse_thr ×
+        strong_reject_factor. Weak rejections (tiny/zero overlap, or RMSE in
+        the marginal band) are uninformative and fall back to appearance
+        similarity (threshold = `threshold`), with edge confidence capped low
+        so geometric edges win Union-Find conflicts.
     min_anchor_std : float
         Minimum joint temporal std (m) for a track to count as dynamic.
         Static-only scenes fall back to best-RMSE anchor.
@@ -78,6 +100,12 @@ class CrossVideoReidentifierV2:
     _HIGH_APP_THR: float = 0.60
     _LOW_APP_THR: float = 0.35
     _MATCH_RMSE_THR: float = 0.60
+    _OVERLAP_PENALTY_K: float = 5.0
+    _OVERLAP_REF_FRAMES: int = 500
+    _DELTA_PRIOR_WEIGHT: float = 0.0   # disabled — consensus offsets replace the prior
+    _DELTA_PRIOR_SCALE: float = 30.0
+    _WEAK_OVERLAP_FRAMES: int = 100
+    _STRONG_REJECT_FACTOR: float = 1.5
     _MIN_ANCHOR_STD: float = 0.05
     _RANSAC_ANCHOR_THR: float = 0.20
     _INLIER_THR: float = 0.25
@@ -96,6 +124,12 @@ class CrossVideoReidentifierV2:
         high_app_thr: float | None = None,
         low_app_thr: float | None = None,
         match_rmse_thr: float | None = None,
+        overlap_penalty_k: float | None = None,
+        overlap_ref_frames: int | None = None,
+        delta_prior_weight: float | None = None,
+        delta_prior_scale: float | None = None,
+        weak_overlap_frames: int | None = None,
+        strong_reject_factor: float | None = None,
         min_anchor_std: float | None = None,
         ransac_anchor_thr: float | None = None,
         inlier_thr: float | None = None,
@@ -115,6 +149,24 @@ class CrossVideoReidentifierV2:
         self.low_app_thr = low_app_thr if low_app_thr is not None else self._LOW_APP_THR
         self.match_rmse_thr = (
             match_rmse_thr if match_rmse_thr is not None else self._MATCH_RMSE_THR
+        )
+        self.overlap_penalty_k = (
+            overlap_penalty_k if overlap_penalty_k is not None else self._OVERLAP_PENALTY_K
+        )
+        self.overlap_ref_frames = (
+            overlap_ref_frames if overlap_ref_frames is not None else self._OVERLAP_REF_FRAMES
+        )
+        self.delta_prior_weight = (
+            delta_prior_weight if delta_prior_weight is not None else self._DELTA_PRIOR_WEIGHT
+        )
+        self.delta_prior_scale = (
+            delta_prior_scale if delta_prior_scale is not None else self._DELTA_PRIOR_SCALE
+        )
+        self.weak_overlap_frames = (
+            weak_overlap_frames if weak_overlap_frames is not None else self._WEAK_OVERLAP_FRAMES
+        )
+        self.strong_reject_factor = (
+            strong_reject_factor if strong_reject_factor is not None else self._STRONG_REJECT_FACTOR
         )
         self.min_anchor_std = (
             min_anchor_std if min_anchor_std is not None else self._MIN_ANCHOR_STD
@@ -179,6 +231,12 @@ class CrossVideoReidentifierV2:
             high_app_thr=self.high_app_thr,
             low_app_thr=self.low_app_thr,
             match_rmse_thr=self.match_rmse_thr,
+            overlap_penalty_k=self.overlap_penalty_k,
+            overlap_ref_frames=self.overlap_ref_frames,
+            delta_prior_weight=self.delta_prior_weight,
+            delta_prior_scale=self.delta_prior_scale,
+            weak_overlap_frames=self.weak_overlap_frames,
+            strong_reject_factor=self.strong_reject_factor,
             min_anchor_std=self.min_anchor_std,
             ransac_anchor_thr=self.ransac_anchor_thr,
             inlier_thr=self.inlier_thr,
@@ -282,6 +340,12 @@ class CrossVideoReidentifierV2:
         high_app_thr: float,
         low_app_thr: float,
         match_rmse_thr: float,
+        overlap_penalty_k: float,
+        overlap_ref_frames: int,
+        delta_prior_weight: float,
+        delta_prior_scale: float,
+        weak_overlap_frames: int,
+        strong_reject_factor: float,
         min_anchor_std: float,
         ransac_anchor_thr: float,
         inlier_thr: float,
@@ -734,6 +798,28 @@ class CrossVideoReidentifierV2:
 
         # ── Geometric helpers ──────────────────────────────────────────────────
 
+        def _overlap_factor(n_frames: int) -> float:
+            """Evidence inflation for short overlaps; 1.0 at ≥ overlap_ref_frames.
+
+            A fit over few frames achieves a low RMSE more easily (same parameter
+            count, fewer constraints), so its RMSE is multiplied by
+            (1 + k/√N) / (1 + k/√N_ref), clamped to ≥ 1. Pairs with a full-length
+            overlap keep their raw RMSE, preserving match_rmse_thr semantics.
+            """
+            if n_frames <= 0:
+                return float("inf")
+            raw = 1.0 + overlap_penalty_k / np.sqrt(float(n_frames))
+            ref = 1.0 + overlap_penalty_k / np.sqrt(float(overlap_ref_frames))
+            return max(raw / ref, 1.0)
+
+        def _delta_prior_cost(delta: int) -> float:
+            """Evidence cost (m) of a candidate camera-pair offset δ.
+
+            A large δ may still win, but must beat small-δ candidates by this
+            margin: delta_prior_weight metres per delta_prior_scale frames.
+            """
+            return delta_prior_weight * abs(int(delta)) / delta_prior_scale
+
         def _get_aligned_flat(pid_b, vid_b, pid_a, vid_a, delta):
             """Common-frame keypoints, flat (N*70, 3), or (None, None)."""
             kb = person_kpts3d.get(vid_b, {})
@@ -853,12 +939,15 @@ class CrossVideoReidentifierV2:
             r = float(np.sqrt(((pred - dst) ** 2).sum(1).mean()))
             return (r if np.isfinite(r) else float("inf")), lam
 
-        # ── Combined matching: xcorr peaks → ALS per candidate → Hungarian ──────
+        # ── Combined matching: xcorr peaks → ALS per candidate → consensus δ ────
 
-        def _match_with_combined_approach(
-            vid_a: str, vid_b: str
-        ) -> tuple[list[tuple[int, int, float]], int]:
-            """Returns (accepted_pairs, best_delta)."""
+        def _pair_delta_candidates(vid_a: str, vid_b: str) -> dict:
+            """Stages 1–2 for one camera pair: appearance sim + scored δ candidates.
+
+            Does NOT commit to a winning δ — all scored candidates are returned so
+            that _solve_consensus_offsets can choose cycle-consistent offsets
+            across the whole camera graph.
+            """
             pids_a = person_pids[vid_a]
             pids_b = person_pids[vid_b]
 
@@ -915,9 +1004,15 @@ class CrossVideoReidentifierV2:
             frames_b_all: set[int] = set()
             for _pb2 in kd_b:
                 frames_b_all.update(int(_f) for _f in kd_b[_pb2][0])
+            # Video-level overlap per candidate δ — used both for the hard filter
+            # below and for the overlap penalty in the δ-selection score.
+            video_overlap: dict[int, int] = {
+                dk: sum(1 for _f in frames_b_all if _f + dk in frames_a_all)
+                for dk in delta_candidates
+            }
             filtered = [
                 dk for dk in delta_candidates
-                if sum(1 for _f in frames_b_all if _f + dk in frames_a_all) >= MIN_DELTA_OVERLAP_FRAMES
+                if video_overlap[dk] >= MIN_DELTA_OVERLAP_FRAMES
             ]
             if filtered:
                 delta_candidates = filtered
@@ -947,13 +1042,13 @@ class CrossVideoReidentifierV2:
             ]
 
             # Stage 2: ALS evaluation for each candidate δ.
-            best_delta = delta_candidates[0] if delta_candidates else 0
-            best_R = np.eye(3, dtype=np.float64)
-            best_t = np.zeros(3, dtype=np.float64)
-            best_rmse = float("inf")
-
+            # Each candidate's evidence score is
+            #     rmse_k × overlap_factor(N_k)  +  delta_prior_cost(δ_k)
+            # (prior currently disabled). All scored candidates are kept; the
+            # cross-camera consensus solve picks the final offsets.
             pids_b_s = sorted(pids_b)
             pids_a_s = sorted(pids_a)
+            cands: list[dict] = []
 
             for dk in delta_candidates:
                 # First ALS pass: seed with only the best appearance pair so that
@@ -979,20 +1074,166 @@ class CrossVideoReidentifierV2:
                 if res2 is not None:
                     R_k, t_k, _, rmse_k = res2
                 else:
-                    _, _, _, rmse_k = res[0], res[1], res[2], res[3]
+                    rmse_k = res[3]
 
-                if rmse_k < best_rmse:
-                    best_rmse, best_delta = rmse_k, dk
-                    best_R, best_t = R_k, t_k
+                n_k = video_overlap.get(dk, 0)
+                score_k = rmse_k * _overlap_factor(n_k) + _delta_prior_cost(dk)
+                logging.info(
+                    f"    [{vid_a}↔{vid_b}] δ={dk}  raw_rmse={rmse_k:.3f}  "
+                    f"overlap={n_k}  score={score_k:.3f}"
+                )
+                cands.append({"delta": int(dk), "score": float(score_k),
+                              "rmse": float(rmse_k), "R": R_k, "t": t_k})
+
+            cands.sort(key=lambda c: c["score"])
+            if cands:
+                logging.info(
+                    f"  [{vid_a}↔{vid_b}] pair-local best δ={cands[0]['delta']}  "
+                    f"score={cands[0]['score']:.3f}"
+                )
+            return {
+                "pids_a": pids_a, "pids_b": pids_b,
+                "pids_a_s": pids_a_s, "pids_b_s": pids_b_s,
+                "sim_mat": sim_mat, "best_seed": best_seed,
+                "frames_a_all": frames_a_all, "frames_b_all": frames_b_all,
+                "cands": cands,
+            }
+
+        def _solve_consensus_offsets(
+            pair_data: dict[tuple[str, str], dict],
+        ) -> dict[tuple[str, str], int]:
+            """Cycle-consistent camera-pair offsets via a Kruskal spanning forest.
+
+            δ is a property of the camera pair (a clock offset), so all pairwise
+            estimates must satisfy δ(a→c) = δ(a→b) + δ(b→c). Per-camera clocks
+            are built by adding camera pairs most-confident-first (lowest best
+            score); an edge only sets the offset between two previously
+            unconnected components. Unreliable pairs therefore never average
+            against reliable ones — they are used at most once, and only when
+            nothing better connects their cameras.
+
+            Convention: a candidate δ for pair (vid_a, vid_b) means
+            frame_a = frame_b + δ, i.e. clock_a − clock_b = δ.
+            """
+            scored = sorted(
+                (pd["cands"][0]["score"], key, pd["cands"][0]["delta"])
+                for key, pd in pair_data.items() if pd["cands"]
+            )
+            if not scored:
+                return {key: 0 for key in pair_data}
+
+            clock: dict[str, float] = {v: 0.0 for v in active_vids}
+            comp: dict[str, str] = {v: v for v in active_vids}
+
+            def _root(v: str) -> str:
+                while comp[v] != v:
+                    comp[v] = comp[comp[v]]
+                    v = comp[v]
+                return v
+
+            for s, (va, vb), d in scored:
+                ra, rb = _root(va), _root(vb)
+                if ra == rb:
+                    continue  # cameras already connected by more confident pairs
+                # Shift vb's whole component so that clock[va] − clock[vb] = d.
+                shift = clock[va] - d - clock[vb]
+                for v in active_vids:
+                    if _root(v) == rb:
+                        clock[v] += shift
+                comp[rb] = ra
+                logging.info(
+                    f"    consensus tree += {va}↔{vb}  δ={d}  score={s:.3f}"
+                )
 
             logging.info(
-                f"  [{vid_a}↔{vid_b}] best δ*={best_delta}  RMSE={best_rmse:.3f}"
+                f"Scene {scene_id}: consensus clocks "
+                + "  ".join(f"{v}={clock[v]:+.1f}" for v in active_vids)
+            )
+            return {
+                key: int(round(clock[key[0]] - clock[key[1]]))
+                for key in pair_data
+            }
+
+        def _fit_pair_at_delta(
+            vid_a: str, vid_b: str, pdata: dict, delta_bar: int
+        ) -> tuple[np.ndarray | None, np.ndarray | None, float, int, float]:
+            """Two-pass ALS fit of one camera pair at a fixed δ.
+
+            Reuses the cached candidate fit when δ was already scored in stage 2.
+            Returns (R, t, rmse, overlap_frames, score); R is None on failure.
+            """
+            pids_a_s, pids_b_s = pdata["pids_a_s"], pdata["pids_b_s"]
+            n_bar = sum(1 for _f in pdata["frames_b_all"]
+                        if _f + delta_bar in pdata["frames_a_all"])
+
+            cached = next((c for c in pdata["cands"] if c["delta"] == delta_bar), None)
+            if cached is not None:
+                R_b, t_b, rmse_bar = cached["R"], cached["t"], cached["rmse"]
+            else:
+                R_b, t_b, rmse_bar = None, None, float("inf")
+                res = _constrained_fit(pdata["best_seed"], vid_b, vid_a, delta_bar)
+                if res is not None:
+                    R_k, t_k = res[0], res[1]
+                    rm = np.full((len(pids_b_s), len(pids_a_s)), 1e6)
+                    for ii, pb in enumerate(pids_b_s):
+                        for jj, pa in enumerate(pids_a_s):
+                            r, _ = _pair_rmse_with_Rt(
+                                R_k, t_k, pb, vid_b, pa, vid_a, delta_bar
+                            )
+                            rm[ii, jj] = r if np.isfinite(r) else 1e6
+                    ri, ci = linear_sum_assignment(rm)
+                    res2 = _constrained_fit(
+                        [(pids_b_s[ri[k2]], pids_a_s[ci[k2]]) for k2 in range(len(ri))],
+                        vid_b, vid_a, delta_bar,
+                    )
+                    if res2 is not None:
+                        R_b, t_b, _, rmse_bar = res2
+                    else:
+                        R_b, t_b, _, rmse_bar = res
+
+            score_bar = (
+                rmse_bar * _overlap_factor(n_bar) + _delta_prior_cost(delta_bar)
+                if np.isfinite(rmse_bar) else float("inf")
+            )
+            return R_b, t_b, rmse_bar, n_bar, score_bar
+
+        def _finalize_pair(
+            vid_a: str, vid_b: str, pdata: dict, delta_options: list[int]
+        ) -> tuple[list[tuple[int, int, float]], int]:
+            """Referee: fit at each offered offset and keep the best evidence.
+
+            delta_options = [pair-local best δ, consensus δ̄]. The consensus can
+            override a pair only by *winning on fitted evidence* — a pair is
+            never forced onto an offset that scores worse than its own best,
+            so the consensus cannot poison a healthy pair.
+            """
+            sim_mat = pdata["sim_mat"]
+            pids_a, pids_b = pdata["pids_a"], pdata["pids_b"]
+            pids_a_s, pids_b_s = pdata["pids_a_s"], pdata["pids_b_s"]
+
+            best_R, best_t = None, None
+            rmse_bar, score_bar, delta_bar = float("inf"), float("inf"), 0
+            for d_opt in dict.fromkeys(int(d) for d in delta_options):
+                R_o, t_o, rmse_o, n_o, score_o = _fit_pair_at_delta(
+                    vid_a, vid_b, pdata, d_opt
+                )
+                logging.info(
+                    f"  [{vid_a}↔{vid_b}] option δ={d_opt}  RMSE={rmse_o:.3f}  "
+                    f"overlap={n_o}  score={score_o:.3f}"
+                )
+                if score_o < score_bar:
+                    best_R, best_t = R_o, t_o
+                    rmse_bar, score_bar, delta_bar = rmse_o, score_o, d_opt
+
+            logging.info(
+                f"  [{vid_a}↔{vid_b}] final δ̄={delta_bar}  RMSE={rmse_bar:.3f}  "
+                f"score={score_bar:.3f}"
             )
 
-            # Fallback to pure appearance when geometry fails.
-            if best_rmse > match_rmse_thr * 3:
+            # Fallback to pure appearance when geometry fails at δ̄.
+            if best_R is None or score_bar > match_rmse_thr * 3:
                 logging.info(
-                    f"  [{vid_a}↔{vid_b}] geometry failed — appearance-only fallback"
+                    f"  [{vid_a}↔{vid_b}] geometry failed at δ̄ — appearance-only fallback"
                 )
                 row_ind, col_ind = linear_sum_assignment(1.0 - sim_mat)
                 return [
@@ -1001,63 +1242,119 @@ class CrossVideoReidentifierV2:
                     if sim_mat[r, c] >= cross_view_reid_threshold
                 ], 0
 
-            # Stage 4: greedy assignment by RMSE under (R*, t*) at δ*.
+            # Stage 4: greedy assignment by overlap-adjusted RMSE under (R, t) at δ̄.
             # All (pb, pa) pairs are evaluated; those below match_rmse_thr are
-            # candidates. We sort by RMSE ascending and greedily assign: take the
-            # cheapest valid pair, mark both persons as used, repeat.
-            # This maximises the number of accepted pairs without letting a
-            # cheap-but-wrong global assignment (lower total cost) block correct
-            # low-RMSE pairs — which is the failure mode of pure Hungarian here.
-            all_pairs: list[tuple[float, float, int, int]] = []  # (rmse, lam, pb, pa)
+            # candidates. We sort ascending and greedily assign: take the cheapest
+            # valid pair, mark both persons as used, repeat. This maximises the
+            # number of accepted pairs without letting a cheap-but-wrong global
+            # assignment (lower total cost) block correct low-RMSE pairs — which
+            # is the failure mode of pure Hungarian here.
+            all_pairs: list[tuple[float, float, float, int, int, int]] = []  # (rmse_adj, raw, lam, n_fr, pb, pa)
             for pb in pids_b_s:
                 for pa in pids_a_s:
-                    r, lam = _pair_rmse_with_Rt(best_R, best_t, pb, vid_b, pa, vid_a, best_delta)
+                    r, lam = _pair_rmse_with_Rt(best_R, best_t, pb, vid_b, pa, vid_a, delta_bar)
                     n_fr = 0
-                    src, _ = _get_aligned_flat(pb, vid_b, pa, vid_a, best_delta)
+                    src, _ = _get_aligned_flat(pb, vid_b, pa, vid_a, delta_bar)
                     if src is not None:
                         n_fr = len(src) // 70
+                    r_adj = r * _overlap_factor(n_fr) if np.isfinite(r) else float("inf")
                     logging.info(
-                        f"    {vid_b}:P{pb} → {vid_a}:P{pa}  frames={n_fr}  RMSE={r:.3f}  λ={lam:.3f}"
+                        f"    {vid_b}:P{pb} → {vid_a}:P{pa}  frames={n_fr}  RMSE={r:.3f}  "
+                        f"adj={r_adj:.3f}  λ={lam:.3f}"
                     )
-                    all_pairs.append((r if np.isfinite(r) else float("inf"), lam, pb, pa))
+                    all_pairs.append((r_adj, r, lam, n_fr, pb, pa))
 
             all_pairs.sort(key=lambda x: x[0])
             used_b: set[int] = set()
             used_a: set[int] = set()
             accepted: list[tuple[int, int, float]] = []
-            for rmse_val, lam, pb, pa in all_pairs:
-                if rmse_val >= match_rmse_thr:
+            delta_cost = _delta_prior_cost(delta_bar)
+            for rmse_adj, rmse_raw, lam, n_fr, pb, pa in all_pairs:
+                if rmse_adj >= match_rmse_thr:
                     break  # sorted, so no more valid pairs
                 if pb in used_b or pa in used_a:
                     continue
                 used_b.add(pb)
                 used_a.add(pa)
                 logging.info(
-                    f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_val:.3f} → accepted"
+                    f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_raw:.3f} "
+                    f"adj={rmse_adj:.3f} → accepted"
                 )
-                accepted.append((pa, pb, float(1.0 - rmse_val / match_rmse_thr)))
+                # Edge confidence for Union-Find conflict resolution (geometric
+                # quality at the consensus δ̄; prior term is currently 0).
+                accepted.append(
+                    (pa, pb, float(1.0 - (rmse_adj + delta_cost) / match_rmse_thr))
+                )
 
-            # Log rejected pairs (assigned persons that didn't make the cut).
-            for rmse_val, lam, pb, pa in all_pairs:
+            # Appearance rescue: a geometric rejection is only *final* when it
+            # is backed by strong evidence (enough overlapping frames AND an
+            # RMSE clearly past the bar). With tiny/zero overlap or a marginal
+            # RMSE, geometry is uninformative — for those pairs fall back to
+            # appearance similarity. Rescued edges get confidence capped at
+            # 0.25 so geometry-backed edges win Union-Find conflicts.
+            ia_idx = {pa: i for i, pa in enumerate(pids_a)}
+            ib_idx = {pb: i for i, pb in enumerate(pids_b)}
+            rescue: list[tuple[float, int, int]] = []
+            for rmse_adj, rmse_raw, lam, n_fr, pb, pa in all_pairs:
                 if pb in used_b or pa in used_a:
                     continue
-                if np.isfinite(rmse_val):
+                if pa not in ia_idx or pb not in ib_idx:
+                    continue
+                strong_reject = (
+                    n_fr >= weak_overlap_frames
+                    and rmse_adj >= match_rmse_thr * strong_reject_factor
+                )
+                if strong_reject:
+                    continue
+                sim = float(sim_mat[ia_idx[pa], ib_idx[pb]])
+                if sim >= cross_view_reid_threshold:
+                    rescue.append((sim, pb, pa))
+            rescue.sort(reverse=True)
+            for sim, pb, pa in rescue:
+                if pb in used_b or pa in used_a:
+                    continue
+                used_b.add(pb)
+                used_a.add(pa)
+                conf = 0.25 * (sim - cross_view_reid_threshold) / max(
+                    1e-6, 1.0 - cross_view_reid_threshold
+                )
+                logging.info(
+                    f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  sim={sim:.3f} "
+                    f"→ appearance rescue (conf={conf:.3f})"
+                )
+                accepted.append((pa, pb, float(conf)))
+
+            # Log rejected pairs (assigned persons that didn't make the cut).
+            for rmse_adj, rmse_raw, lam, n_fr, pb, pa in all_pairs:
+                if pb in used_b or pa in used_a:
+                    continue
+                if np.isfinite(rmse_adj):
                     logging.info(
-                        f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_val:.3f} → rejected"
+                        f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_raw:.3f} "
+                        f"adj={rmse_adj:.3f} → rejected"
                     )
 
-            return accepted, best_delta
+            return accepted, delta_bar
 
-        # ── All-pairs matching ─────────────────────────────────────────────────
+        # ── All-pairs matching: candidates → consensus δ → finalize ────────────
         camera_pair_offsets: dict[str, int] = {}
+        pair_data: dict[tuple[str, str], dict] = {}
 
         for ii, vid_a in enumerate(active_vids):
             for vid_b in active_vids[ii + 1:]:
-                matches, cam_delta = _match_with_combined_approach(vid_a, vid_b)
-                camera_pair_offsets[f"{vid_a}→{vid_b}"] = cam_delta
-                for pa, pb, sim in matches:
-                    edges.append((sim, (vid_a, pa), (vid_b, pb)))
-                    _union((vid_a, pa), (vid_b, pb))
+                pair_data[(vid_a, vid_b)] = _pair_delta_candidates(vid_a, vid_b)
+
+        consensus = _solve_consensus_offsets(pair_data)
+
+        for (vid_a, vid_b), pdata in pair_data.items():
+            delta_options = [consensus[(vid_a, vid_b)]]
+            if pdata["cands"]:
+                delta_options.insert(0, pdata["cands"][0]["delta"])
+            matches, cam_delta = _finalize_pair(vid_a, vid_b, pdata, delta_options)
+            camera_pair_offsets[f"{vid_a}→{vid_b}"] = cam_delta
+            for pa, pb, sim in matches:
+                edges.append((sim, (vid_a, pa), (vid_b, pb)))
+                _union((vid_a, pa), (vid_b, pb))
 
         # ── Conflict resolution (identical to v1) ──────────────────────────────
         def _get_components() -> dict[tuple, list[tuple]]:
