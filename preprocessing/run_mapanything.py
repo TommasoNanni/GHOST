@@ -215,22 +215,25 @@ class MapAnythingScaleEstimator:
     def process_scene(
         self,
         scene_dir: Path,
-        rich_root: Path,
+        img_root: Path,
     ) -> np.ndarray | None:
         """Estimate per-frame scale for one scene.
 
         Parameters
         ----------
         scene_dir : ghost output directory for the scene
-                    (contains vggt_cameras.npz, vggt_depth.npz).
-        rich_root : root of the mounted RICH squash
-                    (contains {scene}/{cam}/{frame:05d}_{cam_num:02d}.jpeg).
+                    (contains vggt_cameras_centered.npz, vggt_depth_centered.npz).
+        img_root  : directory containing one sub-folder per camera (named after
+                    the camera, e.g. ``cam_01/`` or ``cam01/``).  Images may
+                    live directly in that sub-folder or one level deeper (e.g.
+                    inside an ``images_undistorted/`` sub-directory).
 
         Returns
         -------
         float32 (T,) scale array, or None if prerequisites are missing.
         Also saves the array to {scene_dir}/mapanything_scale_centered.npy.
         """
+        _IMG_EXTS = {".jpeg", ".jpg", ".png", ".bmp"}
         out_path = scene_dir / "mapanything_scale_centered.npy"
         if out_path.exists() and not self.force:
             logger.info(f"{scene_dir.name}: already done, loading from disk")
@@ -257,17 +260,24 @@ class MapAnythingScaleEstimator:
         W_ma = (W_vggt // PATCH) * PATCH
 
         scene_name = scene_dir.name
-        img_root   = rich_root / scene_name
 
-        # Build sorted file lists per camera — handles any starting frame number.
+        # Build sorted file lists per camera.
+        # Searches cam_dir directly, then one level deeper (e.g. images_undistorted/).
         cam_file_lists: dict[int, list[Path]] = {}
         for k, cn in enumerate(cam_names):
             cam_dir = img_root / cn
-            if cam_dir.is_dir():
-                cam_file_lists[k] = sorted(
-                    p for p in cam_dir.iterdir()
-                    if p.suffix.lower() in {".jpeg", ".jpg", ".png", ".bmp"}
-                )
+            if not cam_dir.is_dir():
+                continue
+            files = sorted(p for p in cam_dir.iterdir() if p.suffix.lower() in _IMG_EXTS)
+            if not files:
+                for subdir in sorted(cam_dir.iterdir()):
+                    if subdir.is_dir():
+                        files = sorted(p for p in subdir.iterdir()
+                                       if p.suffix.lower() in _IMG_EXTS)
+                        if files:
+                            break
+            if files:
+                cam_file_lists[k] = files
 
         valid_cam_file_ks = [k for k, fl in cam_file_lists.items() if len(fl) >= T]
         if len(valid_cam_file_ks) < 2:
@@ -335,7 +345,9 @@ def main():
 
     p = argparse.ArgumentParser()
     p.add_argument("--ghost_output_root", required=True)
-    p.add_argument("--rich_root",         required=True)
+    p.add_argument("--img_root",          required=True,
+                   help="Directory with one sub-folder per camera (cam_01/ etc.). "
+                        "For RICH: rich_root/scene_name. For EgoHumans: seq_dir/exo.")
     p.add_argument("--scenes",            default="",
                    help="Comma-separated scene names; empty = all scenes")
     p.add_argument("--batch_size",        type=int, default=8)
@@ -344,7 +356,7 @@ def main():
     args = p.parse_args()
 
     output_root = Path(args.ghost_output_root)
-    rich_root   = Path(args.rich_root)
+    img_root    = Path(args.img_root)
 
     if args.scenes:
         scene_dirs = [output_root / s.strip() for s in args.scenes.split(",")]
@@ -364,7 +376,7 @@ def main():
     logger.info(f"Processing {len(scene_dirs)} scene(s) with batch_size={args.batch_size}")
 
     for scene_dir in scene_dirs:
-        estimator.process_scene(scene_dir, rich_root)
+        estimator.process_scene(scene_dir, img_root)
 
     logger.info(f"All done in {(time.perf_counter()-t_total)/60:.1f} min")
 

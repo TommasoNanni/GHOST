@@ -1,7 +1,7 @@
 """Test RePoGen-S keypoints on ParkingLot2_008_eating1:
   1. Generate kps for all frames → saved to /tmp/repogen_kps/
   2. Compare spread / conf stats on bad frames vs ViTPose-B
-  3. Run estimate_scale_triangulated + estimate_procrustes_dlt using the new kps
+  3. Run estimate_scale_triangulated + estimate_procrustes_dlt_mhr using the new kps
      (SAM3D raw body_pose used as proxy for fused pose — good enough for a sanity check)
   4. Report scale, and pelvis translation for a few bad frames
 
@@ -237,7 +237,7 @@ def triangulate_check() -> None:
                 betas_list.append(d["smplx_betas"].mean(axis=0))
         pred_betas[pid] = np.mean(betas_list, axis=0) if betas_list else np.zeros(10, dtype=np.float32)
 
-    trans_dict, orient_dict = placer.estimate_procrustes_dlt(
+    trans_dict, orient_dict = placer.estimate_procrustes_dlt_mhr(
         scale=scale_per_frame,
         all_pids=all_pids,
         pred_betas_by_pid=pred_betas,

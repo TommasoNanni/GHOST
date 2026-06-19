@@ -178,26 +178,25 @@ def main():
 
     fusion_model = load_fusion_model(CHECKPOINT, DEVICE)
     with torch.no_grad():
-        fused_pose_t, betas_out = fusion_model(
+        fused_pose_t, _ = fusion_model(
             pose_t.to(DEVICE), mask_t.to(DEVICE), shape=shape_t.to(DEVICE)
         )
     fused_pose  = fused_pose_t[0].cpu().numpy()   # (T, P, 54, 6)
-    fused_betas = betas_out[0].cpu().numpy() if betas_out is not None else None
 
-    # Mean betas across cameras for each pid
-    sam3d_betas: dict[int, list[np.ndarray]] = {}
+    _betas_lists: dict[int, list[np.ndarray]] = {}
     for cam_dir in cam_dirs:
         for pid in all_pids:
             bf = cam_dir / "body_data" / f"person_{pid}.npz"
             if not bf.exists(): continue
             d = np.load(bf, allow_pickle=False)
             if "smplx_betas" in d.files:
-                sam3d_betas.setdefault(pid, []).append(d["smplx_betas"].mean(0))
+                _betas_lists.setdefault(pid, []).append(d["smplx_betas"].mean(0))
     betas_by_pid: dict[int, np.ndarray] = {
-        pid: (fused_betas[pid_to_slot[pid]] if fused_betas is not None
-              else (np.mean(v, 0) if v else np.zeros(10, np.float32)))
-        for pid, v in sam3d_betas.items()
+        pid: np.mean(v, axis=0).astype(np.float32)
+        for pid, v in _betas_lists.items()
     }
+    for pid in all_pids:
+        betas_by_pid.setdefault(pid, np.zeros(10, np.float32))
     fused_pose_by_pid = {pid: fused_pose[:, pid_to_slot[pid]] for pid in all_pids}
 
     # ── 3. Procrustes DLT placer → initial (R, t) ────────────────────────────
@@ -215,7 +214,7 @@ def main():
     scale_val = float(np.mean(pred_scale[pred_scale > 0])) if (pred_scale > 0).any() else 6.4
     log.info(f"pred_scale = {scale_val:.4f}")
 
-    trans_dict, orient_dict = placer.estimate_procrustes_dlt(
+    trans_dict, orient_dict = placer.estimate_procrustes_dlt_mhr(
         scale=pred_scale,
         all_pids=set(all_pids),
         pred_betas_by_pid=betas_by_pid,

@@ -375,7 +375,7 @@ def main() -> None:
 
     # ── Run Procrustes DLT ────────────────────────────────────────────────────
     # fused_pose_by_pid=None → uses raw per-camera SAM3D body_pose
-    trans_dict, orient_dict = placer.estimate_procrustes_dlt(
+    trans_dict, orient_dict = placer.estimate_procrustes_dlt_mhr(
         scale=scale,
         all_pids=foreground_pids,
         pred_betas_by_pid=pred_betas_by_pid,

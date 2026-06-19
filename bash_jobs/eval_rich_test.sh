@@ -31,7 +31,7 @@ pixi run python evaluation/evaluate_on_rich_test.py \
     --device            cuda \
     --gt_split          test \
     --max_scenes        52 \
-    --modalities        1
+    --modalities        9
 
 echo ""
 echo "Done: $(date)"

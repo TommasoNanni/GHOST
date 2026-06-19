@@ -84,26 +84,25 @@ def main() -> None:
     pid_to_slot = {pid: i for i, pid in enumerate(all_pids)}
 
     with torch.no_grad():
-        fused_pose_t, betas_out = model(
+        fused_pose_t, _ = model(
             pose_t.to(device), mask_t.to(device), shape=shape_t.to(device)
         )
     fused_pose  = fused_pose_t[0].cpu().numpy()   # (T, P, 54, 6)
-    fused_betas = betas_out[0].cpu().numpy() if betas_out is not None else None
 
-    betas_by_pid: dict[int, np.ndarray] = {}
-    if fused_betas is not None:
-        betas_by_pid = {pid: fused_betas[i] for i, pid in enumerate(all_pids)}
-    else:
-        for cam_dir in cam_dirs:
-            for pid in all_pids:
-                if pid in betas_by_pid: continue
-                bf = cam_dir / "body_data" / f"person_{pid}.npz"
-                if bf.exists():
-                    d = np.load(bf, allow_pickle=False)
-                    if "smplx_betas" in d.files:
-                        betas_by_pid[pid] = d["smplx_betas"].mean(0)
+    _betas_lists: dict[int, list[np.ndarray]] = {}
+    for cam_dir in cam_dirs:
         for pid in all_pids:
-            betas_by_pid.setdefault(pid, np.zeros(10, dtype=np.float32))
+            bf = cam_dir / "body_data" / f"person_{pid}.npz"
+            if bf.exists():
+                d = np.load(bf, allow_pickle=False)
+                if "smplx_betas" in d.files:
+                    _betas_lists.setdefault(pid, []).append(d["smplx_betas"].mean(0))
+    betas_by_pid: dict[int, np.ndarray] = {
+        pid: np.mean(v, axis=0).astype(np.float32)
+        for pid, v in _betas_lists.items()
+    }
+    for pid in all_pids:
+        betas_by_pid.setdefault(pid, np.zeros(10, dtype=np.float32))
 
     # ── GT body data ──────────────────────────────────────────────────────────
     gt_body_data = load_gt_body_data(args.scene, args.rich_root, split=args.gt_split)

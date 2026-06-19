@@ -153,13 +153,11 @@ log.info(f"  frame_start={frame_start}  T={T}  pids={all_pids}")
 
 fusion_model = load_fusion_model(CHECKPOINT, DEVICE)
 with torch.no_grad():
-    fused_pose_t, betas_out = fusion_model(
+    fused_pose_t, _ = fusion_model(
         pose_t.to(DEVICE), mask_t.to(DEVICE), shape=shape_t.to(DEVICE)
     )
 fused_pose  = fused_pose_t[0].cpu().numpy()    # (T, P, 54, 6)
-fused_betas = betas_out[0].cpu().numpy() if betas_out is not None else None
 log.info(f"  fused_pose: {fused_pose.shape}")
-log.info(f"  fused_betas: {fused_betas.shape if fused_betas is not None else 'None'}")
 
 # Mean SAM3D betas per pid (fallback)
 sam3d_betas_acc: dict[int, list] = {}

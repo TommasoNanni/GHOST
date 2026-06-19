@@ -156,14 +156,20 @@ def _load_rich_frame(
     scene_name: str,
     cam_idx: int,
     rich_frame_idx: int,
+    frames_dir: Path | None = None,
 ) -> np.ndarray | None:
-    """Load one RICH frame as BGR uint8, or None if not found."""
-    cam_dir = rich_data_root / scene_name / f"cam_{cam_idx:02d}"
+    """Load one RICH frame as BGR uint8, or None if not found.
+
+    If frames_dir is given it is used directly as the scene root (e.g. a
+    squashfuse mount point), bypassing rich_data_root / scene_name.
+    """
+    scene_root = frames_dir if frames_dir is not None else rich_data_root / scene_name
+    cam_dir = scene_root / f"cam_{cam_idx:02d}"
     # Filename suffix matches camera index: 00000_01.jpg for cam_01
     search_dirs = [cam_dir, cam_dir / "frames"]
     for stem_suffix in (f"{rich_frame_idx:05d}_{cam_idx:02d}", f"{rich_frame_idx:05d}"):
         for search_dir in search_dirs:
-            for ext in (".jpg", ".png", ".bmp"):
+            for ext in (".jpg", ".jpeg", ".png", ".bmp"):
                 q = search_dir / f"{stem_suffix}{ext}"
                 if q.exists():
                     img = cv2.imread(str(q))
@@ -197,11 +203,13 @@ def _cam_to_viser(
 def run(
     predictions:     Path,
     scene_dir:       Path,
-    rich_data_root:  Path  = Path(CONFIG.data.rich_data_root),
-    smplx_model_dir: Path  = Path("body_models/SMPLX_NEUTRAL.pkl"),
-    frame_start:     int   = 0,
-    show_gt:         bool  = True,
-    port:            int   = 9090,
+    rich_data_root:  Path       = Path(CONFIG.data.rich_data_root),
+    smplx_model_dir: Path       = Path("body_models/SMPLX_NEUTRAL.pkl"),
+    frame_start:     int        = 0,
+    show_gt:         bool       = True,
+    show_depth:      bool       = False,
+    port:            int        = 9090,
+    frames_dir:      Path | None = None,
 ) -> None:
     """Launch the interactive viser viewer.
 
@@ -213,6 +221,9 @@ def run(
     smplx_model_dir : directory that contains SMPLX_NEUTRAL.pkl (or smplx/ subdir)
     frame_start     : first RICH frame index (used to load correct images)
     show_gt         : also render the GT body in wireframe
+    show_depth      : also render the VGGT depth maps as world-space point clouds
+                      (requires vggt_depth_centered.npz + vggt_cameras_centered.npz
+                      in scene_dir)
     port            : viser WebSocket port
     """
     # ── load predictions ──────────────────────────────────────────────────────
@@ -236,13 +247,14 @@ def run(
     gt_body_transl_world = d.get("gt_body_transl_world")
 
     if gt_body_transl_world is not None:
-        gt_valid = ~np.all(gt_body_transl_world.reshape(T, -1) == 0, axis=-1)
-        first_valid = int(gt_valid.argmax()) if gt_valid.any() else 0
-        n_missing = int((~gt_valid).sum())
+        gt_valid = ~np.all(gt_body_transl_world == 0, axis=-1)   # (T, P)
+        any_valid = gt_valid.any(axis=1)
+        first_valid = int(any_valid.argmax()) if any_valid.any() else 0
+        n_missing = int((~any_valid).sum())
         if n_missing:
             print(f"  {n_missing} frames have no GT annotation — GT body hidden there.")
     else:
-        gt_valid  = np.zeros(T, dtype=bool)
+        gt_valid  = np.zeros((T, P), dtype=bool)
         first_valid = 0
 
     # ── build SMPL-X meshes ───────────────────────────────────────────────────
@@ -283,8 +295,57 @@ def run(
         gt_t_w2c    = gt_camera_data[..., 4:7]
         gt_focal    = gt_camera_data[0, :, 7]
 
+    # ── VGGT depth maps (optional) ────────────────────────────────────────────
+    # Depth lives in VGGT 518-pixel space (same space as the npz intrinsics) and
+    # is stored in VGGT units; the metric scale is recovered per frame from the
+    # ratio between the predicted (scaled) camera translations and the raw VGGT
+    # extrinsic translations.
+    depth_mm = depth_conf = depth_valid_tk = None
+    vggt_extr = vggt_intr = vggt_oc = vggt_cam_valid = None
+    depth_scale = None
+    if show_depth:
+        depth_path = scene_dir / "vggt_depth_centered.npz"
+        cam_path   = scene_dir / "vggt_cameras_centered.npz"
+        if depth_path.exists() and cam_path.exists():
+            depth_npz = np.load(depth_path, mmap_mode="r")
+            depth_mm       = depth_npz["depth"]        # (T, K, h, w) uint16, VGGT units × 1000
+            depth_conf     = depth_npz["depth_conf"]   # (T, K, h, w) float16
+            depth_valid_tk = depth_npz["depth_valid"]  # (T, K) bool
+            cam_npz = np.load(cam_path)
+            vggt_extr      = cam_npz["extrinsics"]       # (T, K, 3, 4) cam-from-world
+            vggt_intr      = cam_npz["intrinsics"]       # (T, K, 3, 3) 518-space
+            vggt_oc        = cam_npz["original_coords"]  # (T, K, 4) [x1,y1,x2,y2]
+            vggt_cam_valid = cam_npz["valid"]            # (T, K) bool
+            if not vggt_cam_valid.any():
+                vggt_cam_valid = ~np.isnan(vggt_extr[:, :, 0, 0])
+
+            # Per-frame metric scale: ||t_pred|| / ||t_vggt|| over valid,
+            # non-reference cameras (the reference cam has t = 0).
+            depth_scale = np.full(T, np.nan, dtype=np.float64)
+            T_d = min(T, vggt_extr.shape[0])
+            for t_s in range(T_d):
+                ratios = []
+                for k_s in range(vggt_extr.shape[1]):
+                    if not vggt_cam_valid[t_s, k_s]:
+                        continue
+                    n_raw  = np.linalg.norm(vggt_extr[t_s, k_s, :3, 3])
+                    n_pred = np.linalg.norm(camera[t_s, k_s, 4:7]) if k_s < K else 0.0
+                    if n_raw > 1e-6 and n_pred > 1e-6:
+                        ratios.append(n_pred / n_raw)
+                if ratios:
+                    depth_scale[t_s] = np.median(ratios)
+            med = np.nanmedian(depth_scale)
+            depth_scale = np.where(np.isfinite(depth_scale), depth_scale,
+                                   med if np.isfinite(med) else 1.0)
+            print(f"Depth point clouds enabled "
+                  f"(metric scale median = {np.median(depth_scale):.4f} m/VGGT-unit)")
+        else:
+            print(f"WARNING: --show-depth requested but {depth_path.name} / "
+                  f"{cam_path.name} not found in {scene_dir} — depth disabled.")
+            show_depth = False
+
     # ── image size from first available frame ─────────────────────────────────
-    sample_img = _load_rich_frame(rich_data_root, scene_name, 0, frame_start)
+    sample_img = _load_rich_frame(rich_data_root, scene_name, 0, frame_start, frames_dir)
     if sample_img is not None:
         H, W = sample_img.shape[:2]
     else:
@@ -299,7 +360,7 @@ def run(
 
     def _load_one(args: tuple[int, int]) -> tuple[int, int, np.ndarray | None]:
         k, t_idx = args
-        img = _load_rich_frame(rich_data_root, scene_name, k, frame_start + t_idx)
+        img = _load_rich_frame(rich_data_root, scene_name, k, frame_start + t_idx, frames_dir)
         if img is not None:
             img = img[::_DS, ::_DS]
             return k, t_idx, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -375,6 +436,21 @@ def run(
             options=["none"] + [str(k) for k in range(K)] + ["all"],
             initial_value="none",
         )
+
+    # Depth point-cloud controls (only when --show-depth)
+    gui_show_depth = gui_depth_cam = gui_depth_point_size = None
+    if show_depth:
+        with server.gui.add_folder("Depth point cloud"):
+            gui_show_depth = server.gui.add_checkbox("Show depth", True)
+            gui_depth_cam  = server.gui.add_dropdown(
+                "Depth camera",
+                options=["all"] + [str(k) for k in range(K)],
+                initial_value="all",
+            )
+            gui_depth_point_size = server.gui.add_slider(
+                "Point size", min=0.001, max=0.1, step=0.001, initial_value=0.006)
+            gui_depth_stride = server.gui.add_slider(
+                "Pixel stride (1 = full res)", min=1, max=6, step=1, initial_value=2)
 
     # "Watch from camera" — snaps the viewer to a RICH camera each frame and
     # shows the live video feed as a sidebar background image.
@@ -515,6 +591,96 @@ def run(
     def _(client: viser.ClientHandle) -> None:
         _clients.pop(client.client_id, None)
 
+    # ── depth point clouds ────────────────────────────────────────────────────
+    _depth_handles: dict[int, object] = {}
+    _DEPTH_CONF_THR = 0.5
+
+    def _depth_cloud(t_idx: int, k: int) -> tuple[np.ndarray, np.ndarray] | None:
+        """Unproject camera k's depth map at frame t into viser world space."""
+        if (t_idx >= depth_mm.shape[0] or k >= depth_mm.shape[1]
+                or not depth_valid_tk[t_idx, k] or not vggt_cam_valid[t_idx, k]):
+            return None
+        stride = int(gui_depth_stride.value)
+        d = depth_mm[t_idx, k][::stride, ::stride].astype(np.float32)
+        d = d / 1000.0 * float(depth_scale[t_idx])   # → metres
+        conf = depth_conf[t_idx, k][::stride, ::stride].astype(np.float32)
+
+        h_d, w_d = d.shape
+        vv, uu = np.mgrid[0:h_d, 0:w_d].astype(np.float32) * stride
+        x1, y1, x2, y2 = vggt_oc[t_idx, k]
+        # Keep only valid-depth, confident pixels inside the un-padded region.
+        mask = (
+            (d > 1e-4) & (conf >= _DEPTH_CONF_THR)
+            & (uu >= x1) & (uu < x2) & (vv >= y1) & (vv < y2)
+        )
+        if not mask.any():
+            return None
+        u, v, z = uu[mask], vv[mask], d[mask]
+
+        intr = vggt_intr[t_idx, k]
+        fx, fy = float(intr[0, 0]), float(intr[1, 1])
+        cx, cy = float(intr[0, 2]), float(intr[1, 2])
+        pts_cam = np.stack([(u - cx) / fx * z, (v - cy) / fy * z, z], axis=-1)
+
+        # World = R_w2c^T @ (x_cam - t_w2c), with t scaled to metres.
+        R_d   = vggt_extr[t_idx, k, :3, :3]
+        t_vec = vggt_extr[t_idx, k, :3, 3] * float(depth_scale[t_idx])
+        pts_world = (pts_cam - t_vec) @ R_d
+        pts_vis   = (pts_world @ _ROT180.T).astype(np.float32)
+
+        # Colours sampled from the cached (downsampled) video frame.
+        frame = frames_cache[k][t_idx] if k < len(frames_cache) else None
+        if frame is not None:
+            fh_, fw_ = frame.shape[:2]
+            iu = np.clip(((u - x1) * W / (x2 - x1) / _DS).astype(np.int32), 0, fw_ - 1)
+            iv = np.clip(((v - y1) * H / (y2 - y1) / _DS).astype(np.int32), 0, fh_ - 1)
+            colors = frame[iv, iu]
+        else:
+            colors = np.full((len(z), 3), 128, dtype=np.uint8)
+        return pts_vis, colors
+
+    def _update_depth_clouds(t_idx: int) -> None:
+        if not show_depth:
+            return
+        want: set[int] = set()
+        if gui_show_depth.value:
+            sel  = gui_depth_cam.value
+            want = set(range(K)) if sel == "all" else {int(sel)}
+        for k in list(_depth_handles):
+            if k not in want:
+                _depth_handles.pop(k).remove()
+        for k in want:
+            res = _depth_cloud(t_idx, k)
+            if res is None:
+                if k in _depth_handles:
+                    _depth_handles.pop(k).remove()
+                continue
+            pts, cols = res
+            _depth_handles[k] = server.scene.add_point_cloud(
+                f"/world/depth/cam_{k:02d}",
+                points     = pts,
+                colors     = cols,
+                point_size = gui_depth_point_size.value,
+            )
+
+    if show_depth:
+        @gui_show_depth.on_update
+        def _(_):
+            _update_depth_clouds(gui_frame.value)
+
+        @gui_depth_cam.on_update
+        def _(_):
+            _update_depth_clouds(gui_frame.value)
+
+        @gui_depth_point_size.on_update
+        def _(_):
+            for h in _depth_handles.values():
+                h.point_size = gui_depth_point_size.value
+
+        @gui_depth_stride.on_update
+        def _(_):
+            _update_depth_clouds(gui_frame.value)
+
     # ── per-frame update ──────────────────────────────────────────────────────
     def update_frame(t_idx: int, force: bool = False) -> None:
         if t_idx == _last_frame[0] and not force:
@@ -535,7 +701,7 @@ def run(
                 h.visible  = gui_show_pred.value
             for p, h in enumerate(_gt_mesh_handles):
                 h.vertices = gt_verts_vis[t_idx, p]
-                h.visible  = gui_show_gt.value and show_gt and bool(gt_valid[t_idx])
+                h.visible  = gui_show_gt.value and show_gt and bool(gt_valid[t_idx, p])
 
             # ── predicted camera frustums + optional frame texture ────────────
             for k, fh in enumerate(_frustum_handles):
@@ -565,6 +731,9 @@ def run(
                 gui_bg_image.image = frame_img if frame_img is not None else _BLACK
             else:
                 gui_bg_image.image = _BLACK
+
+            # ── depth point clouds ─────────────────────────────────────────────
+            _update_depth_clouds(t_idx)
 
     # Snap all clients when the user explicitly picks a camera — not every frame,
     # so the user can freely look around while the background image still updates.
@@ -602,11 +771,13 @@ def run(
 def main(
     predictions:     Path,
     scene_dir:       Path,
-    rich_data_root:  Path = Path(CONFIG.data.rich_data_root),
-    smplx_model_dir: Path = Path("body_models/SMPLX_NEUTRAL.pkl"),
-    frame_start:     int  = 0,
-    show_gt:         bool = True,
-    port:            int  = 9090,
+    rich_data_root:  Path        = Path(CONFIG.data.rich_data_root),
+    smplx_model_dir: Path        = Path("body_models/SMPLX_NEUTRAL.pkl"),
+    frame_start:     int         = 0,
+    show_gt:         bool        = True,
+    show_depth:      bool        = False,
+    port:            int         = 9090,
+    frames_dir:      Path | None = None,
 ) -> None:
     run(
         predictions     = predictions,
@@ -615,7 +786,9 @@ def main(
         smplx_model_dir = smplx_model_dir,
         frame_start     = frame_start,
         show_gt         = show_gt,
+        show_depth      = show_depth,
         port            = port,
+        frames_dir      = frames_dir,
     )
 
 
