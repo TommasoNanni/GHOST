@@ -1,13 +1,17 @@
 """Evaluate ghost pipeline on RICH test set using CHROMM paper metrics.
 
 Metrics (all in millimetres unless noted):
-  WA-MPJPE  — World-Aligned MPJPE: single Sim(3) over ALL frames jointly.
-  W-MPJPE   — World MPJPE: Sim(3) from first 2 frames applied to all.
-  GA-MPJPE  — Group-Aligned MPJPE: per-frame Sim(3) over all persons jointly.
-  PA-MPJPE  — Procrustes-Aligned MPJPE: per-person per-frame Sim(3).
-  RTE       — Root Translation Error (%): SE(3) aligned, normalised by displacement.
+  WA-MPJPE     — World-Aligned MPJPE: single Sim(3) over ALL frames jointly.
+  W-MPJPE      — World MPJPE: Sim(3) from first 2 frames applied to all.
+  WA-MPJPE-100 — WHAM/CHROMM protocol: sequence split into 100-frame segments,
+                 one Sim(3) per segment (all persons jointly), errors pooled.
+  W-MPJPE-100  — per 100-frame segment, Sim(3) from its first 2 valid frames.
+  GA-MPJPE     — Group-Aligned MPJPE: per-frame Sim(3) over all persons jointly.
+  PA-MPJPE     — Procrustes-Aligned MPJPE: per-person per-frame Sim(3).
+  RTE          — Root Translation Error (%): SE(3) aligned, normalised by displacement.
 
 CHROMM (ours-multi) on RICH: WA=53.1 mm  W=79.0 mm  RTE=1.4%
+CHROMM evaluates on 100-frame segments, so compare against the *-100 rows.
 
 Usage
 -----
@@ -19,7 +23,7 @@ Usage
         [--device cuda] [--max_scenes N] [--gt_split test]
 
 The script processes every scene subdirectory in ``ghost_output_root`` that
-contains a ``vggt_cameras.npz`` file (i.e. scenes that completed the VGGT
+contains a ``vggt_cameras_centered.npz`` file (i.e. scenes that completed the VGGT
 preprocessing step).  For each scene it:
   1. Loads SAM3D body estimates from body_data/ directories.
   2. Runs the FusionWithBetas model to refine body pose and shape.
@@ -28,7 +32,7 @@ preprocessing step).  For each scene it:
   5. Loads GT from ``<rich_root>/<gt_split>_body/<scene_name>/``.
   6. Runs SMPL-X FK on GT parameters.
   7. Matches ghost person IDs to GT person IDs by translation proximity.
-  8. Computes the five CHROMM metrics and prints per-scene + aggregate results.
+  8. Computes the CHROMM metrics and prints per-scene + aggregate results.
 """
 
 from __future__ import annotations
@@ -57,9 +61,29 @@ from utilities.rich_gender_plugin import resolve_smplx_models
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# SMPL-X body joints used for MPJPE (pelvis + 21 body joints; no hands, face).
-# This matches the standard 22-joint body evaluation used for RICH/SMPL-X papers.
-_BODY_JOINT_IDX = list(range(22))
+# Evaluation joint convention: the 24 SMPL joints (NOT the SMPL-X body joints), to
+# match the WHAM/DuoMo/CHROMM RICH protocol. SMPL-X mesh vertices are mapped to SMPL
+# vertices via the barycentric `smplx2smpl` matrix (6890 x 10475), then to 24 joints
+# via the SMPL `J_regressor` (24 x 6890). We precompute the combined, gender-agnostic
+# operator J24 = J_regressor @ smplx2smpl  (24 x 10475) and apply it to SMPL-X FK verts.
+_N_SMPL_JOINTS = 24
+_J24_OPERATOR: np.ndarray | None = None
+
+
+def _verts_to_smpl24(verts: np.ndarray) -> np.ndarray:
+    """Map SMPL-X mesh vertices (10475, 3) -> 24 SMPL joints (24, 3) in the same frame."""
+    global _J24_OPERATOR
+    if _J24_OPERATOR is None:
+        import joblib
+        import scipy.sparse as sp
+        smplx2smpl = np.asarray(
+            joblib.load(_REPO_ROOT / "body_models" / "smplx2smpl.pkl")["matrix"]
+        )  # (6890, 10475), barycentric
+        with open(_REPO_ROOT / "body_models" / "smpl" / "SMPL_NEUTRAL.pkl", "rb") as f:
+            Jr = pickle.load(f)["J_regressor"]  # (24, 6890)
+        Jr = Jr.toarray() if sp.issparse(Jr) else np.asarray(Jr)
+        _J24_OPERATOR = (Jr @ smplx2smpl).astype(np.float32)  # (24, 10475)
+    return (_J24_OPERATOR @ verts).astype(np.float32)
 
 # RICH full-resolution (before max_side=1440 resize), needed for calibration scaling.
 _RICH_ORIG_W = 4112
@@ -191,6 +215,77 @@ def metric_w_mpjpe(
     aligned_all = (s * (pred[te, pe].reshape(-1, 3) @ R.T) + t)
     gt_all      = gt[te, pe].reshape(-1, 3)
     return float(np.linalg.norm(aligned_all - gt_all, axis=-1).mean()) * 1000.0
+
+
+def _iter_segments(valid: np.ndarray, segment_len: int):
+    """Yield (t0, t1) bounds of consecutive ``segment_len``-frame windows.
+
+    Windows are cut on absolute frame index (CHROMM/WHAM protocol), not on
+    valid-frame count, so a window may contain fewer valid frames.
+    """
+    T = valid.shape[0]
+    for t0 in range(0, T, segment_len):
+        yield t0, min(t0 + segment_len, T)
+
+
+def metric_wa_mpjpe_100(
+    pred: np.ndarray,   # (T, P, J, 3) metres
+    gt:   np.ndarray,   # (T, P, J, 3) metres
+    valid: np.ndarray,  # (T, P) bool
+    segment_len: int = 100,
+) -> float:
+    """WA-MPJPE-100 (mm): one Sim(3) per 100-frame segment (all persons jointly).
+
+    This is the protocol CHROMM reports on RICH. Per-joint errors from all
+    segments are pooled before averaging, so segments with more valid frames
+    weigh proportionally more.
+    """
+    errs: list[np.ndarray] = []
+    for t0, t1 in _iter_segments(valid, segment_len):
+        t_idx, p_idx = np.where(valid[t0:t1])
+        if len(t_idx) < 2:
+            continue
+        pred_flat = pred[t0:t1][t_idx, p_idx].reshape(-1, 3)
+        gt_flat   = gt[t0:t1][t_idx,   p_idx].reshape(-1, 3)
+        aligned, _, _, _ = _sim3_align(pred_flat, gt_flat)
+        errs.append(np.linalg.norm(aligned - gt_flat, axis=-1))
+    if not errs:
+        return float("nan")
+    return float(np.concatenate(errs).mean()) * 1000.0
+
+
+def metric_w_mpjpe_100(
+    pred: np.ndarray,
+    gt:   np.ndarray,
+    valid: np.ndarray,
+    segment_len: int = 100,
+    n_align_frames: int = 2,
+) -> float:
+    """W-MPJPE-100 (mm): per 100-frame segment, Sim(3) from its first 2 valid frames."""
+    errs: list[np.ndarray] = []
+    for t0, t1 in _iter_segments(valid, segment_len):
+        valid_seg = valid[t0:t1]
+        t_idx, _ = np.where(valid_seg)
+        if len(t_idx) == 0:
+            continue
+        first_frames = sorted(set(t_idx.tolist()))[:n_align_frames]
+        align_mask = np.zeros_like(valid_seg)
+        for tf in first_frames:
+            align_mask[tf] = valid_seg[tf]
+        ta, pa = np.where(align_mask)
+        if len(ta) < 2:
+            continue
+        _, s, R, t = _sim3_align(
+            pred[t0:t1][ta, pa].reshape(-1, 3),
+            gt[t0:t1][ta,   pa].reshape(-1, 3),
+        )
+        te, pe = np.where(valid_seg)
+        aligned_all = s * (pred[t0:t1][te, pe].reshape(-1, 3) @ R.T) + t
+        gt_all      = gt[t0:t1][te, pe].reshape(-1, 3)
+        errs.append(np.linalg.norm(aligned_all - gt_all, axis=-1))
+    if not errs:
+        return float("nan")
+    return float(np.concatenate(errs).mean()) * 1000.0
 
 
 def metric_ga_mpjpe(
@@ -539,8 +634,8 @@ def evaluate_scene(
     logger.info(f"\n{'─'*60}")
     logger.info(f"Scene: {scene_name}")
 
-    if not (scene_dir / "vggt_cameras.npz").exists():
-        logger.warning("  Missing vggt_cameras.npz — skipping")
+    if not (scene_dir / "vggt_cameras_centered.npz").exists():
+        logger.warning("  Missing vggt_cameras_centered.npz — skipping")
         return None
 
     # ── 1. Load body data ────────────────────────────────────────────────────
@@ -565,24 +660,22 @@ def evaluate_scene(
             pose_t.to(device), mask_t.to(device), shape=shape_t.to(device)
         )
     fused_pose  = fused_pose_t[0].cpu().numpy()                                  # (T, P, 54, 6)
-    fused_betas = betas_out[0].cpu().numpy() if betas_out is not None else None  # (P, 10) or None
 
-    # Betas per pid: prefer fused model output, fall back to mean SAM3D betas.
-    if fused_betas is not None:
-        betas_by_pid = {pid: fused_betas[i] for i, pid in enumerate(all_pids)}
-    else:
-        betas_by_pid: dict[int, np.ndarray] = {}
-        for cam_dir in cam_dirs:
-            for pid in all_pids:
-                if pid in betas_by_pid:
-                    continue
-                bf = cam_dir / "body_data" / f"person_{pid}.npz"
-                if bf.exists():
-                    d = np.load(bf, allow_pickle=False)
-                    if "smplx_betas" in d.files:
-                        betas_by_pid[pid] = d["smplx_betas"].mean(axis=0)
+    # Betas per pid: mean SAM3D betas across all cameras and frames.
+    _betas_lists: dict[int, list[np.ndarray]] = {}
+    for cam_dir in cam_dirs:
         for pid in all_pids:
-            betas_by_pid.setdefault(pid, np.zeros(10, dtype=np.float32))
+            bf = cam_dir / "body_data" / f"person_{pid}.npz"
+            if bf.exists():
+                d = np.load(bf, allow_pickle=False)
+                if "smplx_betas" in d.files:
+                    _betas_lists.setdefault(pid, []).append(d["smplx_betas"].mean(0))
+    betas_by_pid: dict[int, np.ndarray] = {
+        pid: np.mean(v, axis=0).astype(np.float32)
+        for pid, v in _betas_lists.items()
+    }
+    for pid in all_pids:
+        betas_by_pid.setdefault(pid, np.zeros(10, dtype=np.float32))
 
     # ── 3. Procrustes DLT ────────────────────────────────────────────────────
     try:
@@ -591,17 +684,15 @@ def evaluate_scene(
             resolve_smplx_models(scene_name, smplx_model_path.parent, _gender_json)
             if _gender_json.exists() else smplx_model_path
         )
-        placer = BodyPlacer(scene_dir, _smplx_arg)
+        # SAM3D kp2d are in uncropped source pixels; VGGT cameras live in
+        # centered-crop space. crop_meta.json (written by center_images.py next
+        # to the centered images) supplies the per-camera offset to reconcile them.
+        crop_meta_path = rich_root / f"centered_{gt_split}" / scene_name / "crop_meta.json"
+        placer = BodyPlacer(scene_dir, _smplx_arg, crop_meta_path=crop_meta_path)
     except Exception as e:
         logger.warning(f"  BodyPlacer init failed: {e} — skipping")
         return None
 
-    fused_betas_map = {
-        cam_dir / "body_data" / f"person_{pid}.npz": betas_by_pid[pid]
-        for cam_dir in cam_dirs
-        for pid in all_pids
-        if (cam_dir / "body_data" / f"person_{pid}.npz").exists()
-    }
     fused_pose_by_pid: dict[int, np.ndarray] | None = None
     if fused_pose is not None:
         fused_pose_by_pid = {
@@ -846,7 +937,7 @@ def evaluate_scene(
 
     # Run M1 placement to get trans_dict for matching
     try:
-        trans_dict_m1, _ = placer.estimate_procrustes_dlt(
+        trans_dict_m1, _ = placer.estimate_procrustes_dlt_mhr(
             scale=pred_scale_pf,
             all_pids=set(all_pids),
             pred_betas_by_pid=betas_by_pid,
@@ -866,23 +957,40 @@ def evaluate_scene(
     n_matched = len(pid_match)
 
     # ── 6. Pre-build GT joints (shared, in RICH world frame) ────────────────
-    J_body    = len(_BODY_JOINT_IDX)
-    gt_joints = np.full((T, n_matched, J_body, 3), np.nan, dtype=np.float32)
-    gt_roots  = np.full((T, n_matched, 3),          np.nan, dtype=np.float32)
+    J_body = _N_SMPL_JOINTS
 
-    for slot, (ghost_pid, gt_pid) in enumerate(sorted(pid_match.items())):
-        gt_pdata = gt_body_data[gt_pid]
-        for frame_idx, params in gt_pdata.items():
-            t_rel = frame_idx - frame_start
-            if not (0 <= t_rel < T):
-                continue
-            J_gt = placer._smplx_fk(
-                params["betas"][np.newaxis],
-                params["body_pose"][np.newaxis],
-                params["global_orient"][np.newaxis],
-            )[0] + params["transl"]
-            gt_joints[t_rel, slot] = J_gt[_BODY_JOINT_IDX]
-            gt_roots[t_rel,  slot] = J_gt[0]
+    def _build_gt_joints(_plc):
+        """GT 24-SMPL joints + roots (T, n_matched, ...) FK'd with the given placer's model."""
+        gj = np.full((T, n_matched, J_body, 3), np.nan, dtype=np.float32)
+        gr = np.full((T, n_matched, 3),          np.nan, dtype=np.float32)
+        for slot, (ghost_pid, gt_pid) in enumerate(sorted(pid_match.items())):
+            for frame_idx, params in gt_body_data[gt_pid].items():
+                t_rel = frame_idx - frame_start
+                if not (0 <= t_rel < T):
+                    continue
+                _, V_gt = _plc._smplx_fk(
+                    params["betas"][np.newaxis],
+                    params["body_pose"][np.newaxis],
+                    params["global_orient"][np.newaxis],
+                    return_verts=True,
+                )
+                J_gt = _verts_to_smpl24(V_gt[0]) + params["transl"]   # (24, 3) world frame
+                gj[t_rel, slot] = J_gt
+                gr[t_rel,  slot] = J_gt[0]
+        return gj, gr
+
+    # Gendered GT joints (for M1–M8: GT params are gendered-model parameters).
+    gt_joints, gt_roots = _build_gt_joints(placer)
+
+    # M9 (gender-blind): a NEUTRAL-SMPL-X placer + neutral GT joints, so the
+    # prediction AND the GT are FK'd with the neutral model — an unbiased,
+    # gender-free version of M1.  Built only when M9 is requested.
+    placer_neutral = None
+    gt_joints_neutral = gt_roots_neutral = None
+    if 9 in (modalities or []):
+        neutral_path = smplx_model_path.parent / "SMPLX_NEUTRAL.pkl"
+        placer_neutral = BodyPlacer(scene_dir, neutral_path, crop_meta_path=crop_meta_path)
+        gt_joints_neutral, gt_roots_neutral = _build_gt_joints(placer_neutral)
 
     # Pre-build GT pose arrays (for M4): (T, P, 54, 6)
     # Frames without GT data get identity rotations (6D = [1,0,0,0,1,0]) so the
@@ -933,6 +1041,8 @@ def evaluate_scene(
         5: "M5: FK-DLT   + pred-scale + pred-pose",
         6: "M6: pred-cam + pred-scale + pred-pose + GT-transl",
         7: "M7: pred-ray + GT-depth (depth oracle)",
+        8: "M8: Sapiens-DLT + pred-scale + pred-pose",
+        9: "M9: pred-cam + pred-scale + pred-pose (gender-blind: neutral SMPL-X for pred AND GT)",
     }
 
     orig_extrinsics = placer.extrinsics    # save original VGGT extrinsics
@@ -977,9 +1087,20 @@ def evaluate_scene(
             pid: pose_for_placer[:, pid_to_slot[pid]] for pid in all_pids
         }
 
+        # M9 is gender-blind: route placement, pred-FK and GT joints through the
+        # neutral-SMPL-X placer / neutral GT arrays.  All other modalities use the
+        # gendered placer and gendered GT.
+        active_placer = placer_neutral if modality == 9 else placer
+        gt_joints_use = gt_joints_neutral if modality == 9 else gt_joints
+        gt_roots_use  = gt_roots_neutral  if modality == 9 else gt_roots
+
         try:
-            placer_fn = (placer.estimate_procrustes_dlt_fk
-                         if modality == 5 else placer.estimate_procrustes_dlt)
+            if modality == 5:
+                placer_fn = active_placer.estimate_procrustes_dlt_fk
+            elif modality == 8:
+                placer_fn = active_placer.estimate_procrustes_dlt_sapiens
+            else:
+                placer_fn = active_placer.estimate_procrustes_dlt_mhr
             trans_dict, orient_dict = placer_fn(
                 scale=scale_pf,
                 all_pids=set(all_pids),
@@ -1002,12 +1123,13 @@ def evaluate_scene(
             for ghost_pid, gt_pid in pid_match.items():
                 frames_t: dict[int, np.ndarray] = {}
                 for frame_idx, params in gt_body_data[gt_pid].items():
-                    J_can = placer._smplx_fk(
+                    _, V_can = placer._smplx_fk(
                         params["betas"][np.newaxis],
                         params["body_pose"][np.newaxis],
                         np.zeros((1, 3), dtype=np.float32),
-                    )[0]
-                    gt_pelvis_world = J_can[0].astype(np.float64) + params["transl"].astype(np.float64)
+                        return_verts=True,
+                    )
+                    gt_pelvis_world = _verts_to_smpl24(V_can[0])[0].astype(np.float64) + params["transl"].astype(np.float64)
                     frames_t[frame_idx] = (R_w2ref @ gt_pelvis_world + t_w2ref).astype(np.float32)
                 trans_dict[ghost_pid] = frames_t
 
@@ -1020,12 +1142,13 @@ def evaluate_scene(
                 frames_t: dict[int, np.ndarray] = {}
                 pred_frames = trans_dict_pred.get(ghost_pid, {})
                 for frame_idx, params in gt_body_data[gt_pid].items():
-                    J_can = placer._smplx_fk(
+                    _, V_can = placer._smplx_fk(
                         params["betas"][np.newaxis],
                         params["body_pose"][np.newaxis],
                         np.zeros((1, 3), dtype=np.float32),
-                    )[0]
-                    gt_pelvis_world = J_can[0].astype(np.float64) + params["transl"].astype(np.float64)
+                        return_verts=True,
+                    )
+                    gt_pelvis_world = _verts_to_smpl24(V_can[0])[0].astype(np.float64) + params["transl"].astype(np.float64)
                     gt_pelvis_cam0 = R_w2ref @ gt_pelvis_world + t_w2ref
                     d_gt = float(np.linalg.norm(gt_pelvis_cam0))
                     t_pred = pred_frames.get(frame_idx)
@@ -1051,13 +1174,19 @@ def evaluate_scene(
                 if not (0 <= t_rel < T) or R_mat is None:
                     continue
                 body_pose_aa = _6d_to_aa(pose_for_placer[t_rel, p_slot, :21])
-                J_can  = placer._smplx_fk(
+                J_can_smplx, V_can = active_placer._smplx_fk(
                     betas_p[np.newaxis],
                     body_pose_aa.reshape(63)[np.newaxis],
                     np.zeros((1, 3), dtype=np.float32),
-                )[0]
-                J_world = (R_mat @ (J_can - J_can[0]).T).T + pelvis_world
-                pred_joints[t_rel, p_slot] = J_world[_BODY_JOINT_IDX]
+                    return_verts=True,
+                )
+                J_can  = _verts_to_smpl24(V_can[0])    # (24, 3) canonical SMPL joints
+                # Pivot about the SMPL-X pelvis: the placer's R_mat/pelvis_world are
+                # defined in the SMPL-X convention, so we reconstruct the placed SMPL-X
+                # mesh (equivalently its J24 joints) about the SMPL-X root, NOT J_can[0].
+                pelvis_smplx = J_can_smplx[0, 0]       # SMPL-X canonical pelvis
+                J_world = (R_mat @ (J_can - pelvis_smplx).T).T + pelvis_world
+                pred_joints[t_rel, p_slot] = J_world
                 pred_roots[t_rel,  p_slot] = J_world[0]
 
         # Gather matched-person arrays
@@ -1070,16 +1199,18 @@ def evaluate_scene(
 
         valid = (
             np.isfinite(pred_joints_m).all((-2, -1)) &
-            np.isfinite(gt_joints).all((-2, -1))
+            np.isfinite(gt_joints_use).all((-2, -1))
         )
         n_valid = int(valid.sum())
         results["n_valid"] = max(results["n_valid"], n_valid)
 
-        wa  = metric_wa_mpjpe(pred_joints_m, gt_joints, valid)
-        w   = metric_w_mpjpe( pred_joints_m, gt_joints, valid)
-        ga  = metric_ga_mpjpe(pred_joints_m, gt_joints, valid)
-        pa  = metric_pa_mpjpe(pred_joints_m, gt_joints, valid)
-        rte = metric_rte(pred_roots_m, gt_roots)
+        wa    = metric_wa_mpjpe(pred_joints_m, gt_joints_use, valid)
+        w     = metric_w_mpjpe( pred_joints_m, gt_joints_use, valid)
+        wa100 = metric_wa_mpjpe_100(pred_joints_m, gt_joints_use, valid)
+        w100  = metric_w_mpjpe_100( pred_joints_m, gt_joints_use, valid)
+        ga  = metric_ga_mpjpe(pred_joints_m, gt_joints_use, valid)
+        pa  = metric_pa_mpjpe(pred_joints_m, gt_joints_use, valid)
+        rte = metric_rte(pred_roots_m, gt_roots_use)
 
         # Raw root error (pred in VGGT/GT-cam frame, GT in RICH world)
         raw_errs = []
@@ -1091,12 +1222,13 @@ def evaluate_scene(
                     continue
                 if np.isfinite(pred_roots_m[t_rel, slot]).all():
                     # GT pelvis = J[0] + transl (not just transl — canonical J[0] is ~33cm offset)
-                    J_gt_body = placer._smplx_fk(
+                    _, V_gt_body = active_placer._smplx_fk(
                         params["betas"][np.newaxis],
                         params["body_pose"][np.newaxis],
                         params["global_orient"][np.newaxis],
-                    )[0]
-                    gt_pelvis_world = J_gt_body[0] + params["transl"].astype(np.float64)
+                        return_verts=True,
+                    )
+                    gt_pelvis_world = _verts_to_smpl24(V_gt_body[0])[0] + params["transl"].astype(np.float64)
                     gt_root_ref = R_w2ref @ gt_pelvis_world + t_w2ref
                     raw_errs.append(float(np.linalg.norm(pred_roots_m[t_rel, slot] - gt_root_ref)))
                 R_pred_mat = orient_dict.get(ghost_pid, {}).get(frame_idx)
@@ -1112,13 +1244,16 @@ def evaluate_scene(
         root_orient_err_deg = float(np.median(orient_errs))          if orient_errs  else float("nan")
 
         logger.info(
-            f"  WA={wa:6.1f}mm  W={w:6.1f}mm  GA={ga:6.1f}mm  PA={pa:6.1f}mm  "
+            f"  WA={wa:6.1f}mm  W={w:6.1f}mm  WA100={wa100:6.1f}mm  W100={w100:6.1f}mm  "
+            f"GA={ga:6.1f}mm  PA={pa:6.1f}mm  "
             f"RTE={rte:5.2f}%  raw_root={raw_root_err_cm:.1f}cm  orient={root_orient_err_deg:.1f}°"
         )
 
         pfx = f"m{modality}_"
         results[pfx + "wa_mpjpe"]           = wa
         results[pfx + "w_mpjpe"]            = w
+        results[pfx + "wa_mpjpe_100"]       = wa100
+        results[pfx + "w_mpjpe_100"]        = w100
         results[pfx + "ga_mpjpe"]           = ga
         results[pfx + "pa_mpjpe"]           = pa
         results[pfx + "rte"]                = rte
@@ -1182,7 +1317,7 @@ def main() -> None:
     only_scenes: set[str] = {s.strip() for s in args.scenes.split(",") if s.strip()}
     scenes = sorted(
         d for d in args.ghost_output_root.iterdir()
-        if d.is_dir() and (d / "vggt_cameras.npz").exists()
+        if d.is_dir() and (d / "vggt_cameras_centered.npz").exists()
         and d.name not in skip_scenes
         and (not only_scenes or d.name in only_scenes)
     )
@@ -1234,6 +1369,8 @@ def main() -> None:
         4: "M4 oracle          ",
         6: "M6 GT-transl       ",
         7: "M7 GT-depth        ",
+        8: "M8 sapiens-DLT     ",
+        9: "M9 gender-blind    ",
     }
     modalities_run = sorted(args.modalities)
     col_w = 20
@@ -1250,21 +1387,24 @@ def main() -> None:
     print(hdr)
     print("  " + "-" * (26 + (col_w + 2) * (len(modalities_run) + 1)))
 
-    chromm = {"wa": "53.1 mm", "w": "79.0 mm", "ga": "—", "pa": "—", "rte": "1.4 %"}
+    # CHROMM evaluates per 100-frame segment → its numbers map to the *-100 rows.
+    chromm = {"wa_mpjpe_100": "53.1 mm", "w_mpjpe_100": "79.0 mm", "rte": "1.4 %"}
 
     def mrow(label, key_suffix, unit):
         row = f"  {label:<26}"
         for m in modalities_run:
             v = agg(f"m{m}_{key_suffix}")
             row += f"  {fmt(v, unit):>{col_w}}"
-        row += f"  {chromm.get(key_suffix.split('_')[0], '—'):>{col_w}}"
+        row += f"  {chromm.get(key_suffix, '—'):>{col_w}}"
         print(row)
 
-    mrow("WA-MPJPE",  "wa_mpjpe",  "mm")
-    mrow("W-MPJPE",   "w_mpjpe",   "mm")
-    mrow("GA-MPJPE",  "ga_mpjpe",  "mm")
-    mrow("PA-MPJPE",  "pa_mpjpe",  "mm")
-    mrow("RTE",       "rte",       "%")
+    mrow("WA-MPJPE",      "wa_mpjpe",      "mm")
+    mrow("W-MPJPE",       "w_mpjpe",       "mm")
+    mrow("WA-MPJPE-100",  "wa_mpjpe_100",  "mm")
+    mrow("W-MPJPE-100",   "w_mpjpe_100",   "mm")
+    mrow("GA-MPJPE",      "ga_mpjpe",      "mm")
+    mrow("PA-MPJPE",      "pa_mpjpe",      "mm")
+    mrow("RTE",           "rte",           "%")
     print()
     print("  --- Diagnostics (shared) ---")
     print(f"  {'Cam rot err (°)':<26}  {agg('cam_rot_err'):>14.2f}")

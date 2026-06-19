@@ -107,9 +107,12 @@ def _run_forward(
                 )
 
             # pose_aggr: (B, T, P, 54, 6) — root excluded by model
-            # betas_out: (B, P, 10)
             pred_pose_54 = _s(pose_aggr)   # (T, P, 54, 6)
-            pred_shape   = _s(betas_out)   # (P, 10)
+            # Mean SAM3D betas: visibility-weighted mean over T and K.
+            mask = inp["person_mask"].float()                               # (B, T, K, P)
+            shape_sum = (inp["shape"] * mask.unsqueeze(-1)).sum(dim=[1,2]) # (B, P, 10)
+            denom     = mask.sum(dim=[1,2]).clamp(min=1).unsqueeze(-1)     # (B, P, 1)
+            pred_shape = _s(shape_sum / denom)                             # (P, 10)
 
             # GT arrays (cam-0 = world frame)
             gt_pose  = _s(targets["pose"])   # (T, P, 55, 6)
@@ -146,8 +149,11 @@ def main(
     no_visualize: bool = False,
     frame_start:  int  = 0,
     show_gt:      bool = True,
-    body_split:   str  = "train_body",
-    device:       str  = "cuda" if torch.cuda.is_available() else "cpu",
+    show_depth:   bool = False,
+    all_people:         bool = False,
+    body_split:         str  = "train_body",
+    device:             str  = "cuda" if torch.cuda.is_available() else "cpu",
+    centered_data_root: Path | None = None,
 ) -> None:
     """
     Parameters
@@ -160,6 +166,9 @@ def main(
     no_visualize : save predictions only — do not launch the viewer
     frame_start  : first RICH frame index (for image loading in the viewer)
     show_gt      : show GT body in the viewer (if available)
+    show_depth   : show VGGT depth maps as point clouds in the viewer
+    all_people   : run inference on ALL foreground persons, not only the
+                   GT-matched subject (background people get no GT overlay)
     device       : "cuda" or "cpu"
     """
     scene_dir = Path(scenes_root) / scene
@@ -182,6 +191,8 @@ def main(
         rich_data_root = CONFIG.data.rich_data_root,
         rich_gt_dir    = CONFIG.data.rich_gt_dir,
         body_split     = body_split,
+        restrict_to_gt_persons = not all_people,
+        min_foreground_cams    = 1 if all_people else None,
     )
     T = dp._frame_end - dp._frame_start
     logger.info(f"  {T} frames, {dp.num_cameras} cameras, {dp.max_persons} persons")
@@ -227,6 +238,11 @@ def main(
         if _gender_json.exists() else Path(CONFIG.data.smplx_model_path)
     )
 
+    # SAM3D kp2d are in uncropped source pixels; VGGT cameras live in centered-crop
+    # space. crop_meta.json (next to the centered images) reconciles them in the placer.
+    _centered_root = Path(centered_data_root) if centered_data_root is not None else Path(CONFIG.data.rich_data_root)
+    crop_meta_path = _centered_root / scene / "crop_meta.json"
+
     logger.info("Running BodyPlacer (Procrustes DLT) …")
     root_translation, orient_R, vggt_cameras = _run_placer(
         scene_dir      = scene_dir,
@@ -236,8 +252,8 @@ def main(
         frame_start    = dp._frame_start,
         T              = T_scene,
         smplx_model_path = _smplx_arg,
-        fused_betas    = pred_shape,     # (P, 10) fused betas for FK
         fused_pose     = pred_pose_54,   # (T, P, 54, 6) fused pose for Procrustes FK
+        crop_meta_path = crop_meta_path,
     )
     # orient_R: (T, P, 3, 3) — NaN where Procrustes DLT failed
 
@@ -277,7 +293,8 @@ def main(
 
     # ── launch visualizer ─────────────────────────────────────────────────────
     repo_root = Path(__file__).parent.parent
-    show_gt_flag = "--show-gt" if show_gt else "--no-show-gt"
+    show_gt_flag    = "--show-gt" if show_gt else "--no-show-gt"
+    show_depth_flag = "--show-depth" if show_depth else "--no-show-depth"
     vis_cmd = (
         f"pixi run python visualize/visualize_fusion.py"
         f" --predictions {out_file}"
@@ -285,6 +302,7 @@ def main(
         f" --smplx-model-dir {CONFIG.data.smplx_model_path}"
         f" --frame-start {frame_start}"
         f" {show_gt_flag}"
+        f" {show_depth_flag}"
         f" --port {port}"
     )
 

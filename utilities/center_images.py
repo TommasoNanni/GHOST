@@ -7,9 +7,11 @@ squashfuse-mounted .sqsh archive, crops each camera's frames symmetrically
 around its calibrated (cx, cy), and writes the results preserving the
 <scene>/<cam_XX>/<frame> folder structure.
 
-Intrinsics in scan_calibration XMLs are for the original 4012×3008 resolution.
-The script reads the actual image size from the first frame of each camera and
-scales (cx, cy) accordingly before cropping.
+Intrinsics in scan_calibration XMLs are for the original 4112×3008 resolution
+(3008×4112 for rotated/portrait cameras, e.g. Pavallion cam_03/cam_05).  The
+script reads the actual image size from the first frame of each camera, picks
+the calibration resolution matching the image orientation, and scales (cx, cy)
+accordingly before cropping.
 
 Usage (typical):
     python utilities/center_images.py \\
@@ -26,6 +28,7 @@ Usage (typical):
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -36,8 +39,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# Native resolution at which GT intrinsics were measured.
-ORIG_W, ORIG_H = 4012, 3008
+# Native landscape resolution at which GT intrinsics were measured.
+# Rotated (portrait) cameras are calibrated at the swapped resolution
+# ORIG_H × ORIG_W; scale_intrinsics selects the right one from the
+# orientation of the actual image.
+ORIG_W, ORIG_H = 4112, 3008
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".bmp", ".png"}
 
@@ -119,10 +125,15 @@ def parse_intrinsics(xml_path: Path) -> np.ndarray | None:
 
 
 def scale_intrinsics(K: np.ndarray, img_w: int, img_h: int) -> np.ndarray:
-    """Scale K defined at (ORIG_W, ORIG_H) to match (img_w, img_h)."""
+    """Scale K from its native calibration resolution to (img_w, img_h).
+
+    Landscape cameras are calibrated at ORIG_W × ORIG_H, portrait (rotated)
+    cameras at ORIG_H × ORIG_W — chosen from the orientation of the image.
+    """
+    calib_w, calib_h = (ORIG_H, ORIG_W) if img_h > img_w else (ORIG_W, ORIG_H)
     K = K.copy()
-    K[0] *= img_w / ORIG_W  # scales fx and cx
-    K[1] *= img_h / ORIG_H  # scales fy and cy
+    K[0] *= img_w / calib_w  # scales fx and cx
+    K[1] *= img_h / calib_h  # scales fy and cy
     return K
 
 
@@ -154,24 +165,36 @@ def process_camera(
     out_cam_dir: Path,
     K_orig: np.ndarray,
     quality: int,
-) -> tuple[int, int]:
+) -> tuple[int, int, dict | None]:
     """Crop and save all frames for one camera.
 
-    Returns (frames_written, frames_skipped).
+    Returns ``(frames_written, frames_skipped, crop_info)`` where ``crop_info``
+    is a dict describing the crop geometry (or ``None`` if no frames were
+    processed).  ``crop_info`` records the top-left offset and sizes needed to
+    map a coordinate from the original (source) image into the cropped image:
+        u_crop = u_src - off_x ;  v_crop = v_src - off_y
     """
     images = sorted(p for p in cam_dir.iterdir() if p.suffix.lower() in _IMAGE_EXTS)
     if not images:
-        return 0, 0
+        return 0, 0, None
 
     # Derive actual image resolution from the first frame.
     first = cv2.imread(str(images[0]))
     if first is None:
         print(f"  [warn] cannot read {images[0]}", file=sys.stderr)
-        return 0, len(images)
+        return 0, len(images), None
 
     img_h, img_w = first.shape[:2]
     K = scale_intrinsics(K_orig, img_w, img_h)
     cx, cy = K[0, 2], K[1, 2]
+
+    # A real principal point sits near the image center; a large deviation
+    # means the calibration resolution/orientation does not match the image.
+    if not (0.4 < cx / img_w < 0.6 and 0.4 < cy / img_h < 0.6):
+        print(f"  [warn] {cam_dir}: scaled PP ({cx:.0f}, {cy:.0f}) far from "
+              f"center of {img_w}x{img_h} — calibration/image mismatch?",
+              file=sys.stderr)
+
     y1, y2, x1, x2 = compute_crop(img_h, img_w, cx, cy)
 
     out_cam_dir.mkdir(parents=True, exist_ok=True)
@@ -188,7 +211,15 @@ def process_camera(
         cv2.imwrite(str(out_path), cropped, encode_params)
         written += 1
 
-    return written, skipped
+    crop_info = {
+        "off_x":  int(x1),          # crop top-left x in source pixels
+        "off_y":  int(y1),          # crop top-left y in source pixels
+        "crop_w": int(x2 - x1),     # cropped image width
+        "crop_h": int(y2 - y1),     # cropped image height
+        "src_w":  int(img_w),       # source image width  (SAM3 bbox frame)
+        "src_h":  int(img_h),       # source image height
+    }
+    return written, skipped, crop_info
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +273,11 @@ def main() -> None:
 
     print(f"Total cameras: {len(tasks)}  |  workers: {args.workers}")
 
+    # Per-scene crop geometry, written to <output>/<scene>/crop_meta.json so
+    # downstream consumers (Sapiens crops, placer kp2d→VGGT mapping) can map
+    # original-image coordinates into the cropped frame.
+    crop_meta: dict[str, dict[str, dict]] = {}
+
     total_written = total_skipped = 0
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {
@@ -251,15 +287,24 @@ def main() -> None:
         for fut in as_completed(futures):
             (cam_dir,) = futures[fut]
             try:
-                written, skipped = fut.result()
+                written, skipped, crop_info = fut.result()
             except Exception as exc:
                 print(f"  [error] {cam_dir}: {exc}", file=sys.stderr)
                 continue
             total_written += written
             total_skipped += skipped
+            if crop_info is not None:
+                crop_meta.setdefault(cam_dir.parent.name, {})[cam_dir.name] = crop_info
             scene_cam = f"{cam_dir.parent.name}/{cam_dir.name}"
             print(f"  {scene_cam}: {written} frames written" +
                   (f", {skipped} skipped" if skipped else ""))
+
+    # Write one crop_meta.json per scene.
+    for scene_name, cams in crop_meta.items():
+        meta_path = output_root / scene_name / "crop_meta.json"
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(meta_path, "w") as f:
+            json.dump({"cameras": cams}, f, indent=2)
 
     print(f"\nDone — {total_written} frames written, {total_skipped} skipped → {args.output}")
 

@@ -31,8 +31,6 @@ import torch
 
 from configuration import CONFIG
 from data.video_dataset import RichDataset
-from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from preprocessing.geometric_reidentifier import GeometricReidentifier
 from preprocessing.run_mapanything import MapAnythingScaleEstimator
 from preprocessing.run_vggt import VGGTPreprocessor
 from preprocessing.segmentation import PersonSegmenter
@@ -156,7 +154,6 @@ def _build_vggt_frame_paths(
 def process_scene(
     scene, segmenter, estimator, reidentifier,
     output_dir, vggt_weights, vggt_devices,
-    skip_geo_reid=True,
     skip_cams: set[str] | None = None,
     ma_estimator: MapAnythingScaleEstimator | None = None,
 ):
@@ -360,36 +357,12 @@ def process_scene(
     else:
         ma_estimator.process_scene(
             scene_dir=scene_output_dir,
-            rich_root=Path(CONFIG.data.rich_data_root),
+            img_root=Path(CONFIG.data.rich_data_root) / scene.scene_id,
         )
 
-    # Step 8: Geometric post-ReID.
-    if skip_geo_reid:
-        print(f"\n--- Step 8: Geometric post-ReID (skipped via --skip-geo-reid) ---")
-    else:
-        geo_reid = GeometricReidentifier(
-            distance_threshold=CONFIG.parameters_extraction.geo_reid_distance_threshold,
-            min_overlap_frames=10,
-            second_pass_threshold=CONFIG.parameters_extraction.geo_reid_second_pass_threshold,
-        )
-        geo_reid.reidentify(scene=scene, video_dirs=video_dirs)
-
-    # Step 9: FusionDatapoint compatibility check.
-    print(f"\n--- Step 9: FusionDatapoint compatibility check ---")
-    try:
-        fusion_dp = RICHFusionDatapoint(
-            scene_dir=scene_output_dir,
-            rich_data_root=CONFIG.data.rich_data_root,
-        )
-        ds = RICHFusionDataset([fusion_dp])
-        inputs, targets = ds[0]
-        print("  FusionDatapoint compatibility: OK")
-    except Exception as e:
-        print(f"  ERROR: FusionDatapoint failed to load: {e}")
-
-    # Step 10: Visualise re-ID corrected segmentation (only if ReID ran this session).
+    # Step 8: Visualise re-ID corrected segmentation (only if ReID ran this session).
     if not _reid_already_done:
-        print(f"\n--- Step 10: Visualising re-ID corrected segmentation ---")
+        print(f"\n--- Step 8: Visualising re-ID corrected segmentation ---")
         for video in scene.videos:
             if video.video_id not in video_dirs:
                 continue
@@ -419,9 +392,6 @@ def main():
     parser.add_argument("--vggt-devices",  type=str,   nargs="+", default=None,
                         help="CUDA device strings for VGGT, e.g. cuda:0 cuda:1. "
                              "Defaults to all available GPUs.")
-    parser.add_argument("--skip-geo-reid", action="store_true", default=True,
-                        help="Skip step 6 (geometric ReID). Use when VGGT cameras "
-                             "are newly estimated and geo-reid should be re-run later.")
     parser.add_argument("--skip-mapanything", action="store_true", default=False,
                         help="Skip step 7 (MapAnything scale estimation).")
     parser.add_argument("--mapanything-device", type=str, default=None,
@@ -487,6 +457,15 @@ def main():
     needs_reid: list[str] = []
 
     for scene in ds.scenes:
+        scene_dir = Path(output_dir) / scene.scene_id
+        if (
+            (scene_dir / "cross_view_reid.json").exists()
+            and (scene_dir / "vggt_cameras_centered.npz").exists()
+            and (ma_estimator is None or (scene_dir / "mapanything_scale_centered.npy").exists())
+        ):
+            print(f"Scene {scene.scene_id}: already done, skipping.")
+            continue
+
         segmenter = PersonSegmenter(
             checkpoint_path=CONFIG.segmentation.checkpoint_path,
             text_prompt=CONFIG.segmentation.text_prompt,
@@ -517,7 +496,6 @@ def main():
                 scene, segmenter, estimator, reidentifier, output_dir,
                 vggt_weights=args.vggt_weights,
                 vggt_devices=vggt_devices,
-                skip_geo_reid=args.skip_geo_reid,
                 skip_cams=skip_cams_map.get(scene.scene_id, set()),
                 ma_estimator=ma_estimator,
             )

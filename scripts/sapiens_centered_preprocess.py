@@ -3,7 +3,8 @@
 Reads bounding boxes from json_data/ per camera, crops each person from the
 RICH centered_train frames, runs Sapiens, and saves per-camera per-person keypoint files:
     {cam_dir}/sapiens_centered_kps_person_{pid}.npz
-        keypoints    (T, 308, 3) float32  [x, y, conf] in ORIGINAL image pixels
+        keypoints    (T, 308, 3) float32  [x, y, conf] in CENTERED (cropped)
+                                          image pixels — matches vggt_*_centered
         frame_indices (T,)        int32
 
 Sapiens outputs 308 COCO-WholeBody keypoints:
@@ -79,6 +80,30 @@ def _load_frame(rich_root: str, scene_name: str, cam_name: str,
     return None
 
 
+def _load_crop_offset(rich_root: str, scene_name: str, cam_name: str) -> tuple[int, int]:
+    """Return the (off_x, off_y) crop offset for one camera from crop_meta.json.
+
+    center_images.py writes <rich_root>/<scene>/crop_meta.json recording, per
+    camera, the top-left corner of the crop in the source-image coordinate
+    system.  SAM3 bboxes (json_data) live in source coordinates, so they must
+    be shifted by -(off_x, off_y) to land correctly on the centered frames.
+    Returns (0, 0) if no metadata is found (uncropped / legacy case).
+    """
+    meta_path = Path(rich_root) / scene_name / "crop_meta.json"
+    if not meta_path.exists():
+        print(f"  [warn] no crop_meta.json at {meta_path} — assuming offset (0,0)",
+              file=sys.stderr)
+        return 0, 0
+    with open(meta_path) as f:
+        meta = json.load(f)
+    cam = meta.get("cameras", {}).get(cam_name)
+    if cam is None:
+        print(f"  [warn] {cam_name} not in {meta_path} — assuming offset (0,0)",
+              file=sys.stderr)
+        return 0, 0
+    return int(cam["off_x"]), int(cam["off_y"])
+
+
 def _pad_bbox(x1, y1, x2, y2, pad: float, W: int, H: int):
     """Add proportional padding and clamp to image bounds."""
     bw, bh = x2 - x1, y2 - y1
@@ -132,7 +157,7 @@ def _preprocess_crop(img_np: np.ndarray, x1, y1, x2, y2,
 
 def _decode_heatmaps(out: torch.Tensor, crop_x1: int, crop_y1: int,
                      crop_w: int, crop_h: int) -> np.ndarray:
-    """Convert (1, 308, 256, 192) heatmaps to (308, 3) [x, y, conf] in original pixels."""
+    """Convert (1, 308, 256, 192) heatmaps to (308, 3) [x, y, conf] in centered-image pixels."""
     hm = out.squeeze(0).float()   # (308, 256, 192)
     K, H, W = hm.shape
     flat = hm.reshape(K, -1)
@@ -157,6 +182,10 @@ def process_camera(cam_dir: Path, scene_name: str, rich_root: str,
     body_dir  = cam_dir / "body_data"
     cam_name  = cam_dir.name
     cam_suffix = cam_name.split("_")[-1]
+
+    # SAM3 bboxes (json_data) are in source-image pixels; the centered frames
+    # are cropped, so shift each bbox by -(off_x, off_y) to align them.
+    off_x, off_y = _load_crop_offset(rich_root, scene_name, cam_name)
 
     if not json_dir.is_dir() or not body_dir.is_dir():
         print(f"  [{cam_name}] missing json_data or body_data — skipping")
@@ -242,8 +271,11 @@ def process_camera(cam_dir: Path, scene_name: str, rich_root: str,
                 continue
 
             bb = labels[pid_str]
+            # Shift from source-image coords into the cropped (centered) frame,
+            # then pad; _pad_bbox clamps to the centered image bounds.
             x1, y1, x2, y2 = _pad_bbox(
-                bb["x1"], bb["y1"], bb["x2"], bb["y2"],
+                bb["x1"] - off_x, bb["y1"] - off_y,
+                bb["x2"] - off_x, bb["y2"] - off_y,
                 _BBOX_PAD, W_img, H_img,
             )
             if x2 - x1 < 2 or y2 - y1 < 2:

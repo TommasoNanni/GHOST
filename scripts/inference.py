@@ -307,7 +307,7 @@ def _run_placer(
     T: int,
     smplx_model_path: Path,
     fused_pose: np.ndarray,
-    fused_betas: np.ndarray | None = None,
+    crop_meta_path: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Estimate world-space root translation + orientation via Procrustes DLT.
 
@@ -316,8 +316,6 @@ def _run_placer(
     recover global_orient and pelvis translation jointly.
 
     Args:
-        fused_betas: (P, 10) refined betas from the fusion model; used for FK.
-                     If None, falls back to zeros per person.
         fused_pose:  (T, P, 54, 6) fused body pose from the fusion model (6D).
                      Used for the Procrustes FK step; falls back to raw SAM3D
                      per-camera body_pose if None.
@@ -335,17 +333,25 @@ def _run_placer(
         _smplx_arg = resolve_smplx_models(scene_dir.name, Path(smplx_model_path).parent, _gender_json)
     else:
         _smplx_arg = smplx_model_path
-    placer = BodyPlacer(scene_dir, _smplx_arg)
+    placer = BodyPlacer(scene_dir, _smplx_arg, crop_meta_path=crop_meta_path)
     P = len(all_pids)
     pid_to_slot = {pid: i for i, pid in enumerate(all_pids)}
 
-    # Betas: prefer fused, fall back to zeros
-    betas_by_pid: dict[int, np.ndarray] = {}
-    for i, pid in enumerate(all_pids):
-        if fused_betas is not None:
-            betas_by_pid[pid] = fused_betas[i].astype(np.float32)
-        else:
-            betas_by_pid[pid] = np.zeros(10, dtype=np.float32)
+    # Betas: mean SAM3D betas across all cameras and frames.
+    _betas_lists: dict[int, list[np.ndarray]] = {}
+    for cam_dir in cam_dirs:
+        for pid in all_pids:
+            bf = cam_dir / "body_data" / f"person_{pid}.npz"
+            if bf.exists():
+                d = np.load(bf, allow_pickle=False)
+                if "smplx_betas" in d.files:
+                    _betas_lists.setdefault(pid, []).append(d["smplx_betas"].mean(0))
+    betas_by_pid: dict[int, np.ndarray] = {
+        pid: np.mean(v, axis=0).astype(np.float32)
+        for pid, v in _betas_lists.items()
+    }
+    for pid in all_pids:
+        betas_by_pid.setdefault(pid, np.zeros(10, dtype=np.float32))
 
     # Build fused_betas_map for scale estimation
     fused_betas_map = {
@@ -377,8 +383,8 @@ def _run_placer(
     del placer.depth_mm, placer.depth_conf
     placer.depth_mm = placer.depth_conf = None
 
-    logger.info("Running Procrustes DLT translation + orientation (Sapiens) ...")
-    trans_dict, orient_dict = placer.estimate_procrustes_dlt_sapiens(
+    logger.info("Running Procrustes DLT translation + orientation (MHR70) ...")
+    trans_dict, orient_dict = placer.estimate_procrustes_dlt_mhr(
         scale=scale_per_frame,
         all_pids=set(all_pids),
         pred_betas_by_pid=betas_by_pid,
@@ -407,17 +413,58 @@ def _run_placer(
             if 0 <= t_rel < T:
                 orient_R[t_rel, p] = R_mat
 
-    # placer returns pelvis_world = R @ J_can[0] + t, but downstream code
-    # (visualizer, evaluator) expects SMPL-X transl = t = pelvis_world - J_can[0].
-    # J_can[0] depends only on betas, so compute once per person.
+    # Canonical pelvis offset J_can[0] per person (depends only on betas).
     _zero_pose   = np.zeros((1, 63), dtype=np.float32)
     _zero_orient = np.zeros((1,  3), dtype=np.float32)
-    for i, pid in enumerate(all_pids):
-        J0 = placer._smplx_fk(
+    J0_by_pid: dict[int, np.ndarray] = {
+        pid: placer._smplx_fk(
             betas_by_pid[pid][np.newaxis], _zero_pose, _zero_orient
         )[0, 0]  # (3,) canonical pelvis offset
+        for pid in all_pids
+    }
+
+    # ── Single-view fallback ──────────────────────────────────────────────
+    # Procrustes DLT needs ≥2 cameras, so persons seen in a single view stay
+    # NaN above.  Place them from that camera's SAM3D estimate instead:
+    # pelvis_cam = J_can[0] + smplx_transl, pushed through the (scaled) VGGT
+    # extrinsic to world.  Less accurate (SAM3D depth) but fine for viewing.
+    from scipy.spatial.transform import Rotation as _SciR
+    n_fallback = 0
+    for k, cam_persons in enumerate(raw):
+        for pid, pdata in cam_persons.items():
+            p = pid_to_slot.get(pid)
+            if p is None:
+                continue
+            fi = pdata.get("frame_indices")
+            tr = pdata.get("smplx_transl")
+            go = pdata.get("smplx_global_orient")
+            if fi is None or tr is None or go is None:
+                continue
+            for i, gf in enumerate(fi.astype(int)):
+                t_rel = int(gf) - frame_start
+                if not (0 <= t_rel < T):
+                    continue
+                if np.isfinite(root_translation[t_rel, p, 0]):
+                    continue
+                if not placer.cam_valid[t_rel, k]:
+                    continue
+                s   = float(scale_per_frame[t_rel])
+                ext = placer.extrinsics[t_rel, k].astype(np.float64)
+                R_k, t_k = ext[:3, :3], ext[:3, 3] * s
+                pelvis_cam   = J0_by_pid[pid] + tr[i]
+                pelvis_world = R_k.T @ (pelvis_cam - t_k)
+                root_translation[t_rel, p] = pelvis_world.astype(np.float32)
+                R_cam = _SciR.from_rotvec(go[i]).as_matrix()
+                orient_R[t_rel, p] = (R_k.T @ R_cam).astype(np.float32)
+                n_fallback += 1
+    if n_fallback:
+        logger.info(f"  single-view fallback placement: {n_fallback} (frame, person) entries")
+
+    # placer returns pelvis_world = R @ J_can[0] + t, but downstream code
+    # (visualizer, evaluator) expects SMPL-X transl = t = pelvis_world - J_can[0].
+    for i, pid in enumerate(all_pids):
         valid = np.isfinite(root_translation[:, i, 0])
-        root_translation[valid, i] -= J0
+        root_translation[valid, i] -= J0_by_pid[pid]
 
     vggt_cameras = _build_vggt_cameras(placer, scale_per_frame)
 
@@ -434,6 +481,7 @@ def main() -> None:
     parser.add_argument("--checkpoint",      required=True, type=Path, help="FusionWithBetas checkpoint (.pt).")
     parser.add_argument("--smplx_model",     required=True, type=Path, help="Path to SMPLX_NEUTRAL.pkl.")
     parser.add_argument("--output",          type=Path, default=None,  help="Output .npz path (default: scene_dir/inference_result.npz).")
+    parser.add_argument("--crop_meta",       type=Path, default=None,  help="Path to crop_meta.json (centered-image crop offsets) for SAM3D kp2d→VGGT correction.")
     parser.add_argument("--device",          default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -470,15 +518,14 @@ def main() -> None:
         # betas_out : (1, P, 10) or None
 
     fused_pose  = pose_aggr[0].cpu().numpy()              # (T, P, J, 6)
-    fused_betas = betas_out[0].cpu().numpy() if betas_out is not None else None  # (P, 10)
 
     # ── 4. BodyPlacer (Procrustes DLT) ──────────────────────────────────────
     logger.info("Running BodyPlacer (Procrustes DLT) ...")
     root_translation, orient_R, vggt_cameras = _run_placer(
         scene_dir, cam_dirs, raw, all_pids, frame_start, T,
         smplx_model_path=args.smplx_model,
-        fused_betas=fused_betas,
         fused_pose=fused_pose,
+        crop_meta_path=args.crop_meta,
     )
     # orient_R: (T, P, 3, 3) — NaN where not estimated
 
@@ -493,9 +540,6 @@ def main() -> None:
         "camera_names":     np.array([d.name for d in cam_dirs]),
         "frame_start":      np.array(frame_start, dtype=np.int32),
     }
-    if fused_betas is not None:
-        save_dict["fused_betas"] = fused_betas       # (P, 10)
-
     output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(str(output), **save_dict)
     logger.info("Done.")
