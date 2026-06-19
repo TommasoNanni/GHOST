@@ -1,13 +1,11 @@
-"""Body metrics for FusionWithBetas evaluation.
+"""Body metrics for PoseFusionModule evaluation.
 
-Three metrics, no camera or alignment assumptions:
+Two metrics, no camera or alignment assumptions:
 
   RR-MPJPE   root-relative MPJPE (metres)     — subtract joint 0, compare positions
   RR-MPJRE   root-relative MPJRE (degrees)    — compare parent-relative rotations, skip root
-  Betas-MSE  mean squared error on betas      — per person, averaged over scenes
 
-update() is called once per (time step, person) for the joint metrics,
-and once per person for BetasMSE.
+update() is called once per (time step, person).
 """
 
 from __future__ import annotations
@@ -108,26 +106,6 @@ class RootRelativeMPJRE(Metric):
     def compute(self) -> Dict[str, float]:
         return self._aggregate()
 
-
-class BetasMSE(Metric):
-    """Mean squared error between predicted and GT SMPL-X betas.
-
-    update() once per person.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(name="Betas-MSE", higher_is_better=False)
-
-    def update(self, pred_betas: np.ndarray, gt_betas: np.ndarray) -> None:
-        """
-        Parameters
-        ----------
-        pred_betas, gt_betas : (10,)
-        """
-        self._record(float(np.mean((pred_betas - gt_betas) ** 2)))
-
-    def compute(self) -> Dict[str, float]:
-        return self._aggregate()
 
 
 class MetricCollection:

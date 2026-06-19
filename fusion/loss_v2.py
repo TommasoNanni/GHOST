@@ -1,8 +1,7 @@
-"""Losses for FusionWithBetas (train_rich_v2.py).
+"""Losses for PoseFusionModule (train_rich_v2.py).
 
-preds = (pose_aggr, betas_out)
+preds = (pose_aggr,)
   preds[0] : (B, T, P, J, 6)  — fused 6-D body pose
-  preds[1] : (B, P, 10)       — refined SMPL-X betas
 
 All losses are self-contained; no imports from loss.py.
 """
@@ -120,36 +119,6 @@ class TemporalSmoothnessLoss(Loss):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Shape
-# ─────────────────────────────────────────────────────────────────────────────
-
-class ShapeMSELoss(Loss):
-    """MSE between predicted betas and GT betas.
-
-    GT betas are the same for all frames (static per clip); we average over
-    valid frames to get a single (B, P, 10) reference.
-    """
-
-    def __init__(self, name: str = "Shape MSE Loss", weight: float = 1.0) -> None:
-        super().__init__(name, weight)
-
-    def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
-        betas_out = preds[1]            # (B, P, 10)
-        shape_gt  = targets["shape"]    # (B, T, P, 10)
-
-        if "gt_valid" in targets:
-            mask = targets["gt_valid"]  # (B, T, P)
-            if not mask.any():
-                return betas_out.new_zeros([])
-            mask_f = mask.to(shape_gt.dtype).unsqueeze(-1)    # (B, T, P, 1)
-            shape_gt_mean = (shape_gt * mask_f).sum(dim=1) / mask_f.sum(dim=1).clamp(min=1)
-        else:
-            shape_gt_mean = shape_gt.mean(dim=1)              # (B, P, 10)
-
-        return F.mse_loss(betas_out.float(), shape_gt_mean.float())
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Joint positions (FK-based)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -164,9 +133,6 @@ class JointPositionLoss(Loss):
     ----------
     body_only  : if True, supervise only body joints 0-21 (skip hands/face).
     chunk_size : number of time steps per SMPL-X call (memory bound).
-    use_gt_betas : if True, use targets["shape"] for FK instead of preds[1].
-                   Keeps betas gradient isolated to ShapeMSELoss during early
-                   training and avoids conflating pose and shape gradients.
     """
 
     def __init__(
@@ -175,12 +141,10 @@ class JointPositionLoss(Loss):
         weight: float = 1.0,
         body_only: bool = False,
         chunk_size: int = 64,
-        use_gt_betas: bool = False,
     ) -> None:
         super().__init__(name, weight)
-        self.body_only    = body_only
-        self.chunk_size   = chunk_size
-        self.use_gt_betas = use_gt_betas
+        self.body_only  = body_only
+        self.chunk_size = chunk_size
 
     def forward(self, preds: tuple, targets: dict) -> torch.Tensor:
         if "gt_joints" not in targets:
@@ -201,10 +165,7 @@ class JointPositionLoss(Loss):
         gt_root = targets["pose"][..., :1, :].float()[:, :T]  # (B, T, P, 1, 6)
         pose_full = torch.cat([gt_root, pose_aggr], dim=3)    # (B, T, P, 55, 6)
 
-        if self.use_gt_betas:
-            betas = targets["shape"].float()[:, :T]
-        else:
-            betas = preds[1].unsqueeze(1).expand(B, T, P, 10)
+        betas = targets["shape"].float()[:, :T]
 
         chunks = []
         for t0 in range(0, T, self.chunk_size):

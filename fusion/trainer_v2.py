@@ -508,7 +508,7 @@ class TrainerV2:
             and isinstance(self.model, torch.nn.parallel.DistributedDataParallel)
         ) else self.model
 
-        _MODEL_KEYS = {"pose", "person_mask", "joint_mask", "shape"}
+        _MODEL_KEYS = {"pose", "person_mask", "joint_mask"}
 
         if isinstance(inputs, dict):
             model_inputs = {k: v for k, v in inputs.items() if k in _MODEL_KEYS}

@@ -54,7 +54,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from fusion.fusion_module_v2 import FusionWithBetas, PoseFusionModule, BetasAggregator
+from fusion.fusion_module_v2 import PoseFusionModule
 from fusion.placer import BodyPlacer
 from utilities.rich_gender_plugin import resolve_smplx_models
 
@@ -586,21 +586,18 @@ def build_fusion_tensors(
     )
 
 
-def load_fusion_model(checkpoint: Path, device: torch.device) -> FusionWithBetas:
+def load_fusion_model(checkpoint: Path, device: torch.device) -> PoseFusionModule:
     ckpt  = torch.load(checkpoint, map_location=device)
     state = ckpt.get("model_state_dict", ckpt.get("model", ckpt))
-    emb_dim   = state["pose_module.joint_id_embedding.weight"].shape[1]
-    n_joints  = state["pose_module.joint_id_embedding.weight"].shape[0]
-    n_layers  = sum(1 for k in state
-                    if k.startswith("pose_module.layers.") and k.endswith(".ff.norm.weight"))
-    max_tlen  = state["pose_module.temporal_pe.pe"].shape[0]
+    emb_dim  = state["joint_id_embedding.weight"].shape[1]
+    n_joints = state["joint_id_embedding.weight"].shape[0]
+    n_layers = sum(1 for k in state if k.startswith("layers.") and k.endswith(".ff.norm.weight"))
+    max_tlen = state["temporal_pe.pe"].shape[0]
 
-    pose_module = PoseFusionModule(
+    model = PoseFusionModule(
         embedding_dim=emb_dim, num_layers=n_layers,
         num_joints=n_joints, max_temporal_len=max_tlen,
-    )
-    betas_agg = BetasAggregator(n_betas=10, embedding_dim=64, num_inducing=4, num_heads=4, dropout=0.3, input_noise_std=0.5)
-    model = FusionWithBetas(pose_module, betas_agg).to(device)
+    ).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
     logger.info(f"Loaded checkpoint: emb={emb_dim} layers={n_layers} joints={n_joints}")
@@ -615,7 +612,7 @@ def evaluate_scene(
     scene_dir:        Path,
     scene_name:       str,
     rich_root:        Path,
-    fusion_model:     FusionWithBetas,
+    fusion_model:     PoseFusionModule,
     device:           torch.device,
     smplx_model_path: Path,
     gt_split:         str = "test",
@@ -656,8 +653,8 @@ def evaluate_scene(
     pid_to_slot = {pid: i for i, pid in enumerate(all_pids)}
 
     with torch.no_grad():
-        fused_pose_t, betas_out = fusion_model(
-            pose_t.to(device), mask_t.to(device), shape=shape_t.to(device)
+        fused_pose_t = fusion_model(
+            pose_t.to(device), mask_t.to(device),
         )
     fused_pose  = fused_pose_t[0].cpu().numpy()                                  # (T, P, 54, 6)
 

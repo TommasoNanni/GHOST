@@ -37,15 +37,14 @@ from torch.utils.data.distributed import DistributedSampler
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.fusion_module_v2 import BetasAggregator, FusionWithBetas, PoseFusionModule
+from fusion.fusion_module_v2 import PoseFusionModule
 from fusion.loss_v2 import (
     JointPositionLoss,
     PoseMSELoss,
-    ShapeMSELoss,
     TemporalSmoothnessLoss,
     VPoserLoss,
 )
-from fusion.metrics_v2 import BetasMSE, MetricCollection, RootRelativeMPJPE, RootRelativeMPJRE
+from fusion.metrics_v2 import MetricCollection, RootRelativeMPJPE, RootRelativeMPJRE
 from fusion.trainer_v2 import TrainerV2
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
@@ -242,25 +241,17 @@ def main():
         dropout=dropout,
         temporal_window=temporal_window,
     )
-    betas_aggregator = BetasAggregator(n_betas=10, embedding_dim=64, num_inducing=4, num_heads=4, dropout=0.3, input_noise_std=0.5)
-    model = FusionWithBetas(pose_module, betas_aggregator).to(device)
+    model = pose_module.to(device)
 
     if is_main:
-        n_pose  = sum(p.numel() for p in pose_module.parameters())
-        n_betas = sum(p.numel() for p in betas_aggregator.parameters())
-        logger.info(f"PoseFusionModule : {n_pose:,} params")
-        logger.info(f"BetasAggregator  : {n_betas:,} params")
-        logger.info(f"Total            : {n_pose + n_betas:,} params")
+        n_params = sum(p.numel() for p in model.parameters())
+        logger.info(f"PoseFusionModule : {n_params:,} params")
 
     if use_ddp:
         model = DDP(model, device_ids=[local_rank], find_unused_parameters=False)
 
     # ── Optimizer & scheduler ─────────────────────────────────────────────────
-    betas_params = set(betas_aggregator.parameters())
-    optimizer = torch.optim.Adam([
-        {"params": [p for p in model.parameters() if p not in betas_params]},
-        {"params": list(betas_params), "weight_decay": 1e-3},
-    ], lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if scheduler_name == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -273,7 +264,6 @@ def main():
 
     # ── Loss weights ──────────────────────────────────────────────────────────
     pose_mse_weight        = CONFIG.fusion.loss.pose_mse_weight
-    shape_mse_weight       = CONFIG.fusion.loss.shape_mse_weight
     temporal_weight        = CONFIG.fusion.loss.temporal_weight
     vposer_weight          = CONFIG.fusion.loss.vposer_weight
     joint_position_weight  = CONFIG.fusion.loss.joint_position_weight
@@ -282,16 +272,15 @@ def main():
     # JointPositionLoss uses GT betas for FK to keep pose gradients clean.
     # Betas supervision comes from ShapeMSELoss (direct MSE on preds[1]).
     losses = {
-        "pose":           (PoseMSELoss(),                        pose_mse_weight),
-        "shape":          (ShapeMSELoss(),                       shape_mse_weight),
-        "joint_position": (JointPositionLoss(use_gt_betas=False), joint_position_weight),
-        "vposer":         (VPoserLoss(),                         vposer_weight),
-        "temporal":       (TemporalSmoothnessLoss(),             temporal_weight),
+        "pose":           (PoseMSELoss(),          pose_mse_weight),
+        "joint_position": (JointPositionLoss(),    joint_position_weight),
+        "vposer":         (VPoserLoss(),           vposer_weight),
+        "temporal":       (TemporalSmoothnessLoss(), temporal_weight),
     }
 
     # ── Curriculum ────────────────────────────────────────────────────────────
     curriculum_schedule = {
-        0: ["pose", "shape", "joint_position"],
+        0: ["pose", "joint_position"],
         50: ["vposer", "temporal"],
     }
 
@@ -299,26 +288,25 @@ def main():
     from pytorch3d.transforms import rotation_6d_to_matrix
     from utilities.smplx_utilities import get_smplx_joints
 
-    metrics = MetricCollection([RootRelativeMPJPE(), RootRelativeMPJRE(), BetasMSE()])
+    metrics = MetricCollection([RootRelativeMPJPE(), RootRelativeMPJRE()])
     METRIC_STRIDE = 8  # evaluate every Nth frame to keep FK memory bounded
 
     def metric_fn(preds, targets, mc):
         pose_aggr = preds[0]              # (B, T, P, J, 6)  — J=54 (no root)
-        betas_out = preds[1]              # (B, P, 10)
         gt_joints = targets["gt_joints"]  # (B, T, P, 55, 3)
 
         B, T, P = pose_aggr.shape[:3]
         t_idx = torch.arange(0, T, METRIC_STRIDE, device=pose_aggr.device)
 
+        gt_valid = targets.get("gt_valid")
+
         with torch.no_grad():
             pose_sub  = pose_aggr[:, t_idx].float()                        # (B, T', P, 54, 6)
 
-            # Prepend GT global_orient so pred and GT FK share the same root frame.
-            # After root-relative subtraction, global rotation cancels — pure body pose comparison.
             gt_root   = targets["pose"][:, t_idx, :, :1, :].float()       # (B, T', P, 1, 6)
             pose_full = torch.cat([gt_root, pose_sub], dim=3)              # (B, T', P, 55, 6)
 
-            betas_exp   = betas_out.unsqueeze(1).expand(B, len(t_idx), P, 10).float()
+            betas_exp   = targets["shape"][:, t_idx].float()              # (B, T', P, 10)
             pred_joints = get_smplx_joints(pose_full, betas_exp).cpu().numpy()[..., :55, :]  # (B,T',P,55,3)
             gt_joints_sub = gt_joints[:, t_idx].float().cpu().numpy()      # (B, T', P, 55, 3)
 
@@ -326,18 +314,6 @@ def main():
 
             gt_pose_sub = targets["pose"][:, t_idx].float().cpu()          # (B, T', P, 55, 6)
             rot_gt = rotation_6d_to_matrix(gt_pose_sub.reshape(-1, 6)).reshape(B, len(t_idx), P, 55, 3, 3).numpy()
-
-            betas_np = betas_out.float().cpu().numpy()                     # (B, P, 10)
-
-            # Compute masked time-mean of GT betas — same reference as ShapeMSELoss.
-            gt_valid = targets.get("gt_valid")
-            shape_gt = targets["shape"].float()                            # (B, T, P, 10)
-            if gt_valid is not None:
-                mask_f = gt_valid.float().unsqueeze(-1)                    # (B, T, P, 1)
-                count  = mask_f.sum(dim=1).clamp(min=1)                    # (B, P, 1)
-                gt_betas_mean = ((shape_gt * mask_f).sum(dim=1) / count).cpu().numpy()  # (B, P, 10)
-            else:
-                gt_betas_mean = shape_gt.mean(dim=1).cpu().numpy()        # (B, P, 10)
 
         for b in range(B):
             for t in range(len(t_idx)):
@@ -348,12 +324,6 @@ def main():
                         continue
                     mc["RR-MPJPE"].update(pred_joints[b, t, p], gt_joints_sub[b, t, p])
                     mc["RR-MPJRE"].update(rot_pred[b, t, p], rot_gt[b, t, p])
-
-            for p in range(P):
-                # Only update if person has at least one valid GT frame.
-                if gt_valid is not None and not gt_valid[b, :, p].any():
-                    continue
-                mc["Betas-MSE"].update(betas_np[b, p], gt_betas_mean[b, p])
 
     # ── Resume checkpoint ─────────────────────────────────────────────────────
     resume_checkpoint = None

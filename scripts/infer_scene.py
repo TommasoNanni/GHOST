@@ -31,7 +31,7 @@ import tyro
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.fusion_module_v2 import BetasAggregator, FusionWithBetas, PoseFusionModule
+from fusion.fusion_module_v2 import PoseFusionModule
 from fusion.placer import BodyPlacer
 from utilities.rich_gender_plugin import resolve_smplx_models
 
@@ -50,9 +50,9 @@ def _R_to_6d(R: np.ndarray) -> np.ndarray:
     return np.concatenate([R[..., 0, :], R[..., 1, :]], axis=-1)
 
 
-def _build_model() -> FusionWithBetas:
+def _build_model() -> PoseFusionModule:
     arch = CONFIG.fusion.architecture
-    pose_module = PoseFusionModule(
+    return PoseFusionModule(
         embedding_dim    = arch.embedding_dimension,
         num_heads        = arch.num_heads,
         num_layers       = arch.num_layers,
@@ -60,11 +60,9 @@ def _build_model() -> FusionWithBetas:
         dropout          = arch.dropout,
         temporal_window  = arch.temporal_window,
     )
-    betas_aggregator = BetasAggregator(n_betas=10, embedding_dim=64, num_inducing=4, num_heads=4, dropout=0.3, input_noise_std=0.5)
-    return FusionWithBetas(pose_module, betas_aggregator)
 
 
-def _load_checkpoint(model: FusionWithBetas, checkpoint: Path) -> None:
+def _load_checkpoint(model: PoseFusionModule, checkpoint: Path) -> None:
     logger.info(f"Loading checkpoint: {checkpoint}")
     state = torch.load(str(checkpoint), map_location="cpu")
     model.load_state_dict(state["model"])
@@ -73,7 +71,7 @@ def _load_checkpoint(model: FusionWithBetas, checkpoint: Path) -> None:
 
 
 def _run_forward(
-    model:   FusionWithBetas,
+    model:   PoseFusionModule,
     dp:      RICHFusionDatapoint,
     device:  torch.device,
 ) -> dict[str, np.ndarray]:
@@ -99,11 +97,10 @@ def _run_forward(
                    for k, v in inputs.items()}
 
             with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
-                pose_aggr, betas_out = model(
+                pose_aggr = model(
                     pose        = inp["pose"],          # (B, T, K, P, 55, 6)
                     person_mask = inp["person_mask"],   # (B, T, K, P)
                     joint_mask  = inp["joint_mask"],    # (B, T, K, P, 55)
-                    shape       = inp["shape"],         # (B, T, K, P, 10)
                 )
 
             # pose_aggr: (B, T, P, 54, 6) — root excluded by model

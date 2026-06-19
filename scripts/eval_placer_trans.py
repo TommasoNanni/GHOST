@@ -992,25 +992,20 @@ def _6d_to_aa(sixd: np.ndarray) -> np.ndarray:
 
 
 def _load_fusion_model(checkpoint: Path, device: "torch.device"):
-    """Load FusionWithBetas from a checkpoint, infer hyper-params from state dict."""
+    """Load PoseFusionModule from a checkpoint, infer hyper-params from state dict."""
     import torch
-    from fusion.fusion_module_v2 import FusionWithBetas, PoseFusionModule, BetasAggregator
+    from fusion.fusion_module_v2 import PoseFusionModule
     ckpt  = torch.load(checkpoint, map_location=device)
     state = ckpt.get("model_state_dict", ckpt.get("model", ckpt))
-    embedding_dim    = state["pose_module.joint_id_embedding.weight"].shape[1]
-    num_joints       = state["pose_module.joint_id_embedding.weight"].shape[0]
+    embedding_dim    = state["joint_id_embedding.weight"].shape[1]
+    num_joints       = state["joint_id_embedding.weight"].shape[0]
     num_layers       = sum(1 for k in state
-                           if k.startswith("pose_module.layers.") and k.endswith(".ff.norm.weight"))
-    max_temporal_len = state["pose_module.temporal_pe.pe"].shape[0]
-    num_inducing     = state["betas_aggregator.inducing_points"].shape[0]
-    betas_emb_dim    = state["betas_aggregator.inducing_points"].shape[1]
-    pose_module = PoseFusionModule(
+                           if k.startswith("layers.") and k.endswith(".ff.norm.weight"))
+    max_temporal_len = state["temporal_pe.pe"].shape[0]
+    model = PoseFusionModule(
         embedding_dim=embedding_dim, num_layers=num_layers,
         num_joints=num_joints, max_temporal_len=max_temporal_len,
-    )
-    betas_agg = BetasAggregator(n_betas=10, embedding_dim=betas_emb_dim,
-                                num_inducing=num_inducing, dropout=0.1)
-    model = FusionWithBetas(pose_module, betas_agg).to(device)
+    ).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
     print(f"  [fusion] loaded checkpoint: embedding_dim={embedding_dim} "
@@ -1088,9 +1083,9 @@ def _run_fusion_fwd(
     shape_t = torch.from_numpy(shape_arr).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        pose_aggr, betas_out = model(pose_t, mask_t, shape=shape_t)
+        pose_aggr = model(pose_t, mask_t)
 
-    fused_pose  = pose_aggr[0].cpu().numpy()   # (T, P, J, 6)
+    fused_pose = pose_aggr[0].cpu().numpy()   # (T, P, J, 6)
     return fused_pose, all_pids, frame_start
 
 

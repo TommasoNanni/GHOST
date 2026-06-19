@@ -52,7 +52,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from fusion.fusion_module_v2 import FusionWithBetas, PoseFusionModule, BetasAggregator
+from fusion.fusion_module_v2 import PoseFusionModule
 from fusion.placer import BodyPlacer
 from utilities.rich_gender_plugin import resolve_smplx_models
 
@@ -212,8 +212,8 @@ def _build_tensors(
 # Model loading
 # ---------------------------------------------------------------------------
 
-def _load_model(checkpoint: Path, device: torch.device) -> FusionWithBetas:
-    """Load FusionWithBetas from a checkpoint.
+def _load_model(checkpoint: Path, device: torch.device) -> PoseFusionModule:
+    """Load PoseFusionModule from a checkpoint.
 
     The checkpoint must be a dict with either:
     - ``"model_state_dict"`` (saved by TrainerV2), or
@@ -224,20 +224,17 @@ def _load_model(checkpoint: Path, device: torch.device) -> FusionWithBetas:
     ckpt = torch.load(checkpoint, map_location=device)
     state = ckpt.get("model_state_dict", ckpt.get("model", ckpt))
 
-    # Infer embedding_dim from joint_id_embedding weight shape.
-    embedding_dim    = state["pose_module.joint_id_embedding.weight"].shape[1]
-    num_joints       = state["pose_module.joint_id_embedding.weight"].shape[0]
-    num_layers       = sum(1 for k in state if k.startswith("pose_module.layers.") and k.endswith(".ff.norm.weight"))
-    max_temporal_len = state["pose_module.temporal_pe.pe"].shape[0]
+    embedding_dim    = state["joint_id_embedding.weight"].shape[1]
+    num_joints       = state["joint_id_embedding.weight"].shape[0]
+    num_layers       = sum(1 for k in state if k.startswith("layers.") and k.endswith(".ff.norm.weight"))
+    max_temporal_len = state["temporal_pe.pe"].shape[0]
 
-    pose_module = PoseFusionModule(
+    model = PoseFusionModule(
         embedding_dim=embedding_dim,
         num_layers=num_layers,
         num_joints=num_joints,
         max_temporal_len=max_temporal_len,
-    )
-    betas_agg = BetasAggregator(n_betas=10, hidden_dim=64, dropout=0.1)
-    model = FusionWithBetas(pose_module, betas_agg).to(device)
+    ).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
 
@@ -513,9 +510,8 @@ def main() -> None:
 
     logger.info("Running fusion forward pass ...")
     with torch.no_grad():
-        pose_aggr, betas_out = model(pose_t, mask_t, shape=shape_t)
+        pose_aggr = model(pose_t, mask_t)
         # pose_aggr : (1, T, P, J, 6)
-        # betas_out : (1, P, 10) or None
 
     fused_pose  = pose_aggr[0].cpu().numpy()              # (T, P, J, 6)
 

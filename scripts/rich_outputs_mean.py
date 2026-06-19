@@ -32,7 +32,7 @@ from pytorch3d.transforms import rotation_6d_to_matrix
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.metrics_v2 import BetasMSE, MetricCollection, RootRelativeMPJPE, RootRelativeMPJRE
+from fusion.metrics_v2 import MetricCollection, RootRelativeMPJPE, RootRelativeMPJRE
 from utilities.smplx_utilities import get_smplx_joints
 
 RICH_OUTPUT_ROOT = Path(
@@ -180,7 +180,7 @@ def main():
     for d in sorted(scene_dirs, key=lambda s: s.name):
         print(f"  {d.name}")
 
-    mc = MetricCollection([RootRelativeMPJPE(), RootRelativeMPJRE(), BetasMSE()])
+    mc = MetricCollection([RootRelativeMPJPE(), RootRelativeMPJRE()])
 
     n_ok = 0
     for i, scene_dir in enumerate(scene_dirs):

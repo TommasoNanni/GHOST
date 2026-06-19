@@ -22,3 +22,7 @@ results/
 easy_ViTPose/
 checkpoints
 core_clariden-*
+dry_run_*
+findings.md
+sapiens_m8_state.md
+figures/
