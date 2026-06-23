@@ -77,6 +77,7 @@ class PersonSegmenter:
         redetect_interval: int = 15,
         new_det_thresh: float = 0.4,
         score_threshold_detection: float = 0.3,
+        single_frame_mode: bool = False,
     ):
         self.checkpoint_path = checkpoint_path
         self.device = device
@@ -84,6 +85,9 @@ class PersonSegmenter:
         self.redetect_interval = redetect_interval
         self.new_det_thresh = new_det_thresh
         self.score_threshold_detection = score_threshold_detection
+        # Disables hotstart_delay (requires 15 consecutive frames to confirm a
+        # track, which kills all detections when T=1).
+        self.single_frame_mode = single_frame_mode
 
         # Populated by _init_models()
         self._predictor: Sam3VideoPredictor | None = None
@@ -212,6 +216,8 @@ class PersonSegmenter:
                 self.redetect_interval,
                 self.new_det_thresh,
                 self.score_threshold_detection,
+                video._max_side,
+                self.single_frame_mode,
             ))
 
         newly_segmented = bool(worker_args)
@@ -238,11 +244,14 @@ class PersonSegmenter:
                 video_results[r["video_id"]] = r
 
             # --- filter short-lived tracks (hallucinated detections) ---
-            for video in scene.videos:
-                PersonSegmenter._filter_short_tracks(
-                    scene_dir / video.video_id / "mask_data",
-                    scene_dir / video.video_id / "json_data",
-                )
+            # In single_frame_mode every track spans exactly 1 frame by definition;
+            # skip the filter to avoid wiping all detections.
+            if not self.single_frame_mode:
+                for video in scene.videos:
+                    PersonSegmenter._filter_short_tracks(
+                        scene_dir / video.video_id / "mask_data",
+                        scene_dir / video.video_id / "json_data",
+                    )
 
             # --- compact per-frame .npy files into a single compressed .npz to save space ---
             for video in scene.videos:
@@ -346,6 +355,10 @@ class PersonSegmenter:
                 self._predictor.model.new_det_thresh = self.new_det_thresh
                 self._predictor.model.score_threshold_detection = self.score_threshold_detection
                 self._predictor.model.o2o_matching_masklets_enable = True
+                if self.single_frame_mode:
+                    self._predictor.model.hotstart_delay = 0
+                    self._predictor.model.hotstart_unmatch_thresh = 0
+                    self._predictor.model.hotstart_dup_thresh = 0
             except AttributeError:
                 pass
 
@@ -364,12 +377,17 @@ class PersonSegmenter:
                 )
             )
 
-            # Propagate through the entire video
+            # Propagate through the entire video. In single_frame_mode the video
+            # has only 1 frame; using "both" would re-process frame 0 in the
+            # backward pass and overwrite the forward results with empty labels.
             objects_count = 0
             for response in self._predictor.handle_stream_request(
                 request=dict(
                     type="propagate_in_video",
                     session_id=session_id,
+                    propagation_direction=(
+                        "forward" if self.single_frame_mode else "both"
+                    ),
                 )
             ):
                 frame_idx = response["frame_index"]
@@ -528,7 +546,9 @@ class PersonSegmenter:
             # Compact immediately after each video to free disk space before
             # the next camera starts on this GPU.
             vid_out = Path(task_args[4])
-            PersonSegmenter._filter_short_tracks(vid_out / "mask_data", vid_out / "json_data")
+            single_frame_mode = task_args[-1]
+            if not single_frame_mode:
+                PersonSegmenter._filter_short_tracks(vid_out / "mask_data", vid_out / "json_data")
             PersonSegmenter._compact_mask_data(vid_out)
             results.append(result)
         return results
@@ -545,6 +565,8 @@ class PersonSegmenter:
         redetect_interval: int = 30,
         new_det_thresh: float = 0.4,
         score_threshold_detection: float = 0.3,
+        max_side: int | None = None,
+        single_frame_mode: bool = False,
     ) -> dict:
         """Segment one video on a specific GPU (runs in a child process).
 
@@ -591,6 +613,7 @@ class PersonSegmenter:
         video_handle = Video(
             path=Path(video_path) if video_path is not None else None,
             frames_dir=Path(video_frames_dir) if video_frames_dir is not None else None,
+            max_side=max_side,
         )
         video_handle.video_id = video_id  # keep consistent with caller's id
         # Extract frames to the canonical co-located path, not into vid_out.
@@ -612,6 +635,10 @@ class PersonSegmenter:
                 predictor.model.new_det_thresh = new_det_thresh
                 predictor.model.score_threshold_detection = score_threshold_detection
                 predictor.model.o2o_matching_masklets_enable = True
+                if single_frame_mode:
+                    predictor.model.hotstart_delay = 0
+                    predictor.model.hotstart_unmatch_thresh = 0
+                    predictor.model.hotstart_dup_thresh = 0
             except AttributeError:
                 pass
 
@@ -630,11 +657,14 @@ class PersonSegmenter:
                 )
             )
 
-            # Propagate through entire video
+            # Propagate through entire video. In single_frame_mode the video
+            # has only 1 frame; using "both" would re-process frame 0 in the
+            # backward pass and overwrite the forward results with empty labels.
             for resp in predictor.handle_stream_request(
                 request=dict(
                     type="propagate_in_video",
                     session_id=session_id,
+                    propagation_direction="forward" if single_frame_mode else "both",
                 )
             ):
                 frame_idx = resp["frame_index"]
