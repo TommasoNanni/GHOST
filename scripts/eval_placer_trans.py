@@ -54,7 +54,7 @@ SMPLX_MODEL:      Path
 USE_GT_INTRINSICS: bool = False
 MAX_SCENES:       int | None = None
 CAMERAS_ONLY:     bool = False
-FUSION_MODEL  = None   # loaded FusionWithBetas, set by argparse
+FUSION_MODEL  = None   # loaded PoseFusionModule, set by argparse
 FUSION_DEVICE = None   # torch.device
 
 # RICH cameras resolution (full-res, before max_side=1440 resize).
@@ -1134,7 +1134,7 @@ def run() -> None:
                         and (cam_dir / "body_data" / f"person_{pid}.npz").exists()
                     }
                     _scale_c = placer.estimate_scale_triangulated(
-                        fused_betas_map=_bm, fused_pose_by_pid=_pts, frame_start=_fs,
+                        pred_betas_map=_bm, fused_pose_by_pid=_pts, frame_start=_fs,
                     )
                     _scale_cameras = float(np.median(_scale_c))
                 else:
@@ -1165,7 +1165,7 @@ def run() -> None:
         assert all_pids, f"No body_data found under {scene_dir}"
 
         pred_betas_map_by_pid = load_pred_betas(cam_dirs)
-        fused_betas_file_map: dict[Path, np.ndarray] = {
+        pred_betas_file_map: dict[Path, np.ndarray] = {
             cam_dir / "body_data" / f"person_{pid}.npz": pred_betas_map_by_pid[pid]
             for cam_dir in cam_dirs
             for pid in all_pids
@@ -1212,7 +1212,7 @@ def run() -> None:
         else:
             try:
                 scale = placer.estimate_scale_triangulated(
-                    fused_betas_map=fused_betas_file_map,
+                    pred_betas_map=pred_betas_file_map,
                     fused_pose_by_pid=fused_pose_by_pid_arr,
                     frame_start=fwd_frame_start,
                 )  # (T,) per-frame scale
@@ -1326,7 +1326,7 @@ def run() -> None:
             }
             try:
                 scale_gt_betas = placer.estimate_scale_triangulated(
-                    fused_betas_map=_gt_b_file_map,
+                    pred_betas_map=_gt_b_file_map,
                     fused_pose_by_pid=fused_pose_by_pid_arr,
                     frame_start=fwd_frame_start,
                 )  # (T,) per-frame

@@ -21,7 +21,7 @@ Usage:
         --scene_dir /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train/BBQ_001_guitar \\
         --rich_root /capstor/scratch/cscs/tnanni/datasets/rich \\
         --smplx_model body_models/SMPLX_NEUTRAL.pkl \\
-        --checkpoint /users/tnanni/ghost/checkpoints/fusion_module_latest/best.pt \\
+        --checkpoint /users/tnanni/ghost/checkpoints/fusion_module/best.pt \\
         --body_split train_body
 """
 from __future__ import annotations

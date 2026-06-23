@@ -18,6 +18,6 @@ pixi run python scripts/eval_placer_trans.py \
     --rich_root   /capstor/scratch/cscs/tnanni/datasets/rich \
     --smplx_model body_models/SMPLX_NEUTRAL.pkl \
     --max_scenes  2 \
-    --checkpoint  checkpoints/fusion_module_latest/best.pt \
+    --checkpoint  checkpoints/fusion_module/best.pt \
     --device      cuda \
     > results/eval_placer_10scenes.txt 2>&1

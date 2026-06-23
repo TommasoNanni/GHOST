@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 SCENE       = "BBQ_001_guitar"
 GHOST_ROOT  = Path("/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train")
 RICH_ROOT   = Path("/capstor/scratch/cscs/tnanni/datasets/rich")
-CHECKPOINT  = Path("/users/tnanni/ghost/checkpoints/fusion_module_latest/best.pt")
+CHECKPOINT  = Path("/users/tnanni/ghost/checkpoints/fusion_module/best.pt")
 SMPLX_MODEL = Path("/users/tnanni/ghost/body_models/SMPLX_NEUTRAL.pkl")
 DEVICE      = torch.device("cpu")   # no GPU needed
 GT_SPLIT    = "train"
@@ -204,7 +204,7 @@ def main():
     placer = BodyPlacer(scene_dir, SMPLX_MODEL)
     pred_scale = placer.estimate_scale_triangulated(
         fused_pose_by_pid=fused_pose_by_pid,
-        fused_betas_map={
+        pred_betas_map={
             cam_dir / "body_data" / f"person_{pid}.npz": betas_by_pid[pid]
             for cam_dir in cam_dirs for pid in all_pids
             if (cam_dir / "body_data" / f"person_{pid}.npz").exists()

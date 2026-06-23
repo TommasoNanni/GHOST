@@ -283,7 +283,7 @@ class BodyPlacer:
         self,
         conf_threshold: float = 0.5,
         min_delta_z: float = 0.05,
-        fused_betas_map: dict[Path, np.ndarray] | None = None,
+        pred_betas_map: dict[Path, np.ndarray] | None = None,
         frame_start: int = 0,
     ) -> np.ndarray:
         """Return per-frame VGGT depth scale ``(T,)`` in metres per VGGT unit.
@@ -303,11 +303,11 @@ class BodyPlacer:
 
         for k, cam_dir in enumerate(self._cam_dirs):
             for body_file in sorted((cam_dir / "body_data").glob("person_*.npz")):
-                fused_betas = (
-                    fused_betas_map.get(body_file) if fused_betas_map is not None else None
+                pred_betas = (
+                    pred_betas_map.get(body_file) if pred_betas_map is not None else None
                 )
                 tagged = self._collect_scale_samples_tagged(
-                    k, body_file, conf_threshold, min_delta_z, fused_betas,
+                    k, body_file, conf_threshold, min_delta_z, pred_betas,
                     frame_start=frame_start,
                 )
                 for global_t, slist in tagged.items():
@@ -333,7 +333,7 @@ class BodyPlacer:
         self,
         fused_pose_by_pid: dict[int, np.ndarray],
         min_cams: int = 2,
-        fused_betas_map: dict[Path, np.ndarray] | None = None,
+        pred_betas_map: dict[Path, np.ndarray] | None = None,
         frame_start: int = 0,
     ) -> np.ndarray:
         """Return per-frame VGGT depth scale using multi-view triangulation (metres / VGGT unit).
@@ -348,7 +348,7 @@ class BodyPlacer:
         Args:
             min_cams: Minimum number of cameras that must observe both endpoints
                 for the triangulation to be attempted.
-            fused_betas_map: Optional ``{body_file: betas (10,)}`` mapping used
+            pred_betas_map: Optional ``{body_file: betas (10,)}`` mapping used
                 to compute FK bone lengths (same semantics as in
                 :meth:`estimate_scale`).
             fused_pose_by_pid: ``{pid: (T_scene, 54, 6)}`` fused body pose from
@@ -396,8 +396,7 @@ class BodyPlacer:
                     continue
 
                 fi = d["frame_indices"]
-                # Use mean SAM3D betas (averaged across cameras+frames) — less biased
-                # than fused BetasAggregator which overestimates bone length by ~20%.
+                # Use mean SAM3D betas (averaged across cameras+frames).
                 b_mean = mean_sam3d_betas.get(pid, np.zeros(10, np.float32))
                 betas = np.tile(b_mean[np.newaxis], (len(fi), 1))
                 if pid not in fused_pose_by_pid:
@@ -1280,7 +1279,7 @@ class BodyPlacer:
         body_file: Path,
         conf_threshold: float,
         min_delta_z: float,
-        fused_betas: np.ndarray | None = None,
+        pred_betas: np.ndarray | None = None,
         frame_start: int = 0,
     ) -> dict[int, list[float]]:
         """Collect scale samples s = L_FK / L_VGGT, tagged by global frame index.
@@ -1303,8 +1302,8 @@ class BodyPlacer:
         T_local = len(frame_indices)
         go_zero = np.zeros((T_local, 3), dtype=np.float32)
 
-        if fused_betas is not None:
-            betas_arr = np.tile(fused_betas[np.newaxis], (T_local, 1))
+        if pred_betas is not None:
+            betas_arr = np.tile(pred_betas[np.newaxis], (T_local, 1))
         else:
             betas_arr = betas
         fk_joints = self._smplx_fk(betas_arr, body_pose, go_zero)  # (T_local, 55, 3)
@@ -1379,12 +1378,12 @@ class BodyPlacer:
         body_file: Path,
         conf_threshold: float,
         min_delta_z: float,
-        fused_betas: np.ndarray | None = None,
+        pred_betas: np.ndarray | None = None,
         frame_start: int = 0,
     ) -> list[float]:
         """Flat list of scale samples; delegates to :meth:`_collect_scale_samples_tagged`."""
         tagged = self._collect_scale_samples_tagged(
-            k, body_file, conf_threshold, min_delta_z, fused_betas,
+            k, body_file, conf_threshold, min_delta_z, pred_betas,
             frame_start=frame_start,
         )
         return [s for sl in tagged.values() for s in sl]
