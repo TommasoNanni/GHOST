@@ -174,12 +174,12 @@ def process_scene(
     _seg_output_dir = Path(output_dir) / scene.scene_id
     _reid_already_done = (_seg_output_dir / "cross_view_reid.json").exists()
     _body_already_done = all(
-        (_seg_output_dir / v.video_id / "body_data").exists()
+        any((_seg_output_dir / v.video_id / "body_data").glob("person_*.npz"))
         for v in scene.videos
     )
 
-    if _body_already_done and _reid_already_done:
-        print(f"\n--- Step 1: Segmentation (skipped — body + ReID already done) ---")
+    if _body_already_done:
+        print(f"\n--- Step 1: Segmentation (skipped — body already done) ---")
         video_dirs = {v.video_id: _seg_output_dir / v.video_id for v in scene.videos}
     else:
         print(f"\n--- Step 1: Segmentation ---")
@@ -200,11 +200,14 @@ def process_scene(
     scene_output_dir = Path(next(iter(video_dirs.values()))).parent
 
     # Step 2: Body parameter estimation.
-    print(f"\n--- Step 2: Body parameter estimation ---")
-    estimator.estimate_scene(
-        scene=scene,
-        video_dirs=video_dirs,
-    )
+    if _body_already_done:
+        print(f"\n--- Step 2: Body parameter estimation (skipped — already done) ---")
+    else:
+        print(f"\n--- Step 2: Body parameter estimation ---")
+        estimator.estimate_scene(
+            scene=scene,
+            video_dirs=video_dirs,
+        )
 
     missing_body = [
         vid_id for vid_id, vid_dir in video_dirs.items()

@@ -30,17 +30,36 @@ ALL_ACTS   = ["01_tagging","02_lego","03_fencing","04_basketball",
 ACTIVITIES = [FILTER_ACT] if FILTER_ACT else ALL_ACTS
 
 remaining = 0
+RAW_ROOT = SQSH_ROOT / "egohumans"
 for activity in ACTIVITIES:
     sqsh = SQSH_ROOT / f"egohumans_{activity}.sqsh"
-    if not sqsh.exists():
-        continue
-    # Mount squash temporarily to count scenes
-    mnt = pathlib.Path(tempfile.mkdtemp())
-    try:
-        r = subprocess.run(["squashfuse", str(sqsh), str(mnt)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if r.returncode != 0:
-            continue
-        cam_ready = mnt / INNER / activity
+    raw_dir = RAW_ROOT / activity
+    if sqsh.exists():
+        # Mount squash temporarily to count scenes
+        mnt = pathlib.Path(tempfile.mkdtemp())
+        try:
+            r = subprocess.run(["squashfuse", str(sqsh), str(mnt)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if r.returncode != 0:
+                continue
+            cam_ready = mnt / INNER / activity
+            if not cam_ready.is_dir():
+                continue
+            for seq_dir in sorted(cam_ready.iterdir()):
+                if not seq_dir.is_dir():
+                    continue
+                out_seq = OUT_ROOT / activity / seq_dir.name
+                done = (
+                    (out_seq / "cross_view_reid.json").exists()
+                    and (out_seq / "vggt_cameras_centered.npz").exists()
+                    and (out_seq / "mapanything_scale_centered.npy").exists()
+                )
+                if not done:
+                    remaining += 1
+        finally:
+            subprocess.run(["fusermount", "-u", str(mnt)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            mnt.rmdir()
+    elif raw_dir.is_dir():
+        cam_ready = raw_dir / INNER / activity
         if not cam_ready.is_dir():
             continue
         for seq_dir in sorted(cam_ready.iterdir()):
@@ -54,9 +73,6 @@ for activity in ACTIVITIES:
             )
             if not done:
                 remaining += 1
-    finally:
-        subprocess.run(["fusermount", "-u", str(mnt)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        mnt.rmdir()
 print(remaining)
 PYEOF
 }

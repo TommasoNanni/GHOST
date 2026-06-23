@@ -159,12 +159,6 @@ def _process_scene(scene_dir: Path, mc: MetricCollection) -> bool:
                 mc["RR-MPJPE"].update(pred_joints[t, p], gt_joints[t, p])
                 mc["RR-MPJRE"].update(rot_pred[t, p], rot_gt[t, p])
 
-        for p in range(P):
-            mc["Betas-MSE"].update(
-                agg_shape_static[p].cpu().numpy(),
-                gt_shape_static[p].cpu().numpy(),
-            )
-
     except Exception as e:
         import traceback
         print(f"  SKIP {scene_dir.name} (processing): {e}")

@@ -524,8 +524,14 @@ class EgoExo4DSceneDataset(Dataset):
         Keep only the first *slice* takes (for quick debugging).
     """
 
-    def __init__(self, frames_root: str | Path, slice: int | None = None):
+    def __init__(
+        self,
+        frames_root: str | Path,
+        slice: int | None = None,
+        max_side: int | None = None,
+    ):
         self.frames_root = Path(frames_root)
+        self._max_side = max_side
         take_dirs = sorted(p for p in self.frames_root.iterdir() if p.is_dir())
         if slice is not None:
             take_dirs = take_dirs[:slice]
@@ -534,11 +540,13 @@ class EgoExo4DSceneDataset(Dataset):
         for take_dir in take_dirs:
             cam_dirs = sorted(
                 p for p in take_dir.iterdir()
-                if p.is_dir() and any(p.glob("*.jpg"))
+                if p.is_dir() and (
+                    any(p.glob("*.jpg")) or any((p / "frames").glob("*.jpg"))
+                )
             )
             if not cam_dirs:
                 continue
-            videos = [Video(path=cam_dir) for cam_dir in cam_dirs]
+            videos = [Video(path=cam_dir, max_side=max_side) for cam_dir in cam_dirs]
             self.scenes.append(Scene(scene_id=take_dir.name, videos=videos))
 
         print(f"EgoExo4DSceneDataset: {len(self.scenes)} takes, "

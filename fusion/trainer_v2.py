@@ -267,7 +267,7 @@ class TrainerV2:
 
         Saved arrays:
           pose       (T, P, J, 6)  — predicted 6-D body pose
-          betas      (P, 10)       — predicted betas (FusionWithBetas only)
+          betas      (P, 10)       — mean SAM3D betas (from inputs)
           gt_pose    (T, P, J, 6)  — ground-truth body pose (when available)
           gt_valid   (T, P)        — ground-truth validity mask (when available)
           gt_betas   (T, P, 10)    — ground-truth betas (when available)
@@ -497,10 +497,9 @@ class TrainerV2:
         """Run the model and return a flat tuple of output tensors.
 
         For PoseFusionModule (single output): returns (pose_aggr,).
-        For FusionWithBetas (two outputs):    returns (pose_aggr, betas_out).
 
         Filters the inputs dict to the keys the model accepts:
-        pose, person_mask, joint_mask, shape. All other keys (e.g. camera,
+        pose, person_mask, joint_mask. All other keys (e.g. camera,
         body_transl_cam_in) are ignored.
         """
         m = self.model.module if (
@@ -518,8 +517,7 @@ class TrainerV2:
         else:
             result = m(inputs)
 
-        # Normalise: if the model returns a tuple (e.g. FusionWithBetas), use it
-        # directly; otherwise wrap the single tensor in a 1-tuple.
+        # Normalise: wrap single tensor in a 1-tuple for uniform handling.
         if isinstance(result, tuple):
             return result
         return (result,)

@@ -316,6 +316,10 @@ def run(
             vggt_intr      = cam_npz["intrinsics"]       # (T, K, 3, 3) 518-space
             vggt_oc        = cam_npz["original_coords"]  # (T, K, 4) [x1,y1,x2,y2]
             vggt_cam_valid = cam_npz["valid"]            # (T, K) bool
+            vggt_cam_names = [
+                n.decode() if isinstance(n, bytes) else n
+                for n in cam_npz["camera_names"]
+            ]                                            # list[str] length K_vggt
             if not vggt_cam_valid.any():
                 vggt_cam_valid = ~np.isnan(vggt_extr[:, :, 0, 0])
 
@@ -594,6 +598,29 @@ def run(
     # ── depth point clouds ────────────────────────────────────────────────────
     _depth_handles: dict[int, object] = {}
     _DEPTH_CONF_THR = 0.5
+    # Lazily opened mask archives keyed by camera index k.
+    _mask_npz: dict[int, object] = {}
+
+    def _get_person_mask(abs_frame: int, k: int, h_full: int, w_full: int) -> np.ndarray | None:
+        """Return a (h_full, w_full) bool array that is True where any person is present."""
+        if k not in _mask_npz:
+            cam_name = vggt_cam_names[k] if k < len(vggt_cam_names) else f"cam_{k:02d}"
+            mpath = scene_dir / cam_name / "mask_data.npz"
+            _mask_npz[k] = np.load(mpath, mmap_mode="r") if mpath.exists() else None
+        npz = _mask_npz[k]
+        if npz is None:
+            return None
+        cam_name = vggt_cam_names[k] if k < len(vggt_cam_names) else f"cam_{k:02d}"
+        cam_idx  = int(cam_name.split("_")[-1])
+        key = f"mask_{abs_frame:05d}_{cam_idx:02d}"
+        if key not in npz:
+            return None
+        raw = npz[key].astype(np.uint16)
+        if raw.shape == (h_full, w_full):
+            return raw > 0
+        from PIL import Image as _PIL
+        resized = np.array(_PIL.fromarray(raw).resize((w_full, h_full), _PIL.NEAREST))
+        return resized > 0
 
     def _depth_cloud(t_idx: int, k: int) -> tuple[np.ndarray, np.ndarray] | None:
         """Unproject camera k's depth map at frame t into viser world space."""
@@ -601,6 +628,7 @@ def run(
                 or not depth_valid_tk[t_idx, k] or not vggt_cam_valid[t_idx, k]):
             return None
         stride = int(gui_depth_stride.value)
+        h_full, w_full = depth_mm[t_idx, k].shape
         d = depth_mm[t_idx, k][::stride, ::stride].astype(np.float32)
         d = d / 1000.0 * float(depth_scale[t_idx])   # → metres
         conf = depth_conf[t_idx, k][::stride, ::stride].astype(np.float32)
@@ -608,10 +636,17 @@ def run(
         h_d, w_d = d.shape
         vv, uu = np.mgrid[0:h_d, 0:w_d].astype(np.float32) * stride
         x1, y1, x2, y2 = vggt_oc[t_idx, k]
-        # Keep only valid-depth, confident pixels inside the un-padded region.
+
+        # Exclude pixels occupied by any person so the depth cloud is background-only.
+        # Mask is loaded at full depth resolution, then downsampled to match d's stride.
+        person_mask_full = _get_person_mask(frame_start + t_idx, k, h_full, w_full)
+        bg = True if person_mask_full is None else ~person_mask_full[::stride, ::stride]
+
+        # Keep only valid-depth, confident, background pixels inside the un-padded region.
         mask = (
             (d > 1e-4) & (conf >= _DEPTH_CONF_THR)
             & (uu >= x1) & (uu < x2) & (vv >= y1) & (vv < y2)
+            & bg
         )
         if not mask.any():
             return None

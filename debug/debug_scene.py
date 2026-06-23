@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 SCENE       = "BBQ_001_guitar"
 GHOST_ROOT  = Path("/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train")
 RICH_ROOT   = Path("/capstor/scratch/cscs/tnanni/datasets/rich")
-CHECKPOINT  = Path("/users/tnanni/ghost/checkpoints/fusion_module_latest/best.pt")
+CHECKPOINT  = Path("/users/tnanni/ghost/checkpoints/fusion_module/best.pt")
 SMPLX_MODEL = Path("/users/tnanni/ghost/body_models/SMPLX_NEUTRAL.pkl")
 DEVICE      = torch.device("cpu")
 GT_SPLIT    = "train"
@@ -199,7 +199,7 @@ else:
     log.info("  MapAnything scale not found — estimating via triangulation ...")
     pred_scale = placer.estimate_scale_triangulated(
         fused_pose_by_pid=fused_pose_by_pid,
-        fused_betas_map=sam3d_betas_map,
+        pred_betas_map=sam3d_betas_map,
         frame_start=frame_start,
     )   # (T_full,) per-frame
 

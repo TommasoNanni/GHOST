@@ -1,9 +1,9 @@
-"""Train FusionWithBetas on multiple RICH scenes with a train/val split.
+"""Train PoseFusionModule on multiple RICH scenes with a train/val split.
 
 Uses:
-  - FusionWithBetas  (PoseFusionModule + BetasAggregator) from fusion_module_v2.py
+  - PoseFusionModule from fusion_module_v2.py
   - TrainerV2        from trainer_v2.py
-  - loss_v2.py       losses adapted for the 2-output preds format
+  - loss_v2.py
 
 Scenes with broken ReID can be added to SKIP_SCENES below.
 
@@ -270,7 +270,6 @@ def main():
 
     # ── Losses ────────────────────────────────────────────────────────────────
     # JointPositionLoss uses GT betas for FK to keep pose gradients clean.
-    # Betas supervision comes from ShapeMSELoss (direct MSE on preds[1]).
     losses = {
         "pose":           (PoseMSELoss(),          pose_mse_weight),
         "joint_position": (JointPositionLoss(),    joint_position_weight),

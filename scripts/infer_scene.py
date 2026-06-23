@@ -151,22 +151,24 @@ def main(
     body_split:         str  = "train_body",
     device:             str  = "cuda" if torch.cuda.is_available() else "cpu",
     centered_data_root: Path | None = None,
+    images_root:        Path | None = None,
 ) -> None:
     """
     Parameters
     ----------
-    scene        : scene directory name, e.g. "BBQ_001_guitar"
-    scenes_root  : root that contains the scene directory (default: config output_directory)
-    checkpoint   : path to a .pt checkpoint; defaults to best.pt in config checkpoint_dir
-    out_dir      : directory where the predictions .npz is written
-    port         : viser WebSocket port
-    no_visualize : save predictions only — do not launch the viewer
-    frame_start  : first RICH frame index (for image loading in the viewer)
-    show_gt      : show GT body in the viewer (if available)
-    show_depth   : show VGGT depth maps as point clouds in the viewer
-    all_people   : run inference on ALL foreground persons, not only the
-                   GT-matched subject (background people get no GT overlay)
-    device       : "cuda" or "cpu"
+    scene          : scene directory name, e.g. "BBQ_001_guitar"
+    scenes_root    : root that contains the scene directory (default: config output_directory)
+    checkpoint     : path to a .pt checkpoint; defaults to best.pt in config checkpoint_dir
+    out_dir        : directory where the predictions .npz is written
+    port           : viser WebSocket port
+    no_visualize   : save predictions only — do not launch the viewer
+    frame_start    : first RICH frame index (for image loading in the viewer)
+    show_gt        : show GT body in the viewer (if available)
+    show_depth     : show VGGT depth maps as point clouds in the viewer
+    all_people     : run inference on ALL foreground persons, not only the
+                     GT-matched subject (background people get no GT overlay)
+    device         : "cuda" or "cpu"
+    images_root    : override for the RICH images root (cam_XX subdirs); defaults to config value
     """
     scene_dir = Path(scenes_root) / scene
     if not scene_dir.exists():
@@ -183,9 +185,10 @@ def main(
 
     # ── load scene ────────────────────────────────────────────────────────────
     logger.info(f"Loading scene: {scene_dir}")
+    _rich_data_root = str(images_root) if images_root is not None else CONFIG.data.rich_data_root
     dp = RICHFusionDatapoint(
         scene_dir      = scene_dir,
-        rich_data_root = CONFIG.data.rich_data_root,
+        rich_data_root = _rich_data_root,
         rich_gt_dir    = CONFIG.data.rich_gt_dir,
         body_split     = body_split,
         restrict_to_gt_persons = not all_people,
@@ -297,6 +300,7 @@ def main(
         f" --predictions {out_file}"
         f" --scene-dir {scene_dir}"
         f" --smplx-model-dir {CONFIG.data.smplx_model_path}"
+        f" --rich-data-root {_rich_data_root}"
         f" --frame-start {frame_start}"
         f" {show_gt_flag}"
         f" {show_depth_flag}"

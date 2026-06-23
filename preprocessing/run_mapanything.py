@@ -274,6 +274,14 @@ class MapAnythingScaleEstimator:
                     if subdir.is_dir():
                         files = sorted(p for p in subdir.iterdir()
                                        if p.suffix.lower() in _IMG_EXTS)
+                        if not files:
+                            # one more level (e.g. images_undistorted/frames/)
+                            for subdir2 in sorted(subdir.iterdir()):
+                                if subdir2.is_dir():
+                                    files = sorted(p for p in subdir2.iterdir()
+                                                   if p.suffix.lower() in _IMG_EXTS)
+                                    if files:
+                                        break
                         if files:
                             break
             if files:

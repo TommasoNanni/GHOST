@@ -16,7 +16,7 @@ Usage:
         --scene Gym_010_lunge2 \\
         --ghost_root /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test \\
         --rich_root  /capstor/scratch/cscs/tnanni/datasets/rich \\
-        --checkpoint checkpoints/fusion_module_latest/best.pt \\
+        --checkpoint checkpoints/fusion_module/best.pt \\
         --smplx_model body_models/SMPLX_NEUTRAL.pkl
 """
 from __future__ import annotations

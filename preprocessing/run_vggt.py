@@ -321,10 +321,11 @@ class VGGTPreprocessor:
             return
 
         with tempfile.TemporaryDirectory() as tmp_dir:
+            nprocs = min(len(devices), len(frame_paths))
             mp.spawn(
                 VGGTPreprocessor._worker_fn,
                 args=(frame_paths, camera_names, output_dir, devices, self.weights, tmp_dir),
-                nprocs=len(devices),
+                nprocs=nprocs,
                 join=True,
             )
             self._merge_chunks(

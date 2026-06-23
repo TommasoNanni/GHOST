@@ -281,33 +281,31 @@ def run_trial(
     true_t = true_t - true_t.min()
 
     K = len(cam_ids)
-    logger.info("  Pairwise offset matrix (estimated vs. true):")
-    for i in range(K):
-        for j in range(i + 1, K):
-            true_pair = int(true_shifts[cam_ids[j]] - true_shifts[cam_ids[i]])
-            if isinstance(offset_mat, torch.Tensor):
-                # dtw / cross_corr: scalar K×K tensor
-                est_pair = offset_mat[i, j].item()
-                err_pair = abs(est_pair - true_pair)
-                flag = " <-- WRONG" if err_pair > 1.5 else ""
-                logger.info(
-                    f"    ({cam_ids[i]} → {cam_ids[j]}): "
-                    f"estimated={est_pair:+.1f}  true={true_pair:+d}  "
-                    f"pairwise_err={err_pair:.1f}  weight={weights[i, j].item():.3f}{flag}"
-                )
-            elif isinstance(offset_mat[i][j], torch.Tensor):
-                # distributional: full per-pair analysis
-                _analyze_distributional_pair(cam_ids[i], cam_ids[j], offset_mat[i][j], true_pair)
-            else:
-                # multi_cross_corr: list of (offset, cost) candidates
-                est_pair = float(offset_mat[i][j][0][0]) if offset_mat[i][j] else 0.0
-                err_pair = abs(est_pair - true_pair)
-                flag = " <-- WRONG" if err_pair > 1.5 else ""
-                logger.info(
-                    f"    ({cam_ids[i]} → {cam_ids[j]}): "
-                    f"estimated={est_pair:+.1f}  true={true_pair:+d}  "
-                    f"pairwise_err={err_pair:.1f}  weight=N/A{flag}"
-                )
+    if VERBOSE:
+        logger.info("  Pairwise offset matrix (estimated vs. true):")
+        for i in range(K):
+            for j in range(i + 1, K):
+                true_pair = int(true_shifts[cam_ids[j]] - true_shifts[cam_ids[i]])
+                if isinstance(offset_mat, torch.Tensor):
+                    est_pair = offset_mat[i, j].item()
+                    err_pair = abs(est_pair - true_pair)
+                    flag = " <-- WRONG" if err_pair > 1.5 else ""
+                    logger.info(
+                        f"    ({cam_ids[i]} → {cam_ids[j]}): "
+                        f"estimated={est_pair:+.1f}  true={true_pair:+d}  "
+                        f"pairwise_err={err_pair:.1f}  weight={weights[i, j].item():.3f}{flag}"
+                    )
+                elif isinstance(offset_mat[i][j], torch.Tensor):
+                    _analyze_distributional_pair(cam_ids[i], cam_ids[j], offset_mat[i][j], true_pair)
+                else:
+                    est_pair = float(offset_mat[i][j][0][0]) if offset_mat[i][j] else 0.0
+                    err_pair = abs(est_pair - true_pair)
+                    flag = " <-- WRONG" if err_pair > 1.5 else ""
+                    logger.info(
+                        f"    ({cam_ids[i]} → {cam_ids[j]}): "
+                        f"estimated={est_pair:+.1f}  true={true_pair:+d}  "
+                        f"pairwise_err={err_pair:.1f}  weight=N/A{flag}"
+                    )
 
     errors = (estimated.cpu() - true_t).abs()
     mae    = errors.mean().item()
@@ -329,12 +327,8 @@ def run_scene(
     scene_dir: Path,
     sync: Synchronizer,
     rng: np.random.Generator,
-    sync_alt: Synchronizer | None = None,
 ) -> dict | None:
     """Run N_TRIALS experiments for one scene.
-
-    If sync_alt is provided, also runs trials with the alternative synchronizer
-    on the same random shifts (joints_position method) and reports both side-by-side.
 
     Returns a summary dict, or None if the scene is not usable.
     """
@@ -349,8 +343,6 @@ def run_scene(
         logger.warning(f"  Skipping: need ≥2 cameras, found {len(cam_data)}")
         return None
 
-    cam_data_joints = load_scene_joints(scene_dir, exclude_cameras=exclude_cams) if sync_alt else {}
-
     pids = common_persons(cam_data)
     if not pids:
         logger.warning("  Skipping: no person ID common across all cameras — run cross-view ReID first.")
@@ -360,7 +352,7 @@ def run_scene(
     logger.info(f"  Cameras: {cam_ids}")
     logger.info(f"  Common persons: {pids}")
 
-    results, results_alt = [], []
+    results = []
     for trial in range(N_TRIALS):
         raw_shifts  = [0] + rng.integers(-MAX_SHIFT, MAX_SHIFT + 1, size=len(cam_ids) - 1).tolist()
         true_shifts = {cam_id: int(s) for cam_id, s in zip(cam_ids, raw_shifts)}
@@ -373,13 +365,6 @@ def run_scene(
             logger.warning(f"  Trial {trial + 1} skipped (insufficient frames after shift)")
             continue
         results.append(result)
-
-        if sync_alt and cam_data_joints:
-            result_alt = run_trial(cam_data_joints, pids, true_shifts, end_cuts, sync_alt)
-            if result_alt is not None:
-                results_alt.append(result_alt)
-                logger.info(f"     [joints_pos] MAE={result_alt['mae']:.2f}  "
-                            f"within-1={result_alt['within_1']*100:.0f}%")
 
         for cam_id, true_t, est, err in zip(cam_ids, result["true_times"], result["estimated"], result["errors"]):
             logger.info(f"     {cam_id}: true={true_t:+.0f}  "
@@ -402,6 +387,16 @@ def run_scene(
         for r in results
     ]
 
+    # AUC: pool all per-camera errors across every trial, integrate CDF (identical to VisualSync)
+    all_errors = np.concatenate([np.array(r["errors"]) for r in results])
+
+    def _auc(threshold_frames, n=1000):
+        ts = np.linspace(0, threshold_frames, n)
+        return float(np.mean([(all_errors <= t).mean() for t in ts]))
+
+    auc_100ms = _auc(100 / 1000 * 15)   # 1.5 frames at 15 fps
+    auc_500ms = _auc(500 / 1000 * 15)   # 7.5 frames at 15 fps
+
     logger.info(f"\n  SUMMARY — {scene_dir.name}  ({N_TRIALS} trials)")
     logger.info(f"    Shift spread    mean={np.mean(all_spreads):.1f}  median={np.median(all_spreads):.1f}  max={np.max(all_spreads):.1f}")
     logger.info(f"    MAE (frames)    mean={np.mean(all_mae):.2f}  median={np.median(all_mae):.2f}  max={np.max(all_mae):.2f}")
@@ -409,10 +404,8 @@ def run_scene(
     logger.info(f"    Within 0.5fr    {np.mean(all_within_half)*100:.1f}%")
     logger.info(f"    Within 1fr      {np.mean(all_within_1)*100:.1f}%")
     logger.info(f"    Within 2fr      {np.mean(all_within_2)*100:.1f}%")
-    if results_alt:
-        alt_mae = [r["mae"] for r in results_alt]
-        alt_w1  = [r["within_1"] for r in results_alt]
-        logger.info(f"    [joints_pos] MAE mean={np.mean(alt_mae):.2f}  Within-1={np.mean(alt_w1)*100:.1f}%")
+    logger.info(f"    AUC@100ms       {auc_100ms*100:.1f}%")
+    logger.info(f"    AUC@500ms       {auc_500ms*100:.1f}%")
 
     return {
         "scene":           scene_dir.name,
@@ -426,9 +419,9 @@ def run_scene(
         "within_half":     float(np.mean(all_within_half)),
         "within_1":        float(np.mean(all_within_1)),
         "within_2":        float(np.mean(all_within_2)),
+        "auc_100ms":       auc_100ms,
+        "auc_500ms":       auc_500ms,
         "trial_results":   results,
-        "mae_mean_alt":    float(np.mean([r["mae"] for r in results_alt])) if results_alt else None,
-        "within_1_alt":    float(np.mean([r["within_1"] for r in results_alt])) if results_alt else None,
     }
 
 if __name__ == "__main__":
@@ -436,8 +429,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--scene", nargs="+", metavar="SCENE",
                         help="One or more scene names to evaluate (default: all)")
+    parser.add_argument("--max-shift", type=int, default=MAX_SHIFT,
+                        help="Maximum absolute shift in frames (default: %(default)s)")
     args = parser.parse_args()
 
+    MAX_SHIFT = args.max_shift
     cli_scenes: list[str] = args.scene or []
     effective_only = cli_scenes or ONLY_SCENES
 
@@ -460,13 +456,12 @@ if __name__ == "__main__":
 
     logger.info(f"Found {len(scene_dirs)} scene(s): {[d.name for d in scene_dirs]}")
 
-    sync      = Synchronizer(method="cross_corr", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
-    sync_alt  = Synchronizer(method="joints_position", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=False)
+    sync = Synchronizer(method="cross_corr", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
     rng  = np.random.default_rng(SEED)
 
     scene_summaries = []
     for scene_dir in scene_dirs:
-        summary = run_scene(scene_dir, sync, rng, sync_alt=sync_alt)
+        summary = run_scene(scene_dir, sync, rng)
         if summary is not None:
             scene_summaries.append(summary)
 
@@ -486,14 +481,9 @@ if __name__ == "__main__":
     logger.info("")
 
     # ── per-scene table (frames) ──────────────────────────────────────────
-    has_alt = any(s.get("mae_mean_alt") is not None for s in scene_summaries)
-    hdr = f"  {'Scene':<35}  {'Cams':>4}  {'Pers':>4}  {'Spread':>7}  {'MAE':>6}  {'MedAE':>6}  {'W-0.5':>7}  {'W-1':>7}  {'W-2':>7}"
-    if has_alt:
-        hdr += f"  {'JP-MAE':>7}  {'JP-W1':>7}"
-    sep = f"  {'-'*35}  {'-'*4}  {'-'*4}  {'-'*7}  {'-'*6}  {'-'*6}  {'-'*7}  {'-'*7}  {'-'*7}"
-    if has_alt:
-        sep += f"  {'-'*7}  {'-'*7}"
-    logger.info("  All values in frames")
+    hdr = f"  {'Scene':<35}  {'Cams':>4}  {'Pers':>4}  {'Spread':>7}  {'MAE':>6}  {'MedAE':>6}  {'W-0.5':>7}  {'W-1':>7}  {'W-2':>7}  {'AUC@100':>8}  {'AUC@500':>8}"
+    sep = f"  {'-'*35}  {'-'*4}  {'-'*4}  {'-'*7}  {'-'*6}  {'-'*6}  {'-'*7}  {'-'*7}  {'-'*7}  {'-'*8}  {'-'*8}"
+    logger.info("  All values in frames; AUC thresholds at 15 fps (100ms=1.5fr, 500ms=7.5fr)")
     logger.info(hdr)
     logger.info(sep)
     for s in scene_summaries:
@@ -501,22 +491,20 @@ if __name__ == "__main__":
             f"  {s['scene']:<35}  {s['n_cameras']:>4}  {s['n_persons']:>4}  "
             f"{s['spread_mean']:>7.1f}  "
             f"{s['mae_mean']:>6.2f}  {s['median_ae_mean']:>6.2f}  "
-            f"{s['within_half']*100:>6.1f}%  {s['within_1']*100:>6.1f}%  {s['within_2']*100:>6.1f}%"
+            f"{s['within_half']*100:>6.1f}%  {s['within_1']*100:>6.1f}%  {s['within_2']*100:>6.1f}%  "
+            f"{s['auc_100ms']*100:>7.1f}%  {s['auc_500ms']*100:>7.1f}%"
         )
-        if has_alt and s.get("mae_mean_alt") is not None:
-            row += f"  {s['mae_mean_alt']:>7.2f}  {s['within_1_alt']*100:>6.1f}%"
         logger.info(row)
     logger.info(sep)
-    alt_maes = [s["mae_mean_alt"] for s in scene_summaries if s.get("mae_mean_alt") is not None]
-    alt_w1s  = [s["within_1_alt"] for s in scene_summaries if s.get("within_1_alt") is not None]
+    all_auc_100 = [s["auc_100ms"] for s in scene_summaries]
+    all_auc_500 = [s["auc_500ms"] for s in scene_summaries]
     mean_row = (
         f"  {'MEAN':<35}  {'':>4}  {'':>4}  "
         f"{np.mean(all_spread):>7.1f}  "
         f"{np.mean(all_mae):>6.2f}  {np.mean(all_median_ae):>6.2f}  "
-        f"{np.mean(all_within_half)*100:>6.1f}%  {np.mean(all_within_1)*100:>6.1f}%  {np.mean(all_within_2)*100:>6.1f}%"
+        f"{np.mean(all_within_half)*100:>6.1f}%  {np.mean(all_within_1)*100:>6.1f}%  {np.mean(all_within_2)*100:>6.1f}%  "
+        f"{np.mean(all_auc_100)*100:>7.1f}%  {np.mean(all_auc_500)*100:>7.1f}%"
     )
-    if has_alt and alt_maes:
-        mean_row += f"  {np.mean(alt_maes):>7.2f}  {np.mean(alt_w1s)*100:>6.1f}%"
     logger.info(mean_row)
 
     # ── ms conversion ─────────────────────────────────────────────────────

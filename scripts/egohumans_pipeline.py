@@ -162,10 +162,17 @@ def _build_scenes(
                 if not undist_dir.is_dir():
                     logging.warning(f"Missing {undist_dir.relative_to(data_root)}")
                     continue
-                if not any(p.suffix.lower() in _IMAGE_EXTS for p in undist_dir.iterdir()):
+                _has_images = any(p.suffix.lower() in _IMAGE_EXTS for p in undist_dir.iterdir())
+                if not _has_images:
+                    # After resizing, originals are deleted and only frames/ subdir remains.
+                    _frames_sub = undist_dir / "frames"
+                    _has_images = _frames_sub.is_dir() and any(p.suffix.lower() in _IMAGE_EXTS for p in _frames_sub.iterdir())
+                if not _has_images:
                     logging.warning(f"Empty {undist_dir.relative_to(data_root)}")
                     continue
-                video = Video(frames_dir=undist_dir)
+                _frames_sub = undist_dir / "frames"
+                _effective_dir = _frames_sub if (_frames_sub.is_dir() and any(p.suffix.lower() in _IMAGE_EXTS for p in _frames_sub.iterdir())) else undist_dir
+                video = Video(frames_dir=_effective_dir, max_side=getattr(CONFIG.data, "egohumans_max_side", None) if _effective_dir == undist_dir else None)
                 video.video_id = cam_name
                 videos.append(video)
             if not videos:
@@ -236,13 +243,13 @@ def process_scene(
     _seg_output_dir = Path(output_dir) / scene.scene_id
     _reid_already_done = (_seg_output_dir / "cross_view_reid.json").exists()
     _body_already_done = all(
-        (_seg_output_dir / v.video_id / "body_data").exists()
+        any((_seg_output_dir / v.video_id / "body_data").glob("person_*.npz"))
         for v in scene.videos
     )
 
     # Step 1: Segmentation.
-    if _body_already_done and _reid_already_done:
-        print(f"\n--- Step 1: Segmentation (skipped — body + ReID already done) ---")
+    if _body_already_done:
+        print(f"\n--- Step 1: Segmentation (skipped — body already done) ---")
         video_dirs = {v.video_id: str(_seg_output_dir / v.video_id) for v in scene.videos}
     else:
         print(f"\n--- Step 1: Segmentation ---")
@@ -252,11 +259,22 @@ def process_scene(
         segmenter._models_ready = False
         torch.cuda.empty_cache()
 
+    # After segmentation, originals may have been deleted and replaced by frames/ subdir.
+    # Update each Video's frames_dir so body estimator finds the right path.
+    for video in scene.videos:
+        if video.frames_dir is not None:
+            frames_sub = video.frames_dir / "frames"
+            if frames_sub.is_dir() and any(p.suffix.lower() in _IMAGE_EXTS for p in frames_sub.iterdir()):
+                video.frames_dir = frames_sub
+
     scene_output_dir = Path(next(iter(video_dirs.values()))).parent
 
     # Step 2: Body parameter estimation.
-    print(f"\n--- Step 2: Body parameter estimation ---")
-    estimator.estimate_scene(scene=scene, video_dirs=video_dirs)
+    if _body_already_done:
+        print(f"\n--- Step 2: Body parameter estimation (skipped — already done) ---")
+    else:
+        print(f"\n--- Step 2: Body parameter estimation ---")
+        estimator.estimate_scene(scene=scene, video_dirs=video_dirs)
 
     missing_body = [
         vid_id for vid_id, vid_dir in video_dirs.items()

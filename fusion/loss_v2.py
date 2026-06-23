@@ -125,7 +125,7 @@ class TemporalSmoothnessLoss(Loss):
 class JointPositionLoss(Loss):
     """FK-based joint position loss.
 
-    Runs SMPL-X FK on (pose_aggr, betas_out) and supervises against
+    Runs SMPL-X FK on pose_aggr (with GT betas) and supervises against
     precomputed GT joint positions (targets["gt_joints"]).  Both sides are
     made root-relative so the loss is translation-invariant.
 

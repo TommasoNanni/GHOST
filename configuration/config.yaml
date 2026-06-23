@@ -4,6 +4,10 @@ data:
   rich_gt_dir: "/capstor/scratch/cscs/tnanni/datasets/rich"
   egohumans_data_root: "/capstor/scratch/cscs/tnanni/datasets/egohumans"
   rich_max_side: 1440  # resize RICH frames so longest side <= this before SAM3; null to skip
+  egohumans_max_side: 1440  # resize EgoHumans frames so longest side <= this before SAM3; null to skip
+  egoexo4d_frames_root: "/capstor/scratch/cscs/tnanni/datasets/egoexo4d/frames"
+  egoexo4d_output_dir: "/iopsstor/scratch/cscs/tnanni/ghost_outputs/egoexo4d"
+  egoexo4d_max_side: 1440  # resize EgoExo4D frames (3840×2160) before SAM3; null to skip
   rich_frames_base_dir: "/tmp/rich_frames"  # writable dir for resized frames (needed when data root is read-only)
   output_directory: "/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train"
   egohumans_output_directory: "/iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_segmentation_test"
@@ -19,7 +23,7 @@ segmentation:
   checkpoint_path: "checkpoints/sam3/sam3.pt" # Path to SAM3 checkpoint; null = auto-download from HuggingFace
   text_prompt: "person" # Text query for SAM3 detection
   redetect_interval: 5 # Add text prompt every N frames so late arrivals are detected
-  new_det_thresh: 0.6 # Min score for a detection to spawn a new track (model default 0.7; lower for 4K/distant people)
+  new_det_thresh: 0.5 # Min score for a detection to spawn a new track (model default 0.7; lower for 4K/distant people)
   score_threshold_detection: 0.5 # Min score to pass NMS/matching gate (model default 0.5)
 
 parameters_extraction:
@@ -41,7 +45,7 @@ synchronization:
   enabled: false  # Set true to run temporal sync before camera alignment (uses random-shift evaluation)
 
 fusion:
-  checkpoint_dir: "checkpoints/fusion_module_latest"
+  checkpoint_dir: "checkpoints/fusion_module"
   use_wandb: true
   architecture:
     embedding_dimension: 128

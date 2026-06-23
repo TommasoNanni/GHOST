@@ -26,7 +26,7 @@ The script processes every scene subdirectory in ``ghost_output_root`` that
 contains a ``vggt_cameras_centered.npz`` file (i.e. scenes that completed the VGGT
 preprocessing step).  For each scene it:
   1. Loads SAM3D body estimates from body_data/ directories.
-  2. Runs the FusionWithBetas model to refine body pose and shape.
+  2. Runs the PoseFusionModule to refine body pose.
   3. Estimates metric translation + global orientation via Procrustes DLT.
   4. Runs SMPL-X FK to obtain world-frame 3D joints for predictions.
   5. Loads GT from ``<rich_root>/<gt_split>_body/<scene_name>/``.
@@ -826,7 +826,7 @@ def evaluate_scene(
         else:
             pred_scale_pf = placer.estimate_scale_triangulated(
                 fused_pose_by_pid=fused_pose_by_pid,
-                fused_betas_map=sam3d_betas_map,
+                pred_betas_map=sam3d_betas_map,
                 frame_start=frame_start,
             )
             logger.info(f"  [scale] using triangulated  median={float(np.median(pred_scale_pf)):.4f}")
@@ -1273,7 +1273,7 @@ def main() -> None:
     parser.add_argument("--rich_root",         required=True, type=Path,
                         help="RICH dataset root (must have <gt_split>_body/ and scan_calibration/).")
     parser.add_argument("--checkpoint",        required=True, type=Path,
-                        help="FusionWithBetas checkpoint (.pt).")
+                        help="PoseFusionModule checkpoint (.pt).")
     parser.add_argument("--smplx_model",       required=True, type=Path,
                         help="Path to SMPLX_NEUTRAL.pkl.")
     parser.add_argument("--device",            default="cuda" if torch.cuda.is_available() else "cpu")

@@ -175,13 +175,13 @@ def process_scene(
     _seg_output_dir = Path(output_dir) / scene.scene_id
     _reid_already_done = (_seg_output_dir / "cross_view_reid.json").exists()
     _body_already_done = all(
-        (_seg_output_dir / v.video_id / "body_data").exists()
+        any((_seg_output_dir / v.video_id / "body_data").glob("person_*.npz"))
         for v in scene.videos
     )
 
     # Step 1: Segmentation.
-    if _body_already_done and _reid_already_done:
-        print(f"\n--- Step 1: Segmentation (skipped — body + ReID already done) ---")
+    if _body_already_done:
+        print(f"\n--- Step 1: Segmentation (skipped — body already done) ---")
         video_dirs = {v.video_id: _seg_output_dir / v.video_id for v in scene.videos}
     else:
         print(f"\n--- Step 1: Segmentation ---")
@@ -196,18 +196,20 @@ def process_scene(
     scene_output_dir = Path(next(iter(video_dirs.values()))).parent
 
     # Step 2: Body parameter estimation.
-    print(f"\n--- Step 2: Body parameter estimation ---")
-    estimator.estimate_scene(scene=scene, video_dirs=video_dirs)
+    if _body_already_done:
+        print(f"\n--- Step 2: Body parameter estimation (skipped — already done) ---")
+    else:
+        print(f"\n--- Step 2: Body parameter estimation ---")
+        estimator.estimate_scene(scene=scene, video_dirs=video_dirs)
 
     missing_body = [
         vid_id for vid_id, vid_dir in video_dirs.items()
         if not any((Path(vid_dir) / "body_data").glob("person_*.npz"))
     ]
     if missing_body:
-        print(
-            f"  WARNING: body estimation incomplete for cameras {missing_body} — "
-            f"skipping cross-view ReID and subsequent steps for this scene."
-        )
+        print(f"  WARNING: no body data for cameras {missing_body} — continuing without them.")
+    if len(missing_body) == len(video_dirs):
+        print("  ERROR: no body data for any camera — aborting scene.")
         return
 
     # Step 3: Cross-view person re-identification.
@@ -368,10 +370,10 @@ def process_scene(
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="EgoExo4D pipeline")
-    parser.add_argument("--frames-root",  type=str, required=True,
-                        help="Root dir of extracted frames (contains one sub-dir per take)")
-    parser.add_argument("--output-dir",   type=str, required=True,
-                        help="Pipeline output directory")
+    parser.add_argument("--frames-root",  type=str, default=None,
+                        help="Root dir of extracted frames (default: CONFIG.data.egoexo4d_frames_root)")
+    parser.add_argument("--output-dir",   type=str, default=None,
+                        help="Pipeline output directory (default: CONFIG.data.egoexo4d_output_dir)")
     parser.add_argument("--take",         type=str, default=None,
                         help="Only process takes whose name contains this string")
     parser.add_argument("--scene-start",  type=int, default=None)
@@ -407,11 +409,14 @@ def main():
         vggt_devices = ["cpu"]
     print(f"VGGT devices: {vggt_devices}")
 
-    frames_root = Path(args.frames_root)
-    output_dir  = Path(args.output_dir)
+    frames_root = Path(args.frames_root or getattr(CONFIG.data, "egoexo4d_frames_root", None) or "")
+    output_dir  = Path(args.output_dir  or getattr(CONFIG.data, "egoexo4d_output_dir",  None) or "")
+    if not frames_root.is_dir():
+        raise SystemExit(f"--frames-root {frames_root} does not exist")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ds = EgoExo4DSceneDataset(frames_root=frames_root)
+    max_side = getattr(CONFIG.data, "egoexo4d_max_side", None)
+    ds = EgoExo4DSceneDataset(frames_root=frames_root, max_side=max_side)
 
     if args.take is not None:
         ds.scenes = [s for s in ds.scenes if args.take in s.scene_id]
@@ -452,6 +457,7 @@ def main():
             redetect_interval=CONFIG.segmentation.redetect_interval,
             new_det_thresh=CONFIG.segmentation.new_det_thresh,
             score_threshold_detection=CONFIG.segmentation.score_threshold_detection,
+            single_frame_mode=True,
         )
         estimator = ParametersExtractor(
             sam3d_hf_repo=CONFIG.parameters_extraction.sam3d_id,

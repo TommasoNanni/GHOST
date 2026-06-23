@@ -29,7 +29,7 @@ Output
 ------
     inference_result.npz containing:
         fused_pose          (T, P, 54, 6) — fused body pose in 6D (root excluded)
-        fused_betas         (P, 10)       — refined per-person shape
+        pred_betas          (P, 10)       — mean SAM3D betas per person
         root_translation    (T, P, 3)     — root 3D position in world (cam0) space, NaN where invisible
         global_orient_R     (N_valid, P, 3, 3)  — body orientation matrices where estimated
         global_orient_frames (N_valid, P)         — global frame indices for the orient estimates
@@ -350,8 +350,8 @@ def _run_placer(
     for pid in all_pids:
         betas_by_pid.setdefault(pid, np.zeros(10, dtype=np.float32))
 
-    # Build fused_betas_map for scale estimation
-    fused_betas_map = {
+    # Build pred_betas_map for scale estimation
+    pred_betas_map = {
         cam_dir / "body_data" / f"person_{pid}.npz": betas_by_pid[pid]
         for cam_dir in cam_dirs
         for pid in all_pids
@@ -370,7 +370,7 @@ def _run_placer(
     else:
         logger.info("Estimating VGGT depth scale (triangulation) — MapAnything scale not found ...")
         scale_per_frame = placer.estimate_scale_triangulated(
-            fused_betas_map=fused_betas_map,
+            pred_betas_map=pred_betas_map,
             fused_pose_by_pid=fused_pose_by_pid,
             frame_start=frame_start,
         )
@@ -475,7 +475,7 @@ def _run_placer(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ghost inference: fuse poses and place bodies.")
     parser.add_argument("--scene_dir",       required=True, type=Path, help="Scene output directory.")
-    parser.add_argument("--checkpoint",      required=True, type=Path, help="FusionWithBetas checkpoint (.pt).")
+    parser.add_argument("--checkpoint",      required=True, type=Path, help="PoseFusionModule checkpoint (.pt).")
     parser.add_argument("--smplx_model",     required=True, type=Path, help="Path to SMPLX_NEUTRAL.pkl.")
     parser.add_argument("--output",          type=Path, default=None,  help="Output .npz path (default: scene_dir/inference_result.npz).")
     parser.add_argument("--crop_meta",       type=Path, default=None,  help="Path to crop_meta.json (centered-image crop offsets) for SAM3D kp2d→VGGT correction.")
