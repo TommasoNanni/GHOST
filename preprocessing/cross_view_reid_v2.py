@@ -100,7 +100,7 @@ class CrossVideoReidentifierV2:
     _HIGH_APP_THR: float = 0.60
     _LOW_APP_THR: float = 0.35
     _MATCH_RMSE_THR: float = 0.60
-    _OVERLAP_PENALTY_K: float = 5.0
+    _OVERLAP_PENALTY_K: float = 30.0
     _OVERLAP_REF_FRAMES: int = 500
     _DELTA_PRIOR_WEIGHT: float = 0.0   # disabled — consensus offsets replace the prior
     _DELTA_PRIOR_SCALE: float = 30.0
@@ -775,6 +775,7 @@ class CrossVideoReidentifierV2:
                 sim_mat += sw * ssim
                 wgt_mat += sw
 
+            pose_mat = np.full((Na, Nb), -1.0, dtype=np.float32)  # -1 = xcorr unavailable
             for i, pa in enumerate(pids_a):
                 pose_a = descs_a[pa][2]
                 if pose_a is None:
@@ -787,6 +788,7 @@ class CrossVideoReidentifierV2:
                     fvb = pose_b
                     s, off = _xcorr_sim(fva, fvb)
                     off_mat[i, j] = off
+                    pose_mat[i, j] = s
                     logging.info(
                         f"  pose xcorr {vid_a}:P{pa} vs {vid_b}:P{pb}"
                         f"  sim={s:.3f}  offset={off:+d}"
@@ -794,7 +796,7 @@ class CrossVideoReidentifierV2:
                     sim_mat[i, j] += w_pose * s
                     wgt_mat[i, j] += w_pose
 
-            return np.where(wgt_mat > 0, sim_mat / wgt_mat, 0.0), off_mat
+            return np.where(wgt_mat > 0, sim_mat / wgt_mat, 0.0), off_mat, pose_mat
 
         # ── Geometric helpers ──────────────────────────────────────────────────
 
@@ -953,7 +955,7 @@ class CrossVideoReidentifierV2:
 
             # Stage 1: appearance sim matrix + full xcorr delta-score curve.
             # ALL person pairs contribute, weighted by appearance sim × track std.
-            sim_mat, _ = _weighted_sim_mat(
+            sim_mat, _, xcorr_sim_mat = _weighted_sim_mat(
                 pids_a, pids_b,
                 person_descs[vid_a], person_descs[vid_b],
                 appearance_weight, shape_weight, pose_weight,
@@ -1094,7 +1096,7 @@ class CrossVideoReidentifierV2:
             return {
                 "pids_a": pids_a, "pids_b": pids_b,
                 "pids_a_s": pids_a_s, "pids_b_s": pids_b_s,
-                "sim_mat": sim_mat, "best_seed": best_seed,
+                "sim_mat": sim_mat, "xcorr_sim_mat": xcorr_sim_mat, "best_seed": best_seed,
                 "frames_a_all": frames_a_all, "frames_b_all": frames_b_all,
                 "cands": cands,
             }
@@ -1211,8 +1213,8 @@ class CrossVideoReidentifierV2:
             pids_a, pids_b = pdata["pids_a"], pdata["pids_b"]
             pids_a_s, pids_b_s = pdata["pids_a_s"], pdata["pids_b_s"]
 
-            best_R, best_t = None, None
-            rmse_bar, score_bar, delta_bar = float("inf"), float("inf"), 0
+            # Fit all δ options; keep all results so we can retry if needed.
+            all_fitted: list[tuple[float, float, np.ndarray | None, np.ndarray | None, int]] = []
             for d_opt in dict.fromkeys(int(d) for d in delta_options):
                 R_o, t_o, rmse_o, n_o, score_o = _fit_pair_at_delta(
                     vid_a, vid_b, pdata, d_opt
@@ -1221,9 +1223,9 @@ class CrossVideoReidentifierV2:
                     f"  [{vid_a}↔{vid_b}] option δ={d_opt}  RMSE={rmse_o:.3f}  "
                     f"overlap={n_o}  score={score_o:.3f}"
                 )
-                if score_o < score_bar:
-                    best_R, best_t = R_o, t_o
-                    rmse_bar, score_bar, delta_bar = rmse_o, score_o, d_opt
+                all_fitted.append((score_o, rmse_o, R_o, t_o, d_opt))
+            all_fitted.sort(key=lambda x: x[0])
+            score_bar, rmse_bar, best_R, best_t, delta_bar = all_fitted[0]
 
             logging.info(
                 f"  [{vid_a}↔{vid_b}] final δ̄={delta_bar}  RMSE={rmse_bar:.3f}  "
@@ -1242,97 +1244,124 @@ class CrossVideoReidentifierV2:
                     if sim_mat[r, c] >= cross_view_reid_threshold
                 ], 0
 
-            # Stage 4: greedy assignment by overlap-adjusted RMSE under (R, t) at δ̄.
-            # All (pb, pa) pairs are evaluated; those below match_rmse_thr are
-            # candidates. We sort ascending and greedily assign: take the cheapest
-            # valid pair, mark both persons as used, repeat. This maximises the
-            # number of accepted pairs without letting a cheap-but-wrong global
-            # assignment (lower total cost) block correct low-RMSE pairs — which
-            # is the failure mode of pure Hungarian here.
-            all_pairs: list[tuple[float, float, float, int, int, int]] = []  # (rmse_adj, raw, lam, n_fr, pb, pa)
-            for pb in pids_b_s:
-                for pa in pids_a_s:
-                    r, lam = _pair_rmse_with_Rt(best_R, best_t, pb, vid_b, pa, vid_a, delta_bar)
-                    n_fr = 0
-                    src, _ = _get_aligned_flat(pb, vid_b, pa, vid_a, delta_bar)
-                    if src is not None:
-                        n_fr = len(src) // 70
-                    r_adj = r * _overlap_factor(n_fr) if np.isfinite(r) else float("inf")
-                    logging.info(
-                        f"    {vid_b}:P{pb} → {vid_a}:P{pa}  frames={n_fr}  RMSE={r:.3f}  "
-                        f"adj={r_adj:.3f}  λ={lam:.3f}"
-                    )
-                    all_pairs.append((r_adj, r, lam, n_fr, pb, pa))
-
-            all_pairs.sort(key=lambda x: x[0])
-            used_b: set[int] = set()
-            used_a: set[int] = set()
-            accepted: list[tuple[int, int, float]] = []
-            delta_cost = _delta_prior_cost(delta_bar)
-            for rmse_adj, rmse_raw, lam, n_fr, pb, pa in all_pairs:
-                if rmse_adj >= match_rmse_thr:
-                    break  # sorted, so no more valid pairs
-                if pb in used_b or pa in used_a:
-                    continue
-                used_b.add(pb)
-                used_a.add(pa)
-                logging.info(
-                    f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_raw:.3f} "
-                    f"adj={rmse_adj:.3f} → accepted"
-                )
-                # Edge confidence for Union-Find conflict resolution (geometric
-                # quality at the consensus δ̄; prior term is currently 0).
-                accepted.append(
-                    (pa, pb, float(1.0 - (rmse_adj + delta_cost) / match_rmse_thr))
-                )
-
-            # Appearance rescue: a geometric rejection is only *final* when it
-            # is backed by strong evidence (enough overlapping frames AND an
-            # RMSE clearly past the bar). With tiny/zero overlap or a marginal
-            # RMSE, geometry is uninformative — for those pairs fall back to
-            # appearance similarity. Rescued edges get confidence capped at
-            # 0.25 so geometry-backed edges win Union-Find conflicts.
             ia_idx = {pa: i for i, pa in enumerate(pids_a)}
             ib_idx = {pb: i for i, pb in enumerate(pids_b)}
-            rescue: list[tuple[float, int, int]] = []
-            for rmse_adj, rmse_raw, lam, n_fr, pb, pa in all_pairs:
-                if pb in used_b or pa in used_a:
-                    continue
-                if pa not in ia_idx or pb not in ib_idx:
-                    continue
-                strong_reject = (
-                    n_fr >= weak_overlap_frames
-                    and rmse_adj >= match_rmse_thr * strong_reject_factor
-                )
-                if strong_reject:
-                    continue
-                sim = float(sim_mat[ia_idx[pa], ib_idx[pb]])
-                if sim >= cross_view_reid_threshold:
-                    rescue.append((sim, pb, pa))
-            rescue.sort(reverse=True)
-            for sim, pb, pa in rescue:
-                if pb in used_b or pa in used_a:
-                    continue
-                used_b.add(pb)
-                used_a.add(pa)
-                conf = 0.25 * (sim - cross_view_reid_threshold) / max(
-                    1e-6, 1.0 - cross_view_reid_threshold
-                )
-                logging.info(
-                    f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  sim={sim:.3f} "
-                    f"→ appearance rescue (conf={conf:.3f})"
-                )
-                accepted.append((pa, pb, float(conf)))
 
-            # Log rejected pairs (assigned persons that didn't make the cut).
-            for rmse_adj, rmse_raw, lam, n_fr, pb, pa in all_pairs:
-                if pb in used_b or pa in used_a:
-                    continue
-                if np.isfinite(rmse_adj):
+            def _compute_accepted(
+                R: np.ndarray, t: np.ndarray, delta: int
+            ) -> tuple[list[tuple[int, int, float]], bool]:
+                """Greedy + rescue acceptance under (R, t) at delta.
+
+                Pairs are sorted by combined cost = geo_rmse + 3*(1-sim), where
+                sim is the appearance+shape+pose similarity. This breaks geometric
+                ties caused by spatially coincident people (ALS local minimum):
+                the correct same-person pair has both lower RMSE AND higher sim,
+                so it wins in the combined sort even when geometry alone fails.
+                The geometric threshold (match_rmse_thr) still guards acceptance.
+
+                Returns (accepted_pairs, has_geo_accepted).
+                """
+                ap: list[tuple[float, float, float, float, int, int, int]] = []
+                for pb in pids_b_s:
+                    for pa in pids_a_s:
+                        r, lam = _pair_rmse_with_Rt(R, t, pb, vid_b, pa, vid_a, delta)
+                        n_fr = 0
+                        src, _ = _get_aligned_flat(pb, vid_b, pa, vid_a, delta)
+                        if src is not None:
+                            n_fr = len(src) // 70
+                        r_adj = r * _overlap_factor(n_fr) if np.isfinite(r) else float("inf")
+                        sim_val = float(sim_mat[ia_idx[pa], ib_idx[pb]])
+                        r_combined = (
+                            r_adj + 3.0 * (1.0 - sim_val)
+                            if np.isfinite(r_adj) else float("inf")
+                        )
+                        logging.info(
+                            f"    {vid_b}:P{pb} → {vid_a}:P{pa}  frames={n_fr}  "
+                            f"RMSE={r:.3f}  adj={r_adj:.3f}  sim={sim_val:.3f}  λ={lam:.3f}"
+                        )
+                        ap.append((r_combined, r_adj, r, lam, n_fr, pb, pa))
+
+                ap.sort(key=lambda x: x[0])
+                ub: set[int] = set()
+                ua: set[int] = set()
+                acc: list[tuple[int, int, float]] = []
+                has_geo_accepted: bool = False
+                dc = _delta_prior_cost(delta)
+                for r_combined, rmse_adj, rmse_raw, lam, n_fr, pb, pa in ap:
+                    if rmse_adj >= match_rmse_thr:
+                        break
+                    if pb in ub or pa in ua:
+                        continue
+                    sim_val = float(sim_mat[ia_idx[pa], ib_idx[pb]])
+                    ub.add(pb)
+                    ua.add(pa)
+                    has_geo_accepted = True
                     logging.info(
                         f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_raw:.3f} "
-                        f"adj={rmse_adj:.3f} → rejected"
+                        f"adj={rmse_adj:.3f} sim={sim_val:.3f} → accepted"
                     )
+                    acc.append((pa, pb, float(1.0 - (rmse_adj + dc) / match_rmse_thr)))
+
+                # Appearance rescue: weak rejects (tiny overlap or marginal RMSE)
+                # fall back to appearance sim. Confidence capped at 0.25 so
+                # geometric edges win Union-Find conflicts.
+                resc: list[tuple[float, int, int]] = []
+                for _, rmse_adj, rmse_raw, lam, n_fr, pb, pa in ap:
+                    if pb in ub or pa in ua:
+                        continue
+                    if pa not in ia_idx or pb not in ib_idx:
+                        continue
+                    strong_reject = (
+                        n_fr >= weak_overlap_frames
+                        and rmse_adj >= match_rmse_thr * strong_reject_factor
+                    )
+                    if strong_reject:
+                        continue
+                    sim = float(sim_mat[ia_idx[pa], ib_idx[pb]])
+                    if sim >= cross_view_reid_threshold:
+                        resc.append((sim, pb, pa))
+                resc.sort(reverse=True)
+                for sim, pb, pa in resc:
+                    if pb in ub or pa in ua:
+                        continue
+                    ub.add(pb)
+                    ua.add(pa)
+                    conf = 0.25 * (sim - cross_view_reid_threshold) / max(
+                        1e-6, 1.0 - cross_view_reid_threshold
+                    )
+                    logging.info(
+                        f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  sim={sim:.3f} "
+                        f"→ appearance rescue (conf={conf:.3f})"
+                    )
+                    acc.append((pa, pb, float(conf)))
+
+                for _, rmse_adj, rmse_raw, lam, n_fr, pb, pa in ap:
+                    if pb in ub or pa in ua:
+                        continue
+                    if np.isfinite(rmse_adj):
+                        logging.info(
+                            f"  {vid_a}:P{pa} ↔ {vid_b}:P{pb}  RMSE={rmse_raw:.3f} "
+                            f"adj={rmse_adj:.3f} → rejected"
+                        )
+
+                return acc, has_geo_accepted
+
+            # Fix B: if the chosen δ yields 0 accepted pairs (no geometry AND no
+            # rescue), retry at the next-best δ option.
+            accepted, _ = _compute_accepted(best_R, best_t, delta_bar)
+            if not accepted and len(all_fitted) > 1:
+                for score_alt, rmse_alt, R_alt, t_alt, delta_alt in all_fitted[1:]:
+                    if R_alt is None:
+                        continue
+                    logging.info(
+                        f"  [{vid_a}↔{vid_b}] 0 matches at δ={delta_bar} "
+                        f"— retrying at δ={delta_alt}"
+                    )
+                    accepted_alt, _ = _compute_accepted(R_alt, t_alt, delta_alt)
+                    if accepted_alt:
+                        accepted = accepted_alt
+                        delta_bar = delta_alt
+                        break
 
             return accepted, delta_bar
 

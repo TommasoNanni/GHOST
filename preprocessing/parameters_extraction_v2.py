@@ -499,7 +499,9 @@ class ParametersExtractor:
             # Load frame idx and bounding boxes
 
             frame_idx_str = json_path.stem.replace("mask_", "")
-            frame_idx = int(frame_idx_str.split("_")[0])
+            # Take the first purely-numeric segment: handles "00000_01" (RICH)
+            # and "frame_001426" (EgoExo4D) without ambiguity.
+            frame_idx = int(next(p for p in frame_idx_str.split("_") if p.isdigit()))
 
             if sam3d_step > 1 and frame_idx % sam3d_step != 0:
                 continue

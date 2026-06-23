@@ -388,6 +388,16 @@ class ParametersExtractor:
                         converter=converter,
                         cam_int=cam_int,
                     )
+                except torch.cuda.OutOfMemoryError as e:
+                    logging.error(
+                        f"{gpu_label}OOM processing {video_id}: {e}. "
+                        "Resetting GPU memory before continuing."
+                    )
+                    # Force full memory release before attempting next video.
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    torch.cuda.reset_peak_memory_stats(gpu_id)
+                    continue
                 except Exception as e:
                     logging.error(
                         f"{gpu_label}Error processing {video_id}: {e}", exc_info=True
