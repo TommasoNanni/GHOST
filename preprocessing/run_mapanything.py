@@ -64,10 +64,30 @@ class MapAnythingScaleEstimator:
         device:     str = "cuda:0",
         batch_size: int = 8,
         force:      bool = False,
+        scale_from: str = "depth",
     ):
+        """scale_from selects the estimator:
+
+        - "depth" (default, legacy): condition MapAnything on vggt intrinsics +
+          depth + poses and take median(MA_depth / vggt_depth). BIASED on
+          wide-FOV cameras: MA's metric scale head is conditioned on the input
+          rays, and geometry-in/scale-out is a rare (~5%) training
+          configuration (arXiv 2509.13414; no wide-angle training data). On
+          EgoHumans undistorted fisheye (~101 deg FOV) the scale comes out
+          ~1.56x too small; RICH (~65 deg) only ~ -3%.
+        - "baselines": run MapAnything IMAGES-ONLY (its in-distribution mode)
+          and take, per frame, the median over camera pairs of
+          (MA camera baseline / vggt camera baseline). Convention-free — no
+          focal length involved. Validated on 031_badminton: 21.50 vs GT
+          21.54 (0.2%) where "depth" gave 13.2. Output goes to a SEPARATE
+          file (mapanything_scale_baseline.npy) so legacy results are kept.
+        """
+        if scale_from not in ("depth", "baselines"):
+            raise ValueError(f"scale_from must be 'depth' or 'baselines', got {scale_from!r}")
         self.device     = torch.device(device if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
         self.force      = force
+        self.scale_from = scale_from
         self._model     = None   # lazy-loaded
 
     # ── Model loading ─────────────────────────────────────────────────────────
@@ -210,6 +230,74 @@ class MapAnythingScaleEstimator:
 
         return results
 
+    def _run_batch_baselines(
+        self,
+        batch_frames:   list[int],
+        valid_ks:       list[int],
+        cam_file_lists: dict[int, list[Path]],
+        vggt_exts:      np.ndarray,
+        H_ma: int, W_ma: int,
+    ) -> dict[int, float]:
+        """Images-only MapAnything; scale from camera-baseline ratios.
+
+        For each frame: MA reconstructs the rig metrically from images alone,
+        vggt gives the same rig up-to-scale; the two differ by one similarity,
+        whose scale is the ratio of any camera-pair distance. Median over all
+        pairs. Returns {frame_idx: scale}.
+        """
+        B = len(batch_frames)
+        views = []
+        for k in valid_ks:
+            files = cam_file_lists[k]
+            imgs = []
+            ok = True
+            for fi in batch_frames:
+                if fi >= len(files):
+                    ok = False
+                    break
+                imgs.append(self._load_img(files[fi], H_ma, W_ma))
+            if not ok:
+                continue
+            views.append({
+                "img":            torch.cat(imgs).to(self.device),   # (B,3,H,W)
+                "data_norm_type": ["dinov2"] * B,
+            })
+        if len(views) < 2:
+            return {}
+
+        with torch.no_grad():
+            preds = self._model.infer(
+                views,
+                memory_efficient_inference=True,
+                minibatch_size=1,
+                use_amp=True,
+                amp_dtype="bf16",
+                apply_mask=False,
+                mask_edges=False,
+            )
+
+        results: dict[int, float] = {}
+        n_cams = len(views)
+        for b, fi in enumerate(batch_frames):
+            # MA camera centres (metric, view-0 frame): c2w translation
+            ma_c = [preds[v]["camera_poses"][b].cpu().double().numpy()[:3, 3]
+                    for v in range(n_cams)]
+            # vggt camera centres (up-to-scale): -R^T t from w2c extrinsics
+            vg_c = []
+            for k in valid_ks[:n_cams]:
+                E = vggt_exts[fi, k]
+                vg_c.append(-E[:3, :3].T @ E[:3, 3])
+            ratios = []
+            for i in range(n_cams):
+                for j in range(i + 1, n_cams):
+                    vb = float(np.linalg.norm(vg_c[i] - vg_c[j]))
+                    if vb < 1e-6:
+                        continue
+                    ratios.append(float(np.linalg.norm(ma_c[i] - ma_c[j])) / vb)
+            if ratios:
+                results[fi] = float(np.median(ratios))
+        return results
+
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def process_scene(
@@ -234,7 +322,9 @@ class MapAnythingScaleEstimator:
         Also saves the array to {scene_dir}/mapanything_scale_centered.npy.
         """
         _IMG_EXTS = {".jpeg", ".jpg", ".png", ".bmp"}
-        out_path = scene_dir / "mapanything_scale_centered.npy"
+        out_name = ("mapanything_scale_baseline.npy" if self.scale_from == "baselines"
+                    else "mapanything_scale_centered.npy")
+        out_path = scene_dir / out_name
         if out_path.exists() and not self.force:
             logger.info(f"{scene_dir.name}: already done, loading from disk")
             return np.load(out_path)
@@ -308,12 +398,18 @@ class MapAnythingScaleEstimator:
             if len(valid_ks) < 2:
                 continue
 
-            results = self._run_batch(
-                batch_frames, valid_ks,
-                cam_file_lists,
-                vggt_exts, vggt_intrs, depth_mm,
-                H_vggt, W_vggt, H_ma, W_ma,
-            )
+            if self.scale_from == "baselines":
+                results = self._run_batch_baselines(
+                    batch_frames, valid_ks, cam_file_lists,
+                    vggt_exts, H_ma, W_ma,
+                )
+            else:
+                results = self._run_batch(
+                    batch_frames, valid_ks,
+                    cam_file_lists,
+                    vggt_exts, vggt_intrs, depth_mm,
+                    H_vggt, W_vggt, H_ma, W_ma,
+                )
             for fi, s in results.items():
                 scale_arr[fi] = s
 
@@ -361,6 +457,9 @@ def main():
     p.add_argument("--batch_size",        type=int, default=8)
     p.add_argument("--device",            default="cuda")
     p.add_argument("--force",             action="store_true")
+    p.add_argument("--scale_from",        choices=["depth", "baselines"], default="depth",
+                   help="depth = legacy conditioned depth-ratio (writes mapanything_scale_centered.npy); "
+                        "baselines = images-only camera-baseline ratio (writes mapanything_scale_baseline.npy)")
     args = p.parse_args()
 
     output_root = Path(args.ghost_output_root)
@@ -378,6 +477,7 @@ def main():
         device=args.device,
         batch_size=args.batch_size,
         force=args.force,
+        scale_from=args.scale_from,
     )
 
     t_total = time.perf_counter()
