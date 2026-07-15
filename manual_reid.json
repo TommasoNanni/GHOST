@@ -1,0 +1,5789 @@
+{
+  "_schema": {
+    "notation": "cXpY = camera X, person Y. e.g. 'c1p0' = camera 1 person 0.",
+    "groups": "maps a global person id -> list of cXpY tokens (same real person across views).",
+    "example": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p5"
+        ],
+        "2": [
+          "c1p1",
+          "c2p0"
+        ]
+      }
+    }
+  },
+  "egoexo4d": {
+    "cmu_soccer06_3": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p5",
+          "c3p12",
+          "c4p14"
+        ],
+        "2": [
+          "c2p2",
+          "c3p3"
+        ],
+        "3": [
+          "c3p6",
+          "c4p13"
+        ],
+        "4": [
+          "c3p10",
+          "c4p15"
+        ],
+        "5": [
+          "c3p8",
+          "c4p11"
+        ],
+        "6": [
+          "c4p7"
+        ],
+        "7": [
+          "c4p4"
+        ],
+        "8": [
+          "c4p9"
+        ],
+        "9": [
+          "c4p5"
+        ]
+      }
+    },
+    "cmu_soccer12_2": {
+      "groups": {
+        "1": [
+          "c2p1",
+          "c3p11",
+          "c4p4",
+          "c5p13"
+        ]
+      },
+      "notes": "cam1 is empty"
+    },
+    "cmu_soccer16_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p6",
+          "c4p4",
+          "c5p5"
+        ],
+        "2": [
+          "c3p3",
+          "c4p7"
+        ]
+      }
+    },
+    "georgiatech_bike_06_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c4p5",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_06_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p5",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_06_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p5",
+          "c4p3",
+          "c5p6"
+        ]
+      }
+    },
+    "georgiatech_bike_06_8": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p7"
+        ]
+      }
+    },
+    "georgiatech_bike_07_10": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c4p3",
+          "c5p6"
+        ]
+      }
+    },
+    "georgiatech_bike_07_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_07_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p5",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_07_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p6"
+        ]
+      }
+    },
+    "georgiatech_bike_07_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c4p3",
+          "c5p6"
+        ]
+      }
+    },
+    "georgiatech_bike_07_8": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p5",
+          "c4p3",
+          "c5p7"
+        ]
+      }
+    },
+    "georgiatech_bike_14_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p5",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_14_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p5",
+          "c4p6",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_14_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p6",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_14_8": {
+      "groups": {
+        "1": [
+          "c3p2",
+          "c4p6",
+          "c5p4"
+        ]
+      },
+      "notes": "c1 empty"
+    },
+    "georgiatech_bike_15_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3"
+        ]
+      },
+      "notes": "c5 empty, no renders"
+    },
+    "georgiatech_bike_15_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p5",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_15_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_15_8": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p5",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_16_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_16_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_bike_16_8": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_covid_02_10": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "georgiatech_covid_02_12": {
+      "groups": {
+        "1": [
+          "c1p7",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "georgiatech_covid_02_14": {
+      "groups": {
+        "1": [
+          "c1p7",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "georgiatech_covid_02_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p6",
+          "c4p7"
+        ]
+      }
+    },
+    "georgiatech_covid_02_4": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p2",
+          "c3p6",
+          "c4p7"
+        ]
+      }
+    },
+    "georgiatech_covid_04_10": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "georgiatech_covid_04_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "georgiatech_covid_04_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "georgiatech_covid_04_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "georgiatech_covid_06_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p6",
+          "c4p7"
+        ]
+      }
+    },
+    "georgiatech_covid_06_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p6",
+          "c4p4"
+        ]
+      }
+    },
+    "georgiatech_covid_18_10": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_covid_18_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_covid_18_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3"
+        ]
+      },
+      "notes": "c4 empty, no render"
+    },
+    "georgiatech_covid_18_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_covid_18_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "georgiatech_covid_18_8": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p2",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "iiith_cooking_59_2": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p6",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "iiith_cooking_64_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c4p4"
+        ]
+      },
+      "notes": "c3 didn't render anything, no detection"
+    },
+    "iiith_cooking_89_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "iiith_cooking_90_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "iiith_soccer_015_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p8"
+        ],
+        "2": [
+          "c1p5",
+          "c2p6",
+          "c3p3",
+          "c5p4"
+        ],
+        "3": [
+          "c3p7"
+        ]
+      }
+    },
+    "nus_cpr_12_1": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p7",
+          "c3p3",
+          "c4p4"
+        ],
+        "2": [
+          "c2p2",
+          "c3p6"
+        ],
+        "3": [
+          "c2p5"
+        ],
+        "4": [
+          "c2p8"
+        ]
+      }
+    },
+    "nus_cpr_12_2": {
+      "groups": {
+        "1": [],
+        "2": [],
+        "3": [],
+        "4": [],
+        "5": []
+      }
+    },
+    "sfu_basketball012_10": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p8",
+          "c3p3",
+          "c4p4"
+        ],
+        "2": [
+          "c1p7",
+          "c2p6"
+        ],
+        "3": [
+          "c1p10",
+          "c2p2"
+        ],
+        "4": [
+          "c1p9"
+        ],
+        "5": [
+          "c1p5"
+        ]
+      },
+      "notes": "c1p5?"
+    },
+    "sfu_basketball012_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p13",
+          "c3p7",
+          "c4p8"
+        ],
+        "2": [
+          "c1p5",
+          "c2p11",
+          "c3p3",
+          "c4p4"
+        ],
+        "3": [
+          "c1p9",
+          "c2p10"
+        ],
+        "4": [
+          "c2p2"
+        ],
+        "5": [
+          "c2p12"
+        ],
+        "6": [
+          "c2p6"
+        ]
+      },
+      "notes": "c2p2?, c2p6?"
+    },
+    "sfu_basketball012_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p11",
+          "c3p3",
+          "c4p4"
+        ],
+        "2": [
+          "c1p6",
+          "c2p7"
+        ],
+        "3": [
+          "c1p8",
+          "c2p9"
+        ],
+        "4": [
+          "c1p10",
+          "c2p1"
+        ],
+        "5": [
+          "c1p5",
+          "c2p2"
+        ]
+      }
+    },
+    "sfu_basketball012_3": {
+      "groups": {
+        "1": [
+          "c1p7",
+          "c2p10",
+          "c3p3",
+          "c4p4"
+        ],
+        "2": [
+          "c1p5",
+          "c2p8"
+        ],
+        "3": [
+          "c1p9",
+          "c2p6"
+        ],
+        "4": [
+          "c1p11",
+          "c2p2"
+        ],
+        "5": [
+          "c1p1"
+        ]
+      }
+    },
+    "sfu_basketball012_4": {
+      "groups": {
+        "1": [
+          "c1p8",
+          "c2p2",
+          "c3p7",
+          "c4p4"
+        ],
+        "2": [
+          "c1p5",
+          "c2p6",
+          "c3p3"
+        ],
+        "3": [
+          "c1p1",
+          "c2p10"
+        ],
+        "4": [
+          "c2p9"
+        ]
+      }
+    },
+    "sfu_basketball012_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p12",
+          "c3p3",
+          "c4p4"
+        ],
+        "2": [
+          "c1p7",
+          "c2p6"
+        ],
+        "3": [
+          "c1p9",
+          "c2p8"
+        ],
+        "4": [
+          "c1p11",
+          "c2p2"
+        ],
+        "5": [
+          "c1p5",
+          "c2p10"
+        ]
+      }
+    },
+    "sfu_basketball012_7": {
+      "groups": {
+        "1": [
+          "c1p7",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ],
+        "2": [
+          "c1p5",
+          "c2p6"
+        ],
+        "3": [
+          "c1p9",
+          "c2p8"
+        ],
+        "4": [
+          "c1p11",
+          "c2p12"
+        ],
+        "5": [
+          "c1p1",
+          "c2p10"
+        ]
+      }
+    },
+    "sfu_basketball012_8": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p6",
+          "c3p7",
+          "c4p8"
+        ],
+        "2": [
+          "c1p11",
+          "c2p12",
+          "c3p3",
+          "c4p4"
+        ],
+        "3": [
+          "c1p9",
+          "c2p10"
+        ],
+        "4": [
+          "c1p13",
+          "c2p2"
+        ],
+        "5": [
+          "c1p5",
+          "c2p14"
+        ]
+      }
+    },
+    "sfu_basketball016_2": {
+      "groups": {
+        "1": [
+          "c1p9",
+          "c2p2",
+          "c3p3",
+          "c4p8"
+        ],
+        "2": [
+          "c1p1",
+          "c2p6",
+          "c3p7"
+        ],
+        "3": [
+          "c1p5",
+          "c2p10",
+          "c3p11",
+          "c4p4"
+        ]
+      },
+      "notes": "c4p4 only hand"
+    },
+    "sfu_basketball_04_8": {
+      "groups": {
+        "1": [
+          "c1p13",
+          "c2p14",
+          "c4p12"
+        ],
+        "2": [
+          "c1p5",
+          "c2p6",
+          "c3p11",
+          "c4p15"
+        ],
+        "3": [
+          "c1p1",
+          "c2p2"
+        ],
+        "4": [
+          "c1p9",
+          "c2p10",
+          "c3p7",
+          "c4p4"
+        ],
+        "5": [
+          "c3p3"
+        ],
+        "6": [
+          "c4p8"
+        ]
+      }
+    },
+    "sfu_basketball_05_22": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p14",
+          "c3p7",
+          "c4p8"
+        ],
+        "2": [
+          "c1p1",
+          "c2p10"
+        ],
+        "3": [
+          "c1p9",
+          "c2p13"
+        ],
+        "4": [
+          "c1p11",
+          "c2p2"
+        ],
+        "5": [
+          "c2p12",
+          "c3p3",
+          "c4p4"
+        ],
+        "6": [
+          "c2p6"
+        ]
+      }
+    },
+    "sfu_basketball_05_26": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p15",
+          "c4p11"
+        ],
+        "2": [
+          "c1p9",
+          "c2p10",
+          "c3p7",
+          "c4p8"
+        ],
+        "3": [
+          "c1p5",
+          "c2p2"
+        ],
+        "4": [
+          "c1p12",
+          "c2p13"
+        ],
+        "5": [
+          "c2p6",
+          "c4p4"
+        ],
+        "6": [
+          "c2p14"
+        ],
+        "7": [
+          "c3p3"
+        ]
+      }
+    },
+    "sfu_basketball_09_11": {
+      "groups": {
+        "1": [
+          "c1p9",
+          "c2p2",
+          "c3p13"
+        ],
+        "2": [
+          "c1p5",
+          "c2p6",
+          "c3p7",
+          "c4p4"
+        ],
+        "3": [
+          "c1p1",
+          "c3p12",
+          "c4p11"
+        ],
+        "4": [
+          "c3p10",
+          "c4p8"
+        ],
+        "5": [
+          "c3p3"
+        ]
+      }
+    },
+    "sfu_basketball_09_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ],
+        "2": [
+          "c2p6",
+          "c3p9"
+        ],
+        "3": [
+          "c3p7",
+          "c4p12"
+        ],
+        "4": [
+          "c3p11",
+          "c4p8"
+        ],
+        "5": [
+          "c3p13",
+          "c4p10"
+        ]
+      }
+    },
+    "sfu_cooking028_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ],
+        "2": [
+          "c2p5"
+        ],
+        "3": [
+          "c2p6"
+        ]
+      }
+    },
+    "sfu_cooking_007_7": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c4p3",
+          "c5p4"
+        ]
+      }
+    },
+    "sfu_cooking_008_3": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c4p5",
+          "c5p4"
+        ],
+        "2": [
+          "c4p3",
+          "c5p6"
+        ]
+      }
+    },
+    "sfu_cooking_008_5": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c4p3",
+          "c5p5"
+        ],
+        "2": [
+          "c4p4"
+        ]
+      }
+    },
+    "sfu_covid_004_2": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p6",
+          "c3p7",
+          "c4p4"
+        ],
+        "2": [
+          "c1p1"
+        ],
+        "3": [
+          "c2p2",
+          "c3p3"
+        ]
+      }
+    },
+    "sfu_covid_004_4": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p6",
+          "c3p8",
+          "c4p4"
+        ],
+        "2": [
+          "c1p1",
+          "c3p7"
+        ],
+        "3": [
+          "c2p2",
+          "c3p3"
+        ]
+      }
+    },
+    "sfu_covid_008_16": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "unc_basketball_02-24-23_01_3": {
+      "groups": {
+        "1": [
+          "c3p9",
+          "c4p6"
+        ]
+      },
+      "notes": "weird one, it is just a person with a ball in the hands, not playing actively"
+    },
+    "unc_basketball_02-24-23_02_10": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p11"
+        ],
+        "2": [
+          "c2p5",
+          "c3p14",
+          "c4p15"
+        ],
+        "3": [
+          "c3p10",
+          "c4p7"
+        ],
+        "4": [
+          "c3p8",
+          "c4p13"
+        ],
+        "5": [
+          "c3p6",
+          "c4p17"
+        ],
+        "6": [
+          "c3p7"
+        ],
+        "7": [
+          "c3p16",
+          "c4p9"
+        ],
+        "8": [
+          "c4p14",
+          "c4p4"
+        ]
+      },
+      "notes": "c3p14 not sure about correct assig., same cam3-4 bkg ppl"
+    },
+    "unc_basketball_02-24-23_02_11": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p11",
+          "c4p8"
+        ],
+        "2": [
+          "c3p9",
+          "c4p12"
+        ],
+        "3": [
+          "c3p7",
+          "c4p10"
+        ],
+        "4": [
+          "c3p5",
+          "c4p4"
+        ],
+        "5": [
+          "c3p13",
+          "c4p14"
+        ],
+        "6": [
+          "c3p3",
+          "c4p6"
+        ]
+      },
+      "notes": "not sure about c3 c4 reid"
+    },
+    "unc_basketball_03-30-23_02_10": {
+      "groups": {
+        "1": [
+          "c2p2",
+          "c3p10",
+          "c4p8"
+        ]
+      }
+    },
+    "unc_basketball_03-30-23_02_14": {
+      "groups": {
+        "1": [
+          "c2p8",
+          "c3p3",
+          "c4p10"
+        ]
+      }
+    },
+    "unc_basketball_03-30-23_02_15": {
+      "groups": {
+        "1": [
+          "c2p5",
+          "c3p8",
+          "c4p9"
+        ]
+      }
+    },
+    "unc_basketball_03-30-23_02_17": {
+      "groups": {
+        "1": [
+          "c2p7",
+          "c3p2",
+          "c4p11"
+        ]
+      }
+    },
+    "unc_basketball_03-30-23_02_18": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p6",
+          "c3p13",
+          "c4p12"
+        ]
+      }
+    },
+    "unc_basketball_03-30-23_02_19": {
+      "groups": {
+        "1": [
+          "c2p5",
+          "c3p8",
+          "c4p9"
+        ]
+      }
+    },
+    "unc_basketball_03-30-23_02_4": {
+      "groups": {
+        "1": [
+          "c1p9",
+          "c2p2",
+          "c3p7",
+          "c4p12"
+        ],
+        "2": [
+          "c1p1",
+          "c2p6",
+          "c3p14"
+        ],
+        "3": [
+          "c1p5",
+          "c2p10",
+          "c3p3",
+          "c4p8"
+        ],
+        "4": [
+          "c3p13",
+          "c4p4"
+        ],
+        "5": [
+          "c3p11"
+        ]
+      }
+    },
+    "unc_basketball_03-30-23_02_5": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p9",
+          "c3p3",
+          "c4p11"
+        ]
+      }
+    },
+    "unc_basketball_03-30-23_02_7": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p12",
+          "c4p8"
+        ],
+        "2": [
+          "c1p5",
+          "c2p9",
+          "c3p3",
+          "c4p11"
+        ],
+        "3": [
+          "c2p6",
+          "c3p7",
+          "c4p4"
+        ],
+        "4": [
+          "c3p10",
+          "c4p13"
+        ]
+      }
+    },
+    "uniandes_basketball_001_23": {
+      "groups": {
+        "1": [
+          "c1p26",
+          "c2p10",
+          "c3p7",
+          "c4p41"
+        ],
+        "2": [
+          "c2p6",
+          "c1p9"
+        ],
+        "3": [
+          "c2p2",
+          "c1p13"
+        ],
+        "4": [
+          "c2p14",
+          "c1p23"
+        ]
+      },
+      "notes": "rest is a mess to reidentify"
+    },
+    "uniandes_basketball_001_24": {
+      "groups": {
+        "1": [
+          "c1p22",
+          "c2p6",
+          "c3p7",
+          "c4p45"
+        ],
+        "2": [
+          "C1P19",
+          "c2p10"
+        ]
+      },
+      "notes": "c3p7 unsure about number, rest is a mess to reid"
+    },
+    "uniandes_basketball_001_26": {
+      "groups": {
+        "1": [
+          "c1p9",
+          "c2p2",
+          "c3p24",
+          "c4p37"
+        ]
+      },
+      "notes": "rest is a mess"
+    },
+    "uniandes_basketball_001_27": {
+      "groups": {
+        "1": [
+          "c1p25",
+          "c2p6",
+          "c3p3",
+          "c4p4"
+        ]
+      },
+      "notes": "rest is a mess to reidentify"
+    },
+    "uniandes_basketball_003_38": {
+      "groups": {
+        "1": [],
+        "2": [],
+        "3": [],
+        "4": [],
+        "5": []
+      }
+    },
+    "uniandes_basketball_004_23": {
+      "groups": {
+        "1": [
+          "c1p27",
+          "c2p2",
+          "c3p21",
+          "c4p10"
+        ]
+      },
+      "notes": "rest is a mess to reidentify"
+    },
+    "uniandes_basketball_004_44": {
+      "groups": {
+        "1": [
+          "c1p13",
+          "c2p2",
+          "c3p21",
+          "c4p4"
+        ]
+      },
+      "notes": "rest is a mess to reidentify"
+    },
+    "uniandes_basketball_004_45": {
+      "groups": {
+        "1": [
+          "c1p17",
+          "c2p9",
+          "c3p15",
+          "c4p26"
+        ]
+      }
+    },
+    "uniandes_dance_002_11": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p10",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_002_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p8",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_008_29": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p7",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_008_30": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p7",
+          "c3p10",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_008_31": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p10",
+          "c4p9",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_008_32": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p10",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_008_33": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p11",
+          "c5p5"
+        ],
+        "2": [
+          "c1p1",
+          "c3p3"
+        ],
+        "3": [
+          "c3p7"
+        ],
+        "4": [
+          "c3p9"
+        ],
+        "5": []
+      },
+      "notes": "cam04 was empty, need to redo it"
+    },
+    "uniandes_dance_008_34": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p15",
+          "c4p14",
+          "c5p5"
+        ],
+        "2": [
+          "c1p1",
+          "c3p9",
+          "c4p10"
+        ],
+        "3": [
+          "c3p3",
+          "c4p8"
+        ],
+        "4": [
+          "c3p7",
+          "c4p12"
+        ],
+        "5": [
+          "c3p13",
+          "c4p4"
+        ],
+        "6": [
+          "c3p11"
+        ],
+        "7": [
+          "c4p6"
+        ]
+      }
+    },
+    "uniandes_dance_008_35": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p13",
+          "c4p8",
+          "c5p5"
+        ],
+        "2": [
+          "c1p1",
+          "c3p3",
+          "c4p12"
+        ],
+        "3": [
+          "c3p7",
+          "c4p10"
+        ],
+        "4": [
+          "c3p11",
+          "c4p4"
+        ],
+        "5": [
+          "c3p9"
+        ]
+      }
+    },
+    "uniandes_dance_008_36": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p14",
+          "c4p15",
+          "c5p5"
+        ],
+        "2": [
+          "c1p1",
+          "c3p9",
+          "c4p11"
+        ]
+      }
+    },
+    "uniandes_dance_008_37": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p8",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_008_38": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p11",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_10": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p11",
+          "c3p16",
+          "c4p13",
+          "c5p14"
+        ]
+      }
+    },
+    "uniandes_dance_016_11": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p10",
+          "c3p13",
+          "c4p14",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p10",
+          "c3p8",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_13": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p11",
+          "c3p12",
+          "c4p15",
+          "c5p10"
+        ]
+      },
+      "notes": "Not sure about the c3p7"
+    },
+    "uniandes_dance_016_14": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p10",
+          "c3p11",
+          "c4p4",
+          "c5p5"
+        ]
+      },
+      "notes": "not sure about c3p11 if 11 is right, same c4p4"
+    },
+    "uniandes_dance_016_3": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p14",
+          "c3p12",
+          "c4p16",
+          "c5p10"
+        ]
+      }
+    },
+    "uniandes_dance_016_30": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p17",
+          "c4p9",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_31": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p2",
+          "c3p16",
+          "c4p8",
+          "c5p4"
+        ]
+      }
+    },
+    "uniandes_dance_016_32": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p11",
+          "c4p14",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_33": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p10",
+          "c3p15",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_36": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p10",
+          "c3p15",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_37": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c3p18",
+          "c4p12",
+          "c5p5"
+        ]
+      },
+      "notes": "c2 skipped since there is the hand with qr code and main person is covered"
+    },
+    "uniandes_dance_016_38": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_39": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p3",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_42": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p10",
+          "c3p17",
+          "c4p14",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_43": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p10",
+          "c3p8",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_44": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p10",
+          "c3p16",
+          "c4p14",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_45": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p10",
+          "c3p11",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_6": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p10",
+          "c3p8",
+          "c4p16",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_016_7": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p11",
+          "c3p16",
+          "c4p15",
+          "c5p10"
+        ]
+      }
+    },
+    "uniandes_dance_016_8": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p11",
+          "c3p14",
+          "c4p9",
+          "c5p10"
+        ]
+      }
+    },
+    "uniandes_dance_017_6": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p14",
+          "c4p17",
+          "c5p10"
+        ]
+      }
+    },
+    "uniandes_dance_019_17": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p8",
+          "c4p4",
+          "c5p5"
+        ]
+      },
+      "notes": "not sure about c3p8"
+    },
+    "uniandes_dance_019_18": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_19": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p12",
+          "c4p4",
+          "c5p5"
+        ]
+      },
+      "notes": "not sure about c3p12"
+    },
+    "uniandes_dance_019_20": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_22": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p11",
+          "c4p8",
+          "c5p4"
+        ]
+      },
+      "notes": "c2 skipped since there is the hand with qr code and main person is covered"
+    },
+    "uniandes_dance_019_24": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p8",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_25": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p11",
+          "c4p7",
+          "c5p5"
+        ]
+      },
+      "notes": "not sure about c3p11"
+    },
+    "uniandes_dance_019_26": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p10",
+          "c4p4",
+          "c5p5"
+        ]
+      },
+      "notes": "c2 completely empty, not sure c3p10"
+    },
+    "uniandes_dance_019_27": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p7",
+          "c5p5"
+        ]
+      },
+      "notes": "not sure about c3p10"
+    },
+    "uniandes_dance_019_28": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_46": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p6",
+          "c4p9",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_47": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_49": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_51": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p6",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_52": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_54": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p6",
+          "c4p11",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_55": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p12",
+          "c4p9",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_56": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_57": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p13",
+          "c4p9",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_019_58": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_024_11": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_024_12": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p6",
+          "c3p15",
+          "c4p12",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_024_13": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p14",
+          "c4p11",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_024_14": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p12",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_024_15": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p8",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_024_16": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p10",
+          "c4p4",
+          "c5p12"
+        ]
+      }
+    },
+    "uniandes_dance_024_17": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p10",
+          "c4p4",
+          "c5p5"
+        ]
+      },
+      "notes": "not sure c4p4"
+    },
+    "uniandes_dance_024_45": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p13",
+          "c4p10",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_024_47": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p8",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "uniandes_dance_024_48": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p10",
+          "c4p4",
+          "c5p5"
+        ]
+      },
+      "notes": "c2 completely empty"
+    },
+    "uniandes_dance_024_49": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p14",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0706_Dance_4_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0706_Dance_4_3": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0706_Dance_4_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0706_Dance_4_5": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0713_Dance_3_2": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p7",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0713_Dance_3_3": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0713_Dance_3_4": {
+      "groups": {
+        "1": [
+          "c1p11",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p10"
+        ]
+      }
+    },
+    "upenn_0713_Dance_3_5": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p7",
+          "c3p3",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0713_Dance_4_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p7",
+          "c3p3",
+          "c4p10",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0713_Dance_4_3": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0713_Dance_4_4": {
+      "groups": {
+        "1": [
+          "c1p10",
+          "c2p2",
+          "c3p8",
+          "c4p4",
+          "c5p9"
+        ]
+      },
+      "notes": "not sure c1p10"
+    },
+    "upenn_0713_Dance_4_5": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      },
+      "notes": "not sure c1p6"
+    },
+    "upenn_0713_Dance_5_4": {
+      "groups": {
+        "1": [
+          "c1p11",
+          "c2p7",
+          "c3p3",
+          "c4p9",
+          "c5p14"
+        ]
+      }
+    },
+    "upenn_0713_Dance_5_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p7",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0721_Piano_1_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p7",
+          "c3p8",
+          "c4p4",
+          "c5p10"
+        ]
+      }
+    },
+    "upenn_0721_Piano_1_3": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "upenn_0722_Piano_1_2": {
+      "groups": {
+        "1": [
+          "c1p11",
+          "c2p16",
+          "c3p3",
+          "c4p4",
+          "c5p10"
+        ]
+      }
+    },
+    "upenn_0727_Partner_Dance_3_1_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p11",
+          "c3p8",
+          "c4p16",
+          "c5p5"
+        ],
+        "2": [
+          "c1p6",
+          "c2p7",
+          "c3p3",
+          "c4p9",
+          "c5p10"
+        ]
+      }
+    },
+    "utokyo_pcr_2001_29_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "utokyo_pcr_2001_29_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "utokyo_pcr_2001_29_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "utokyo_pcr_2001_30_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "utokyo_pcr_2001_30_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "utokyo_pcr_2001_32_2": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "utokyo_pcr_2001_32_4": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p3",
+          "c4p4"
+        ]
+      }
+    },
+    "utokyo_soccer_8000_43_2": {
+      "groups": {
+        "1": [
+          "c1p8",
+          "c2p2",
+          "c3p3",
+          "c4p4",
+          "c5p5"
+        ]
+      }
+    },
+    "utokyo_soccer_8000_43_4": {
+      "groups": {
+        "1": [
+          "c1p10",
+          "c2p2",
+          "c3p3",
+          "c4p7",
+          "c5p5"
+        ]
+      }
+    },
+    "utokyo_soccer_8000_43_6": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p2",
+          "c3p8",
+          "c4p12",
+          "c5p5"
+        ]
+      },
+      "notes": "not sure c1p1"
+    }
+  },
+  "egohumans": {
+    "001_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p27"
+        ],
+        "3": [
+          "c1p2",
+          "c2p2",
+          "c5p2",
+          "c7p5"
+        ],
+        "1": [
+          "c1p3",
+          "c2p3",
+          "c5p3",
+          "c7p3"
+        ],
+        "2": [
+          "c1p4",
+          "c2p15",
+          "c5p4",
+          "c7p4"
+        ]
+      }
+    },
+    "001_basketball": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "2": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "3": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "1": [
+          "c1p4",
+          "c3p4",
+          "c4p4",
+          "c8p5"
+        ]
+      }
+    },
+    "001_fencing": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c5p1",
+          "c10p1",
+          "c13p1"
+        ],
+        "2": [
+          "c4p2",
+          "c5p2",
+          "c10p2",
+          "c13p2"
+        ],
+        "3": [
+          "c5p4",
+          "c13p3"
+        ]
+      }
+    },
+    "001_legoassemble": {
+      "groups": {
+        "2": [
+          "c2p1",
+          "c3p1",
+          "c4p1",
+          "c6p1"
+        ],
+        "3": [
+          "c2p2",
+          "c3p2",
+          "c4p5",
+          "c6p4"
+        ],
+        "1": [
+          "c2p3",
+          "c3p3",
+          "c4p3",
+          "c6p3"
+        ]
+      }
+    },
+    "001_tagging": {
+      "groups": {
+        "2": [
+          "c1p1",
+          "c4p1",
+          "c6p2",
+          "c8p6"
+        ],
+        "4": [
+          "c1p2",
+          "c4p2",
+          "c6p7",
+          "c8p8"
+        ],
+        "3": [
+          "c1p3",
+          "c4p3",
+          "c6p3",
+          "c8p9"
+        ],
+        "1": [
+          "c1p4",
+          "c4p4",
+          "c6p4",
+          "c8p5"
+        ]
+      }
+    },
+    "001_tennis": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c9p1",
+          "c12p1",
+          "c20p6"
+        ],
+        "2": [
+          "c4p2",
+          "c9p2",
+          "c12p2",
+          "c20p8"
+        ]
+      }
+    },
+    "001_volleyball": {
+      "groups": {
+        "2": [
+          "c2p21",
+          "c4p22",
+          "c8p23",
+          "c11p24"
+        ],
+        "4": [
+          "c2p17",
+          "c4p45",
+          "c8p11",
+          "c11p39"
+        ],
+        "1": [
+          "c2p13",
+          "c4p36",
+          "c8p3",
+          "c11p30"
+        ],
+        "3": [
+          "c2p5",
+          "c4p29",
+          "c8p7",
+          "c11p35"
+        ]
+      }
+    },
+    "002_badminton": {
+      "groups": {
+        "4": [
+          "c1p2",
+          "c2p2",
+          "c5p11",
+          "c7p10"
+        ],
+        "3": [
+          "c1p4",
+          "c2p4",
+          "c5p26",
+          "c7p27"
+        ],
+        "1": [
+          "c1p1",
+          "c2p1",
+          "c5p42",
+          "c7p12"
+        ],
+        "2": [
+          "c1p24",
+          "c2p48",
+          "c5p15",
+          "c7p23"
+        ]
+      }
+    },
+    "002_basketball": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p1",
+          "c4p5",
+          "c8p6"
+        ],
+        "4": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "3": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "2": [
+          "c1p4",
+          "c3p4",
+          "c4p4",
+          "c8p4"
+        ]
+      }
+    },
+    "002_fencing": {
+      "groups": {
+        "2": [
+          "c4p1",
+          "c5p6",
+          "c10p4",
+          "c13p1"
+        ],
+        "1": [
+          "c4p5",
+          "c5p13",
+          "c10p7",
+          "c13p8"
+        ],
+        "3": [
+          "c5p3",
+          "c13p11"
+        ]
+      }
+    },
+    "002_legoassemble": {
+      "groups": {
+        "2": [
+          "c2p1",
+          "c3p1",
+          "c4p1",
+          "c6p1"
+        ],
+        "3": [
+          "c2p2",
+          "c3p2",
+          "c4p2",
+          "c6p2"
+        ],
+        "1": [
+          "c2p3",
+          "c3p3",
+          "c4p3",
+          "c6p3"
+        ]
+      }
+    },
+    "002_tagging": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c4p1",
+          "c6p7",
+          "c8p1"
+        ],
+        "2": [
+          "c1p2",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "1": [
+          "c1p3",
+          "c4p3",
+          "c6p3",
+          "c8p3"
+        ],
+        "3": [
+          "c1p6",
+          "c4p5",
+          "c6p4",
+          "c8p4"
+        ]
+      }
+    },
+    "002_tennis": {
+      "groups": {
+        "2": [
+          "c4p1",
+          "c9p6",
+          "c12p12",
+          "c20p1"
+        ],
+        "1": [
+          "c4p2",
+          "c9p3",
+          "c12p4",
+          "c20p8"
+        ]
+      }
+    },
+    "002_volleyball": {
+      "groups": {
+        "4": [
+          "c2p6",
+          "c4p37",
+          "c8p1",
+          "c11p5"
+        ],
+        "2": [
+          "c2p17",
+          "c4p11",
+          "c8p19",
+          "c11p38"
+        ],
+        "3": [
+          "c2p27",
+          "c4p14",
+          "c8p8",
+          "c11p24"
+        ],
+        "1": [
+          "c2p10",
+          "c4p28",
+          "c8p4",
+          "c11p9"
+        ]
+      }
+    },
+    "003_badminton": {
+      "groups": {
+        "3": [
+          "c1p3",
+          "c2p11",
+          "c5p20",
+          "c7p17"
+        ],
+        "4": [
+          "c1p21",
+          "c2p42",
+          "c5p27",
+          "c7p33"
+        ],
+        "2": [
+          "c1p28",
+          "c2p1",
+          "c5p35",
+          "c7p1"
+        ],
+        "1": [
+          "c1p25",
+          "c2p26",
+          "c5p16",
+          "c7p5"
+        ]
+      }
+    },
+    "003_basketball": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c3p5",
+          "c4p8",
+          "c8p7"
+        ],
+        "2": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "3": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p9"
+        ],
+        "1": [
+          "c1p4",
+          "c3p4",
+          "c4p4",
+          "c8p6"
+        ]
+      }
+    },
+    "003_fencing": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c5p1",
+          "c10p1",
+          "c13p1"
+        ],
+        "2": [
+          "c4p2",
+          "c5p2",
+          "c10p2",
+          "c13p2"
+        ],
+        "3": [
+          "c5p6",
+          "c13p5"
+        ]
+      }
+    },
+    "003_legoassemble": {
+      "groups": {
+        "2": [
+          "c2p1",
+          "c3p1",
+          "c4p1",
+          "c6p1"
+        ],
+        "3": [
+          "c2p2",
+          "c3p2",
+          "c4p4",
+          "c6p2"
+        ],
+        "1": [
+          "c2p3",
+          "c3p3",
+          "c4p3",
+          "c6p3"
+        ]
+      }
+    },
+    "003_tagging": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c4p1",
+          "c6p1",
+          "c8p8"
+        ],
+        "4": [
+          "c1p2",
+          "c4p2",
+          "c6p2",
+          "c8p6"
+        ],
+        "3": [
+          "c1p3",
+          "c4p3",
+          "c6p3",
+          "c8p3"
+        ],
+        "2": [
+          "c1p7",
+          "c4p4",
+          "c6p5",
+          "c8p4"
+        ]
+      }
+    },
+    "003_tennis": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c9p1",
+          "c12p11",
+          "c20p5"
+        ],
+        "2": [
+          "c4p2",
+          "c9p2",
+          "c12p13",
+          "c20p8"
+        ]
+      }
+    },
+    "003_volleyball": {
+      "groups": {
+        "4": [
+          "c2p17",
+          "c4p15",
+          "c8p4",
+          "c11p7"
+        ],
+        "2": [
+          "c2p11",
+          "c4p3",
+          "c8p3",
+          "c11p37"
+        ],
+        "3": [
+          "c2p14",
+          "c4p2",
+          "c8p2",
+          "c11p29"
+        ],
+        "1": [
+          "c2p5",
+          "c4p1",
+          "c8p1",
+          "c11p23"
+        ]
+      }
+    },
+    "004_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p19"
+        ],
+        "3": [
+          "c1p3",
+          "c2p3",
+          "c5p3",
+          "c7p30"
+        ],
+        "2": [
+          "c1p26",
+          "c2p18",
+          "c5p6",
+          "c7p17"
+        ],
+        "1": [
+          "c1p20",
+          "c2p4",
+          "c5p4",
+          "c7p28"
+        ]
+      }
+    },
+    "004_basketball": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p6"
+        ],
+        "2": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "3": [
+          "c1p3",
+          "c3p3",
+          "c4p5",
+          "c8p3"
+        ],
+        "1": [
+          "c1p9",
+          "c3p7",
+          "c4p4",
+          "c8p4"
+        ]
+      }
+    },
+    "004_fencing": {
+      "groups": {
+        "2": [
+          "c4p1",
+          "c5p1",
+          "c10p1",
+          "c13p1"
+        ],
+        "1": [
+          "c4p2",
+          "c5p2",
+          "c10p2",
+          "c13p2"
+        ],
+        "3": [
+          "c5p6",
+          "c13p5"
+        ]
+      }
+    },
+    "004_legoassemble": {
+      "groups": {
+        "1": [
+          "c2p1",
+          "c3p1",
+          "c4p1",
+          "c6p1"
+        ],
+        "3": [
+          "c2p2",
+          "c3p2",
+          "c4p2",
+          "c6p2"
+        ],
+        "2": [
+          "c2p4",
+          "c3p3",
+          "c4p3",
+          "c6p3"
+        ]
+      }
+    },
+    "004_tagging": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c4p1",
+          "c6p1",
+          "c8p5"
+        ],
+        "2": [
+          "c1p2",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "1": [
+          "c1p3",
+          "c4p3",
+          "c6p3",
+          "c8p3"
+        ],
+        "3": [
+          "c1p4",
+          "c4p4",
+          "c6p4",
+          "c8p4"
+        ]
+      }
+    },
+    "004_tennis": {
+      "groups": {
+        "2": [
+          "c4p1",
+          "c9p1",
+          "c12p1",
+          "c20p7"
+        ],
+        "1": [
+          "c4p2",
+          "c9p2",
+          "c12p2",
+          "c20p5"
+        ]
+      }
+    },
+    "004_volleyball": {
+      "groups": {
+        "2": [
+          "c2p1",
+          "c4p40",
+          "c8p1",
+          "c11p6"
+        ],
+        "4": [
+          "c2p17",
+          "c4p8",
+          "c8p9",
+          "c11p34"
+        ],
+        "3": [
+          "c2p38",
+          "c4p4",
+          "c8p12",
+          "c11p19"
+        ],
+        "1": [
+          "c2p3",
+          "c4p26",
+          "c8p5",
+          "c11p50"
+        ]
+      }
+    },
+    "005_badminton": {
+      "groups": {
+        "4": [
+          "c1p6",
+          "c2p38",
+          "c5p15",
+          "c7p9"
+        ],
+        "3": [
+          "c1p22",
+          "c2p4",
+          "c5p24",
+          "c7p4"
+        ],
+        "2": [
+          "c1p10",
+          "c2p5",
+          "c5p29",
+          "c7p5"
+        ],
+        "1": [
+          "c1p26",
+          "c2p1",
+          "c5p8",
+          "c7p1"
+        ]
+      }
+    },
+    "005_basketball": {
+      "groups": {
+        "2": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "4": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "1": [
+          "c1p9",
+          "c3p3",
+          "c4p5",
+          "c8p3"
+        ],
+        "3": [
+          "c1p4",
+          "c3p7",
+          "c4p8",
+          "c8p6"
+        ]
+      }
+    },
+    "005_fencing": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c5p1",
+          "c10p1",
+          "c13p1"
+        ],
+        "2": [
+          "c4p2",
+          "c5p2",
+          "c10p2",
+          "c13p2"
+        ],
+        "3": [
+          "c5p3",
+          "c13p3"
+        ]
+      }
+    },
+    "005_legoassemble": {
+      "groups": {
+        "2": [
+          "c2p1",
+          "c3p1",
+          "c4p1",
+          "c6p1"
+        ],
+        "1": [
+          "c2p2",
+          "c3p2",
+          "c4p2",
+          "c6p2"
+        ],
+        "3": [
+          "c2p4",
+          "c3p3",
+          "c4p3",
+          "c6p3"
+        ]
+      }
+    },
+    "005_tagging": {
+      "groups": {
+        "2": [
+          "c1p1",
+          "c4p1",
+          "c6p1",
+          "c8p1"
+        ],
+        "3": [
+          "c1p2",
+          "c4p5",
+          "c6p2",
+          "c8p2"
+        ],
+        "4": [
+          "c1p3",
+          "c4p7",
+          "c6p3",
+          "c8p3"
+        ],
+        "1": [
+          "c1p4",
+          "c4p4",
+          "c6p4",
+          "c8p6"
+        ]
+      }
+    },
+    "005_tennis": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c9p7",
+          "c12p1",
+          "c20p11"
+        ],
+        "2": [
+          "c4p6",
+          "c9p3",
+          "c12p15",
+          "c20p18"
+        ]
+      }
+    },
+    "005_volleyball": {
+      "groups": {
+        "2": [
+          "c2p2",
+          "c8p2",
+          "c11p2"
+        ],
+        "4": [
+          "c2p4",
+          "c4p4",
+          "c8p4",
+          "c11p4"
+        ],
+        "3": [
+          "c2p3",
+          "c4p3",
+          "c8p3",
+          "c11p3"
+        ],
+        "1": [
+          "c2p1",
+          "c4p1",
+          "c8p1",
+          "c11p8"
+        ]
+      }
+    },
+    "006_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p1",
+          "c5p14",
+          "c7p27"
+        ],
+        "3": [
+          "c1p4",
+          "c2p4",
+          "c5p21",
+          "c7p18"
+        ],
+        "2": [
+          "c1p3",
+          "c2p3",
+          "c5p26",
+          "c7p2"
+        ],
+        "1": [
+          "c1p19",
+          "c2p13",
+          "c5p30",
+          "c7p15"
+        ]
+      }
+    },
+    "006_basketball": {
+      "groups": {
+        "2": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "1": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "4": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "3": [
+          "c1p4",
+          "c3p4",
+          "c4p4",
+          "c8p4"
+        ]
+      }
+    },
+    "006_fencing": {
+      "groups": {
+        "1": [
+          "c4p4",
+          "c5p3",
+          "c10p3",
+          "c13p3"
+        ],
+        "2": [
+          "c4p6",
+          "c5p1",
+          "c10p1",
+          "c13p1"
+        ],
+        "3": [
+          "c5p2",
+          "c13p2"
+        ]
+      }
+    },
+    "006_legoassemble": {
+      "groups": {
+        "1": [
+          "c2p1",
+          "c3p4",
+          "c4p1",
+          "c6p1"
+        ],
+        "3": [
+          "c2p2",
+          "c3p2",
+          "c4p2",
+          "c6p2"
+        ],
+        "2": [
+          "c2p5",
+          "c3p3",
+          "c4p3",
+          "c6p6"
+        ]
+      }
+    },
+    "006_tagging": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c4p1",
+          "c6p1",
+          "c8p1"
+        ],
+        "1": [
+          "c1p2",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "3": [
+          "c1p3",
+          "c4p5",
+          "c6p6",
+          "c8p3"
+        ],
+        "2": [
+          "c1p4",
+          "c4p4",
+          "c6p4",
+          "c8p4"
+        ]
+      }
+    },
+    "006_tennis": {
+      "groups": {
+        "1": [
+          "c4p3",
+          "c9p7",
+          "c12p8",
+          "c20p3"
+        ],
+        "2": [
+          "c4p2",
+          "c9p4",
+          "c12p10",
+          "c20p2"
+        ]
+      }
+    },
+    "006_volleyball": {
+      "groups": {
+        "1": [
+          "c2p11",
+          "c4p44",
+          "c8p13",
+          "c11p8"
+        ],
+        "2": [
+          "c2p22",
+          "c4p12",
+          "c8p7",
+          "c11p37"
+        ],
+        "4": [
+          "c2p5",
+          "c4p20",
+          "c8p17",
+          "c11p21"
+        ],
+        "3": [
+          "c2p1",
+          "c4p6",
+          "c8p3",
+          "c11p47"
+        ]
+      }
+    },
+    "007_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p37",
+          "c5p1",
+          "c7p10"
+        ],
+        "3": [
+          "c1p3",
+          "c2p26",
+          "c5p3",
+          "c7p7"
+        ],
+        "2": [
+          "c1p5",
+          "c2p17",
+          "c5p30",
+          "c7p13"
+        ],
+        "1": [
+          "c1p4",
+          "c2p23",
+          "c5p4",
+          "c7p18"
+        ]
+      }
+    },
+    "007_basketball": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "1": [
+          "c1p6",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "2": [
+          "c1p7",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "3": [
+          "c1p8",
+          "c3p4",
+          "c4p5",
+          "c8p4"
+        ]
+      }
+    },
+    "007_fencing": {
+      "groups": {
+        "1": [
+          "c4p4",
+          "c5p3",
+          "c10p3",
+          "c13p3"
+        ],
+        "2": [
+          "c4p6",
+          "c5p2",
+          "c10p2",
+          "c13p2"
+        ],
+        "3": [
+          "c4p10",
+          "c5p1",
+          "c10p8",
+          "c13p1"
+        ]
+      }
+    },
+    "007_tagging": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c4p5",
+          "c6p1",
+          "c8p1"
+        ],
+        "3": [
+          "c1p2",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "2": [
+          "c1p3",
+          "c4p3",
+          "c6p8",
+          "c8p6"
+        ],
+        "1": [
+          "c1p7",
+          "c4p9",
+          "c6p4",
+          "c8p10"
+        ]
+      }
+    },
+    "007_tennis": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c9p7",
+          "c12p11",
+          "c20p1"
+        ],
+        "2": [
+          "c4p2",
+          "c9p4",
+          "c12p8",
+          "c20p2"
+        ]
+      }
+    },
+    "007_volleyball": {
+      "groups": {
+        "2": [
+          "c2p11",
+          "c4p1",
+          "c8p20",
+          "c11p1"
+        ],
+        "1": [
+          "c2p25",
+          "c4p26",
+          "c8p5",
+          "c11p10"
+        ],
+        "4": [
+          "c2p7",
+          "c4p2",
+          "c8p9",
+          "c11p2"
+        ],
+        "3": [
+          "c2p22",
+          "c4p16",
+          "c8p13",
+          "c11p47"
+        ]
+      }
+    },
+    "008_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p37"
+        ],
+        "3": [
+          "c1p3",
+          "c2p3",
+          "c5p3",
+          "c7p26"
+        ],
+        "2": [
+          "c1p16",
+          "c2p5",
+          "c5p5",
+          "c7p5"
+        ],
+        "1": [
+          "c1p4",
+          "c2p4",
+          "c5p4",
+          "c7p4"
+        ]
+      }
+    },
+    "008_basketball": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p7"
+        ],
+        "4": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p5"
+        ],
+        "2": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "3": [
+          "c1p6",
+          "c3p4",
+          "c4p4",
+          "c8p4"
+        ]
+      }
+    },
+    "008_fencing": {
+      "groups": {
+        "1": [
+          "c4p2",
+          "c5p6",
+          "c10p8",
+          "c13p2"
+        ],
+        "2": [
+          "c4p3",
+          "c5p3",
+          "c10p3",
+          "c13p3"
+        ],
+        "3": [
+          "c4p7",
+          "c5p4",
+          "c10p10",
+          "c13p4"
+        ]
+      }
+    },
+    "008_tagging": {
+      "groups": {
+        "3": [
+          "c1p1",
+          "c4p1",
+          "c6p8",
+          "c8p10"
+        ],
+        "2": [
+          "c1p2",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "4": [
+          "c1p3",
+          "c4p3",
+          "c6p3",
+          "c8p3"
+        ],
+        "1": [
+          "c1p6",
+          "c4p7",
+          "c6p12",
+          "c8p5"
+        ]
+      },
+      "notes": "person 2 is actually missing, but okay anyway"
+    },
+    "008_tennis": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c9p7",
+          "c12p8",
+          "c20p9"
+        ],
+        "2": [
+          "c4p2",
+          "c9p4",
+          "c12p13",
+          "c20p2"
+        ]
+      }
+    },
+    "008_volleyball": {
+      "groups": {
+        "1": [
+          "c2p21",
+          "c4p22",
+          "c8p4",
+          "c11p20"
+        ],
+        "2": [
+          "c2p2",
+          "c4p10",
+          "c8p15",
+          "c11p38"
+        ],
+        "4": [
+          "c2p9",
+          "c4p35",
+          "c8p19",
+          "c11p28"
+        ],
+        "3": [
+          "c2p29",
+          "c4p26",
+          "c8p8",
+          "c11p51"
+        ]
+      }
+    },
+    "009_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p1",
+          "c5p9",
+          "c7p9"
+        ],
+        "3": [
+          "c1p5",
+          "c2p5",
+          "c5p10",
+          "c7p10"
+        ],
+        "2": [
+          "c1p6",
+          "c2p6",
+          "c5p11",
+          "c7p11"
+        ],
+        "1": [
+          "c1p23",
+          "c2p16",
+          "c5p7",
+          "c7p7"
+        ]
+      }
+    },
+    "009_basketball": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "2": [
+          "c1p2",
+          "c3p2",
+          "c4p5",
+          "c8p2"
+        ],
+        "3": [
+          "c1p6",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "1": [
+          "c1p7",
+          "c3p4",
+          "c4p9",
+          "c8p4"
+        ]
+      }
+    },
+    "009_fencing": {
+      "groups": {
+        "1": [
+          "c4p2",
+          "c5p4",
+          "c10p2",
+          "c13p13"
+        ],
+        "2": [
+          "c4p1",
+          "c5p12",
+          "c10p1",
+          "c13p8"
+        ],
+        "3": [
+          "c4p6",
+          "c5p14",
+          "c13p5"
+        ]
+      }
+    },
+    "009_tagging": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c4p1",
+          "c6p1",
+          "c8p1"
+        ],
+        "3": [
+          "c1p2",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "2": [
+          "c1p6",
+          "c4p5",
+          "c6p3",
+          "c8p3"
+        ],
+        "4": [
+          "c1p7",
+          "c4p8",
+          "c6p4",
+          "c8p4"
+        ]
+      },
+      "notes": "person 2 is actually missing, but okay anyway"
+    },
+    "009_tennis": {
+      "groups": {
+        "2": [
+          "c4p2",
+          "c9p5",
+          "c12p2",
+          "c20p2"
+        ],
+        "1": [
+          "c4p3",
+          "c9p4",
+          "c12p3",
+          "c20p3"
+        ]
+      }
+    },
+    "009_volleyball": {
+      "groups": {
+        "1": [
+          "c2p16",
+          "c4p4",
+          "c8p14",
+          "c11p26"
+        ],
+        "2": [
+          "c2p3",
+          "c4p1",
+          "c8p25",
+          "c11p1"
+        ],
+        "4": [
+          "c2p10",
+          "c4p2",
+          "c8p12",
+          "c11p2"
+        ],
+        "3": [
+          "c2p19",
+          "c4p17",
+          "c8p8",
+          "c11p37"
+        ]
+      }
+    },
+    "010_badminton": {
+      "groups": {
+        "3": [
+          "c1p2",
+          "c2p2",
+          "c5p2",
+          "c7p2"
+        ],
+        "4": [
+          "c1p3",
+          "c2p9",
+          "c5p3",
+          "c7p3"
+        ],
+        "1": [
+          "c1p5",
+          "c2p5",
+          "c5p5",
+          "c7p5"
+        ],
+        "2": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p1"
+        ]
+      }
+    },
+    "010_basketball": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "2": [
+          "c1p2",
+          "c3p2",
+          "c4p7",
+          "c8p8"
+        ],
+        "3": [
+          "c1p6",
+          "c3p3",
+          "c4p3",
+          "c8p10"
+        ],
+        "1": [
+          "c1p5",
+          "c3p4",
+          "c4p9",
+          "c8p4"
+        ]
+      }
+    },
+    "010_fencing": {
+      "groups": {
+        "1": [
+          "c4p9",
+          "c5p10",
+          "c10p3",
+          "c13p4"
+        ],
+        "2": [
+          "c4p5",
+          "c5p2",
+          "c10p7",
+          "c13p12"
+        ],
+        "3": [
+          "c4p13",
+          "c5p6",
+          "c13p8"
+        ]
+      }
+    },
+    "010_tagging": {
+      "groups": {
+        "3": [
+          "c1p1",
+          "c4p1",
+          "c6p1",
+          "c8p1"
+        ],
+        "2": [
+          "c1p2",
+          "c4p5",
+          "c6p5",
+          "c8p2"
+        ],
+        "4": [
+          "c1p7",
+          "c4p4",
+          "c6p4",
+          "c8p6"
+        ],
+        "1": [
+          "c1p8",
+          "c4p3",
+          "c6p3",
+          "c8p3"
+        ]
+      },
+      "notes": "person 2 is actually missing, but okay anyway"
+    },
+    "010_tennis": {
+      "groups": {
+        "1": [
+          "c4p3",
+          "c9p2",
+          "c12p2",
+          "c20p5"
+        ],
+        "2": [
+          "c4p1",
+          "c9p1",
+          "c12p1",
+          "c20p1"
+        ]
+      }
+    },
+    "010_volleyball": {
+      "groups": {
+        "1": [
+          "c2p23",
+          "c4p38",
+          "c8p13",
+          "c11p7"
+        ],
+        "2": [
+          "c2p4",
+          "c4p1",
+          "c8p22",
+          "c11p1"
+        ],
+        "4": [
+          "c2p12",
+          "c4p3",
+          "c8p10",
+          "c11p3"
+        ],
+        "3": [
+          "c2p14",
+          "c4p2",
+          "c8p6",
+          "c11p2"
+        ]
+      }
+    },
+    "011_badminton": {
+      "groups": {
+        "4": [
+          "c1p2",
+          "c2p3",
+          "c5p15",
+          "c7p8"
+        ],
+        "3": [
+          "c1p20",
+          "c2p29",
+          "c5p22",
+          "c7p27"
+        ],
+        "1": [
+          "c1p39",
+          "c2p37",
+          "c5p1",
+          "c7p1"
+        ],
+        "2": [
+          "c1p28",
+          "c2p21",
+          "c5p35",
+          "c7p16"
+        ]
+      }
+    },
+    "011_basketball": {
+      "groups": {
+        "3": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "1": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "4": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "2": [
+          "c1p4",
+          "c3p4",
+          "c4p4",
+          "c8p4"
+        ]
+      }
+    },
+    "011_fencing": {
+      "groups": {
+        "1": [
+          "c4p1",
+          "c5p1",
+          "c10p1",
+          "c13p1"
+        ],
+        "2": [
+          "c4p3",
+          "c5p14",
+          "c10p5",
+          "c13p11"
+        ],
+        "3": [
+          "c4p6",
+          "c5p10",
+          "c13p13"
+        ]
+      }
+    },
+    "011_tagging": {
+      "groups": {
+        "3": [
+          "c1p1",
+          "c4p1",
+          "c6p1",
+          "c8p1"
+        ],
+        "2": [
+          "c1p2",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "4": [
+          "c1p3",
+          "c4p3",
+          "c6p5",
+          "c8p5"
+        ],
+        "1": [
+          "c1p4",
+          "c4p4",
+          "c6p6",
+          "c8p6"
+        ]
+      },
+      "notes": "person 2 is actually missing, but okay anyway"
+    },
+    "011_tennis": {
+      "groups": {
+        "2": [
+          "c4p1",
+          "c9p2",
+          "c12p10",
+          "c20p8"
+        ],
+        "1": [
+          "c4p5",
+          "c9p6",
+          "c12p7",
+          "c20p4"
+        ]
+      }
+    },
+    "011_volleyball": {
+      "groups": {
+        "1": [
+          "c2p10",
+          "c8p12",
+          "c11p5"
+        ],
+        "2": [
+          "c2p6",
+          "c4p11",
+          "c8p26",
+          "c11p27"
+        ],
+        "4": [
+          "c2p18",
+          "c4p1",
+          "c8p8",
+          "c11p9"
+        ],
+        "3": [
+          "c2p33",
+          "c4p22",
+          "c8p4",
+          "c11p41"
+        ]
+      }
+    },
+    "012_badminton": {
+      "groups": {
+        "4": [
+          "c1p3",
+          "c2p9",
+          "c5p5",
+          "c7p12"
+        ],
+        "3": [
+          "c1p13",
+          "c2p11",
+          "c5p6",
+          "c7p15"
+        ],
+        "2": [
+          "c1p1",
+          "c2p4",
+          "c5p9",
+          "c7p1"
+        ],
+        "1": [
+          "c1p2",
+          "c2p6",
+          "c5p10",
+          "c7p2"
+        ]
+      }
+    },
+    "012_basketball": {
+      "groups": {
+        "2": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "3": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "1": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "4": [
+          "c1p4",
+          "c3p4",
+          "c4p4",
+          "c8p4"
+        ]
+      }
+    },
+    "012_fencing": {
+      "groups": {
+        "1": [
+          "c4p5",
+          "c5p10",
+          "c10p11",
+          "c13p12"
+        ],
+        "2": [
+          "c4p9",
+          "c5p15",
+          "c10p3",
+          "c13p8"
+        ],
+        "3": [
+          "c4p16",
+          "c5p17",
+          "c13p4"
+        ]
+      }
+    },
+    "012_tagging": {
+      "groups": {
+        "2": [
+          "c1p5",
+          "c4p1",
+          "c6p1",
+          "c8p1"
+        ],
+        "1": [
+          "c1p4",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "4": [
+          "c1p7",
+          "c8p6"
+        ],
+        "3": [
+          "c1p8",
+          "c4p3",
+          "c6p3",
+          "c8p3"
+        ]
+      }
+    },
+    "012_tennis": {
+      "groups": {
+        "2": [
+          "c4p1",
+          "c9p1",
+          "c12p1",
+          "c20p1"
+        ],
+        "1": [
+          "c4p2",
+          "c9p2",
+          "c12p2",
+          "c20p2"
+        ]
+      }
+    },
+    "013_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p13"
+        ],
+        "3": [
+          "c1p4",
+          "c2p4",
+          "c5p4",
+          "c7p25"
+        ],
+        "2": [
+          "c1p3",
+          "c2p3",
+          "c5p3",
+          "c7p3"
+        ],
+        "1": [
+          "c1p5",
+          "c2p5",
+          "c5p5",
+          "c7p22"
+        ]
+      }
+    },
+    "013_basketball": {
+      "groups": {
+        "2": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "4": [
+          "c1p2",
+          "c3p2",
+          "c4p2",
+          "c8p2"
+        ],
+        "1": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "3": [
+          "c1p4",
+          "c3p4",
+          "c4p4",
+          "c8p4"
+        ]
+      }
+    },
+    "013_fencing": {
+      "groups": {
+        "1": [
+          "c4p8",
+          "c5p4",
+          "c10p4",
+          "c13p4"
+        ],
+        "2": [
+          "c4p3",
+          "c5p3",
+          "c10p3",
+          "c13p3"
+        ],
+        "3": [
+          "c4p2",
+          "c5p6",
+          "c13p2"
+        ]
+      }
+    },
+    "013_tagging": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c4p1",
+          "c6p1",
+          "c8p1"
+        ],
+        "2": [
+          "c1p5",
+          "c4p3",
+          "c6p3",
+          "c8p3"
+        ],
+        "3": [
+          "c1p8",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "4": [
+          "c1p4",
+          "c8p6"
+        ]
+      }
+    },
+    "013_tennis": {
+      "groups": {
+        "2": [
+          "c4p1",
+          "c9p1",
+          "c12p4",
+          "c20p12"
+        ],
+        "1": [
+          "c4p2",
+          "c9p2",
+          "c12p6",
+          "c20p5"
+        ]
+      }
+    },
+    "014_badminton": {
+      "groups": {
+        "3": [
+          "c1p1",
+          "c2p3",
+          "c5p31",
+          "c7p38"
+        ],
+        "4": [
+          "c1p2",
+          "c2p33",
+          "c5p12",
+          "c7p25"
+        ],
+        "1": [
+          "c1p22",
+          "c2p15",
+          "c5p27",
+          "c7p9"
+        ],
+        "2": [
+          "c1p18",
+          "c2p26",
+          "c5p37",
+          "c7p21"
+        ]
+      }
+    },
+    "014_basketball": {
+      "groups": {
+        "3": [
+          "c1p1",
+          "c3p1",
+          "c4p1",
+          "c8p1"
+        ],
+        "1": [
+          "c1p2",
+          "c3p2",
+          "c4p5",
+          "c8p2"
+        ],
+        "4": [
+          "c1p3",
+          "c3p3",
+          "c4p3",
+          "c8p3"
+        ],
+        "2": [
+          "c1p4",
+          "c3p4",
+          "c4p4",
+          "c8p4"
+        ]
+      }
+    },
+    "014_fencing": {
+      "groups": {
+        "1": [
+          "c4p10",
+          "c5p1",
+          "c10p8",
+          "c13p1"
+        ],
+        "2": [
+          "c4p14",
+          "c5p7",
+          "c10p5",
+          "c13p9"
+        ],
+        "3": [
+          "c4p6",
+          "c5p2",
+          "c10p15",
+          "c13p2"
+        ]
+      }
+    },
+    "014_tagging": {
+      "groups": {
+        "1": [
+          "c1p8",
+          "c4p1",
+          "c6p1",
+          "c8p6"
+        ],
+        "2": [
+          "c1p6",
+          "c4p2",
+          "c6p2",
+          "c8p2"
+        ],
+        "3": [
+          "c1p4",
+          "c4p3",
+          "c6p3",
+          "c8p3"
+        ],
+        "4": [
+          "c1p5",
+          "c4p9",
+          "c6p10",
+          "c8p7"
+        ]
+      }
+    },
+    "015_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p11"
+        ],
+        "3": [
+          "c1p5",
+          "c2p5",
+          "c5p5",
+          "c7p5"
+        ],
+        "1": [
+          "c1p6",
+          "c2p6",
+          "c5p6",
+          "c7p6"
+        ],
+        "2": [
+          "c1p4",
+          "c2p4",
+          "c5p4",
+          "c7p4"
+        ]
+      }
+    },
+    "016_badminton": {
+      "groups": {
+        "3": [
+          "c1p1",
+          "c2p35",
+          "c5p23",
+          "c7p21"
+        ],
+        "4": [
+          "c1p23",
+          "c2p33",
+          "c5p14",
+          "c7p30"
+        ],
+        "1": [
+          "c1p13",
+          "c2p10",
+          "c5p29",
+          "c7p9"
+        ],
+        "2": [
+          "c1p31",
+          "c2p16",
+          "c5p6",
+          "c7p18"
+        ]
+      }
+    },
+    "017_badminton": {
+      "groups": {
+        "2": [
+          "c1p4",
+          "c2p4",
+          "c5p20",
+          "c7p30"
+        ],
+        "1": [
+          "c1p3",
+          "c2p3",
+          "c5p27",
+          "c7p9"
+        ],
+        "4": [
+          "c1p2",
+          "c2p2",
+          "c5p18",
+          "c7p25"
+        ],
+        "3": [
+          "c1p5",
+          "c2p5",
+          "c5p15",
+          "c7p16"
+        ]
+      }
+    },
+    "018_badminton": {
+      "groups": {
+        "4": [
+          "c1p3",
+          "c2p22",
+          "c5p14",
+          "c7p38"
+        ],
+        "3": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p24"
+        ],
+        "1": [
+          "c1p7",
+          "c2p36",
+          "c5p29",
+          "c7p9"
+        ],
+        "2": [
+          "c1p21",
+          "c2p19",
+          "c5p5",
+          "c7p20"
+        ]
+      }
+    },
+    "019_badminton": {
+      "groups": {
+        "3": [
+          "c1p8",
+          "c2p5",
+          "c5p5",
+          "c7p5"
+        ],
+        "4": [
+          "c1p18",
+          "c2p1",
+          "c5p1",
+          "c7p20"
+        ],
+        "1": [
+          "c1p11",
+          "c2p2",
+          "c5p2",
+          "c7p2"
+        ],
+        "2": [
+          "c1p21",
+          "c2p26",
+          "c5p7",
+          "c7p7"
+        ]
+      }
+    },
+    "020_badminton": {
+      "groups": {
+        "4": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p1"
+        ],
+        "3": [
+          "c1p5",
+          "c2p5",
+          "c5p5",
+          "c7p5"
+        ],
+        "1": [
+          "c1p2",
+          "c2p2",
+          "c5p2",
+          "c7p2"
+        ],
+        "6": [
+          "c1p6",
+          "c2p6",
+          "c5p6",
+          "c7p6"
+        ]
+      }
+    },
+    "021_badminton": {
+      "groups": {
+        "4": [
+          "c1p4",
+          "c2p5",
+          "c5p15",
+          "c7p37"
+        ],
+        "3": [
+          "c1p16",
+          "c2p36",
+          "c5p17",
+          "c7p32"
+        ],
+        "1": [
+          "c1p23",
+          "c2p8",
+          "c5p31",
+          "c7p22"
+        ],
+        "2": [
+          "c1p19",
+          "c2p30",
+          "c5p28",
+          "c7p18"
+        ]
+      }
+    },
+    "022_badminton": {
+      "groups": {
+        "3": [
+          "c1p2",
+          "c2p40",
+          "c5p1",
+          "c7p19"
+        ],
+        "4": [
+          "c1p20",
+          "c2p7",
+          "c5p25",
+          "c7p33"
+        ],
+        "1": [
+          "c1p6",
+          "c2p9",
+          "c5p22",
+          "c7p5"
+        ],
+        "2": [
+          "c1p30",
+          "c2p21",
+          "c5p39",
+          "c7p17"
+        ]
+      }
+    },
+    "023_badminton": {
+      "groups": {
+        "1": [
+          "c1p2",
+          "c2p11",
+          "c5p2",
+          "c7p35"
+        ],
+        "2": [
+          "c1p4",
+          "c2p6",
+          "c5p4",
+          "c7p6"
+        ],
+        "3": [
+          "c1p1",
+          "c2p7",
+          "c5p1",
+          "c7p7"
+        ],
+        "4": [
+          "c1p3",
+          "c2p5",
+          "c5p3",
+          "c7p5"
+        ]
+      }
+    },
+    "024_badminton": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p32",
+          "c5p1",
+          "c7p18"
+        ],
+        "2": [
+          "c1p2",
+          "c2p28",
+          "c5p2",
+          "c7p46"
+        ],
+        "3": [
+          "c1p7",
+          "c2p4",
+          "c5p33",
+          "c7p24"
+        ],
+        "4": [
+          "c1p3",
+          "c2p16",
+          "c5p3",
+          "c7p14"
+        ]
+      }
+    },
+    "025_badminton": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p1",
+          "c5p16",
+          "c7p26"
+        ],
+        "2": [
+          "c1p2",
+          "c2p2",
+          "c5p23",
+          "c7p6"
+        ],
+        "3": [
+          "c1p4",
+          "c2p4",
+          "c5p25",
+          "c7p17"
+        ],
+        "4": [
+          "c1p3",
+          "c2p3",
+          "c5p28",
+          "c7p9"
+        ]
+      }
+    },
+    "026_badminton": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p32",
+          "c5p2",
+          "c7p2"
+        ],
+        "2": [
+          "c1p23",
+          "c2p31",
+          "c5p3",
+          "c7p22"
+        ],
+        "4": [
+          "c1p16",
+          "c2p9",
+          "c5p5",
+          "c7p5"
+        ],
+        "3": [
+          "c1p30",
+          "c2p14",
+          "c5p4",
+          "c7p4"
+        ]
+      }
+    },
+    "027_badminton": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p34",
+          "c5p27",
+          "c7p24"
+        ],
+        "2": [
+          "c1p33",
+          "c2p36",
+          "c5p23",
+          "c7p28"
+        ],
+        "4": [
+          "c1p25",
+          "c2p11",
+          "c5p4",
+          "c7p9"
+        ],
+        "3": [
+          "c1p2",
+          "c2p18",
+          "c5p35",
+          "c7p20"
+        ]
+      }
+    },
+    "028_badminton": {
+      "groups": {
+        "1": [
+          "c1p14",
+          "c2p11",
+          "c5p20",
+          "c7p4"
+        ],
+        "2": [
+          "c1p17",
+          "c2p12",
+          "c5p22",
+          "c7p9"
+        ],
+        "4": [
+          "c1p2",
+          "c2p2",
+          "c5p3",
+          "c7p10"
+        ],
+        "3": [
+          "c1p24",
+          "c2p6",
+          "c5p27",
+          "c7p5"
+        ]
+      }
+    },
+    "029_badminton": {
+      "groups": {
+        "2": [
+          "c1p7",
+          "c2p10",
+          "c5p4",
+          "c7p8"
+        ],
+        "1": [
+          "c1p1",
+          "c2p4",
+          "c5p5",
+          "c7p12"
+        ],
+        "4": [
+          "c1p3",
+          "c2p3",
+          "c5p3",
+          "c7p6"
+        ],
+        "3": [
+          "c1p13",
+          "c2p1",
+          "c5p9",
+          "c7p2"
+        ]
+      }
+    },
+    "030_badminton": {
+      "groups": {
+        "2": [
+          "c1p6",
+          "c2p32",
+          "c5p19",
+          "c7p16"
+        ],
+        "1": [
+          "c1p17",
+          "c2p29",
+          "c5p33",
+          "c7p24"
+        ],
+        "4": [
+          "c1p28",
+          "c2p3",
+          "c5p11",
+          "c7p5"
+        ],
+        "3": [
+          "c1p35",
+          "c2p10",
+          "c5p23",
+          "c7p12"
+        ]
+      }
+    },
+    "031_badminton": {
+      "groups": {
+        "2": [
+          "c1p1",
+          "c2p1",
+          "c5p14",
+          "c7p13"
+        ],
+        "1": [
+          "c1p3",
+          "c2p3",
+          "c5p20",
+          "c7p3"
+        ],
+        "3": [
+          "c1p2",
+          "c2p2",
+          "c5p10",
+          "c7p2"
+        ],
+        "4": [
+          "c1p6",
+          "c2p5",
+          "c5p12",
+          "c7p5"
+        ]
+      }
+    },
+    "032_badminton": {
+      "groups": {
+        "2": [
+          "c1p8",
+          "c2p4",
+          "c5p4",
+          "c7p18"
+        ],
+        "1": [
+          "c1p30",
+          "c2p5",
+          "c5p5",
+          "c7p29"
+        ],
+        "3": [
+          "c1p19",
+          "c2p2",
+          "c5p2",
+          "c7p7"
+        ],
+        "4": [
+          "c1p23",
+          "c2p3",
+          "c5p3",
+          "c7p17"
+        ]
+      }
+    },
+    "033_badminton": {
+      "groups": {
+        "2": [
+          "c1p9",
+          "c2p39",
+          "c5p15",
+          "c7p16"
+        ],
+        "1": [
+          "c1p21",
+          "c2p42",
+          "c5p23",
+          "c7p20"
+        ],
+        "3": [
+          "c1p28",
+          "c2p18",
+          "c5p34",
+          "c7p12"
+        ],
+        "4": [
+          "c1p36",
+          "c2p14",
+          "c5p3",
+          "c7p4"
+        ]
+      }
+    },
+    "034_badminton": {
+      "groups": {
+        "2": [
+          "c1p8",
+          "c2p32",
+          "c5p2",
+          "c7p2"
+        ],
+        "1": [
+          "c1p21",
+          "c2p29",
+          "c5p3",
+          "c7p3"
+        ],
+        "4": [
+          "c1p18",
+          "c2p12",
+          "c5p1",
+          "c7p1"
+        ],
+        "3": [
+          "c1p27",
+          "c2p9",
+          "c5p4",
+          "c7p4"
+        ]
+      }
+    },
+    "035_badminton": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p33",
+          "c5p1",
+          "c7p20"
+        ],
+        "2": [
+          "c1p3",
+          "c2p35",
+          "c5p3",
+          "c7p25"
+        ],
+        "4": [
+          "c1p2",
+          "c2p12",
+          "c5p2",
+          "c7p7"
+        ],
+        "3": [
+          "c1p4",
+          "c2p15",
+          "c5p34",
+          "c7p17"
+        ]
+      }
+    },
+    "036_badminton": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p39",
+          "c5p15",
+          "c7p38"
+        ],
+        "2": [
+          "c1p29",
+          "c2p43",
+          "c5p23",
+          "c7p5"
+        ],
+        "4": [
+          "c1p32",
+          "c2p26",
+          "c5p40",
+          "c7p24"
+        ],
+        "3": [
+          "c1p1",
+          "c2p18",
+          "c5p37",
+          "c7p1"
+        ]
+      }
+    },
+    "037_badminton": {
+      "groups": {
+        "2": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p1"
+        ],
+        "1": [
+          "c1p4",
+          "c2p4",
+          "c5p4",
+          "c7p26"
+        ],
+        "3": [
+          "c1p2",
+          "c2p2",
+          "c5p2",
+          "c7p2"
+        ],
+        "4": [
+          "c1p5",
+          "c2p5",
+          "c5p5",
+          "c7p5"
+        ]
+      }
+    },
+    "038_badminton": {
+      "groups": {
+        "1": [
+          "c1p10",
+          "c2p39",
+          "c5p15",
+          "c7p16"
+        ],
+        "2": [
+          "c1p6",
+          "c2p40",
+          "c5p23",
+          "c7p27"
+        ],
+        "4": [
+          "c1p24",
+          "c2p18",
+          "c5p4",
+          "c7p5"
+        ],
+        "3": [
+          "c1p2",
+          "c2p25",
+          "c5p35",
+          "c7p13"
+        ]
+      }
+    },
+    "039_badminton": {
+      "groups": {
+        "1": [
+          "c1p5",
+          "c2p42",
+          "c5p16",
+          "c7p17"
+        ],
+        "2": [
+          "c1p18",
+          "c2p3",
+          "c5p21",
+          "c7p3"
+        ],
+        "3": [
+          "c1p39",
+          "c2p2",
+          "c5p30",
+          "c7p2"
+        ],
+        "4": [
+          "c1p19",
+          "c2p25",
+          "c5p33",
+          "c7p14"
+        ]
+      }
+    },
+    "040_badminton": {
+      "groups": {
+        "1": [
+          "c1p2",
+          "c2p41",
+          "c5p27",
+          "c7p20"
+        ],
+        "2": [
+          "c1p29",
+          "c2p46",
+          "c5p4",
+          "c7p32"
+        ],
+        "4": [
+          "c1p21",
+          "c2p30",
+          "c5p23",
+          "c7p16"
+        ],
+        "3": [
+          "c1p17",
+          "c2p14",
+          "c5p15",
+          "c7p9"
+        ]
+      }
+    },
+    "041_badminton": {
+      "groups": {
+        "1": [
+          "c1p14",
+          "c2p5",
+          "c5p5",
+          "c7p19"
+        ],
+        "2": [
+          "c1p6",
+          "c2p4",
+          "c5p4",
+          "c7p4"
+        ],
+        "3": [
+          "c1p9",
+          "c2p2",
+          "c5p2",
+          "c7p2"
+        ],
+        "4": [
+          "c1p24",
+          "c2p1",
+          "c5p1",
+          "c7p1"
+        ]
+      }
+    },
+    "042_badminton": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p1",
+          "c5p4",
+          "c7p4"
+        ],
+        "2": [
+          "c1p24",
+          "c2p35",
+          "c5p5",
+          "c7p5"
+        ],
+        "4": [
+          "c1p2",
+          "c2p2",
+          "c5p3",
+          "c7p3"
+        ],
+        "3": [
+          "c1p28",
+          "c2p22",
+          "c5p6",
+          "c7p6"
+        ]
+      }
+    },
+    "043_badminton": {
+      "groups": {
+        "1": [
+          "c1p3",
+          "c2p3",
+          "c5p20",
+          "c7p34"
+        ],
+        "4": [
+          "c1p2",
+          "c2p2",
+          "c5p5",
+          "c7p5"
+        ],
+        "2": [
+          "c1p4",
+          "c2p4",
+          "c5p6",
+          "c7p6"
+        ],
+        "3": [
+          "c1p1",
+          "c2p1",
+          "c5p7",
+          "c7p7"
+        ]
+      }
+    },
+    "044_badminton": {
+      "groups": {
+        "1": [
+          "c1p6",
+          "c2p28",
+          "c5p29",
+          "c7p38"
+        ],
+        "4": [
+          "c1p23",
+          "c2p47",
+          "c5p21",
+          "c7p34"
+        ],
+        "2": [
+          "c1p1",
+          "c2p1",
+          "c5p33",
+          "c7p19"
+        ],
+        "3": [
+          "c1p31",
+          "c2p24",
+          "c5p37",
+          "c7p12"
+        ]
+      }
+    },
+    "045_badminton": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p1",
+          "c5p7",
+          "c7p7"
+        ],
+        "4": [
+          "c1p2",
+          "c2p2",
+          "c5p8",
+          "c7p8"
+        ],
+        "2": [
+          "c1p20",
+          "c2p18",
+          "c5p6",
+          "c7p6"
+        ],
+        "3": [
+          "c1p4",
+          "c2p4",
+          "c5p5",
+          "c7p5"
+        ]
+      }
+    },
+    "046_badminton": {
+      "groups": {
+        "1": [
+          "c1p15",
+          "c2p4",
+          "c5p4",
+          "c7p35"
+        ],
+        "4": [
+          "c1p2",
+          "c2p2",
+          "c5p9",
+          "c7p14"
+        ],
+        "3": [
+          "c1p1",
+          "c2p1",
+          "c5p1",
+          "c7p10"
+        ],
+        "2": [
+          "c1p27",
+          "c2p3",
+          "c5p3",
+          "c7p23"
+        ]
+      }
+    },
+    "047_badminton": {
+      "groups": {
+        "1": [
+          "c1p8",
+          "c2p38",
+          "c5p17",
+          "c7p7"
+        ],
+        "4": [
+          "c1p26",
+          "c2p34",
+          "c5p25",
+          "c7p31"
+        ],
+        "2": [
+          "c1p37",
+          "c2p6",
+          "c5p35",
+          "c7p33"
+        ],
+        "3": [
+          "c1p23",
+          "c2p12",
+          "c5p10",
+          "c7p18"
+        ]
+      }
+    },
+    "048_badminton": {
+      "groups": {
+        "1": [
+          "c1p8",
+          "c2p37",
+          "c5p21",
+          "c7p4"
+        ],
+        "4": [
+          "c1p12",
+          "c2p20",
+          "c5p29",
+          "c7p26"
+        ],
+        "2": [
+          "c1p34",
+          "c2p16",
+          "c5p33",
+          "c7p18"
+        ],
+        "3": [
+          "c1p31",
+          "c2p13",
+          "c5p7",
+          "c7p11"
+        ]
+      }
+    },
+    "049_badminton": {
+      "groups": {
+        "1": [
+          "c1p1",
+          "c2p1",
+          "c5p13",
+          "c7p14"
+        ],
+        "4": [
+          "c1p24",
+          "c2p40",
+          "c5p3",
+          "c7p3"
+        ],
+        "2": [
+          "c1p23",
+          "c2p16",
+          "c5p4",
+          "c7p4"
+        ],
+        "3": [
+          "c1p31",
+          "c2p20",
+          "c5p2",
+          "c7p2"
+        ]
+      }
+    },
+    "050_badminton": {
+      "groups": {
+        "1": [
+          "c2p33",
+          "c5p5",
+          "c7p23"
+        ],
+        "4": [
+          "c2p31",
+          "c5p13",
+          "c7p6"
+        ],
+        "2": [
+          "c2p7",
+          "c5p32",
+          "c7p17"
+        ],
+        "3": [
+          "c2p12",
+          "c5p1",
+          "c7p1"
+        ]
+      }
+    },
+    "051_badminton": {
+      "groups": {
+        "4": [
+          "c2p2",
+          "c5p11",
+          "c7p20"
+        ],
+        "1": [
+          "c2p36",
+          "c5p22",
+          "c7p6"
+        ],
+        "2": [
+          "c2p18",
+          "c5p29",
+          "c7p14"
+        ],
+        "3": [
+          "c2p28",
+          "c5p1",
+          "c7p1"
+        ]
+      }
+    },
+    "052_badminton": {
+      "groups": {
+        "4": [
+          "c2p1",
+          "c5p14",
+          "c7p15"
+        ],
+        "1": [
+          "c2p10",
+          "c5p24",
+          "c7p18"
+        ],
+        "2": [
+          "c2p13",
+          "c5p27",
+          "c7p6"
+        ],
+        "3": [
+          "c2p7",
+          "c5p5",
+          "c7p3"
+        ]
+      }
+    },
+    "053_badminton": {
+      "groups": {
+        "4": [
+          "c2p16",
+          "c5p5",
+          "c7p22"
+        ],
+        "1": [
+          "c2p1",
+          "c5p19",
+          "c7p25"
+        ],
+        "3": [
+          "c2p13",
+          "c5p17",
+          "c7p12"
+        ],
+        "2": [
+          "c2p35",
+          "c5p8",
+          "c7p9"
+        ]
+      }
+    },
+    "054_badminton": {
+      "groups": {
+        "1": [
+          "c2p5",
+          "c5p5",
+          "c7p5"
+        ],
+        "4": [
+          "c2p3",
+          "c5p3",
+          "c7p3"
+        ],
+        "2": [
+          "c2p1",
+          "c5p1",
+          "c7p1"
+        ],
+        "3": [
+          "c2p2",
+          "c5p2",
+          "c7p2"
+        ]
+      }
+    },
+    "055_badminton": {
+      "groups": {
+        "4": [
+          "c2p4",
+          "c5p12",
+          "c7p19"
+        ],
+        "1": [
+          "c2p24",
+          "c5p21",
+          "c7p6"
+        ],
+        "3": [
+          "c2p8",
+          "c5p1",
+          "c7p1"
+        ],
+        "2": [
+          "c2p17",
+          "c5p25",
+          "c7p13"
+        ]
+      }
+    },
+    "056_badminton": {
+      "groups": {
+        "1": [
+          "c2p3",
+          "c5p3",
+          "c7p21"
+        ],
+        "4": [
+          "c2p7",
+          "c5p13",
+          "c7p9"
+        ],
+        "3": [
+          "c2p1",
+          "c5p32",
+          "c7p1"
+        ],
+        "2": [
+          "c2p27",
+          "c5p5",
+          "c7p14"
+        ]
+      }
+    },
+    "057_badminton": {
+      "groups": {
+        "1": [
+          "c2p1",
+          "c5p1",
+          "c7p1"
+        ],
+        "4": [
+          "c2p5",
+          "c5p5",
+          "c7p5"
+        ],
+        "3": [
+          "c2p2",
+          "c5p2",
+          "c7p2"
+        ],
+        "2": [
+          "c2p11",
+          "c5p6",
+          "c7p6"
+        ]
+      }
+    },
+    "058_badminton": {
+      "groups": {
+        "4": [
+          "c2p31",
+          "c5p4",
+          "c7p4"
+        ],
+        "1": [
+          "c2p23",
+          "c5p1",
+          "c7p1"
+        ],
+        "3": [
+          "c2p12",
+          "c5p2",
+          "c7p2"
+        ],
+        "2": [
+          "c2p21",
+          "c5p3",
+          "c7p3"
+        ]
+      }
+    },
+    "059_badminton": {
+      "groups": {
+        "4": [
+          "c2p37",
+          "c5p26",
+          "c7p1"
+        ],
+        "1": [
+          "c2p23",
+          "c5p28",
+          "c7p7"
+        ],
+        "3": [
+          "c2p15",
+          "c5p13",
+          "c7p9"
+        ],
+        "2": [
+          "c2p21",
+          "c5p24",
+          "c7p14"
+        ]
+      }
+    },
+    "060_badminton": {
+      "groups": {
+        "1": [
+          "c2p33",
+          "c5p14",
+          "c7p3"
+        ],
+        "4": [
+          "c2p31",
+          "c5p27",
+          "c7p28"
+        ],
+        "3": [
+          "c2p10",
+          "c5p25",
+          "c7p6"
+        ],
+        "2": [
+          "c2p43",
+          "c5p5",
+          "c7p15"
+        ]
+      }
+    },
+    "061_badminton": {
+      "groups": {
+        "1": [
+          "c2p28",
+          "c5p11",
+          "c7p21"
+        ],
+        "4": [
+          "c2p17",
+          "c5p2",
+          "c7p2"
+        ],
+        "3": [
+          "c2p1",
+          "c5p1",
+          "c7p1"
+        ],
+        "2": [
+          "c2p14",
+          "c5p3",
+          "c7p3"
+        ]
+      }
+    }
+  }
+}

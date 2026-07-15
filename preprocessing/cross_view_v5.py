@@ -1,23 +1,32 @@
 """
-Cross-view person ReID v4.
+Cross-view person ReID v5.
 
-Delta estimation: identical to v2/v3 (weighted xcorr + ALS per candidate + consensus clocks).
-Assignment at fixed delta: tiered approach.
+Delta estimation: identical to v2/v3/v4 (weighted xcorr + ALS per candidate + consensus clocks).
+Assignment at fixed delta: two phases.
 
-  Tier 1 — Split persons by motion (pose_std > STD_THRESHOLD).
-            If nobody exceeds the threshold, fall back to top-TIER1_FALLBACK_N by std.
-            Match high-motion persons via canonical joint similarity (camera-invariant,
-            no geometry required).
+  Phase 1 — Dynamic people (unchanged from v4 Tier-1).
+            Split persons by motion (pose_std > STD_THRESHOLD); if nobody exceeds it,
+            fall back to top-TIER1_FALLBACK_N by std. Match high-motion persons via
+            canonical joint similarity (camera-invariant, no geometry). Accept ≥ CANON_THR.
+            Matching is pairwise (per camera pair) and unions accepted pairs.
 
-  Geometry — Fit (R, t, {λ_i}) from Tier 1 accepted pairs only (well-conditioned ALS).
+  Phase 2 — Static people (new). After ALL pairwise Phase-1 matching is done, every person
+            still in a singleton union-find component is clustered *globally* across all
+            cameras at once via single-linkage on a betas+appearance feature:
 
-  Tier 2 — Match static persons geometrically.
-            For each candidate pair (k, l): given fixed (R, t), solve a 2×2 regularised
-            least-squares for (λ_k, λ_l) with L2 penalty α*(λ-1)² on each scale.
-            Data term normalised by T·J so α=0.1 is scale-independent.
-            Accept pairs below RMSE_THR.
+              edge (i, j) is accepted only if
+                  sim(i, j) ≥ STATIC_SIM_FLOOR                  (absolute backstop)
+                  ∧ i and j are mutual best matches             (relative evidence)
+                  ∧ sim(i, j) beats each runner-up by RATIO_THR (discriminability / SDS)
+              greedily, strongest edge first, subject to
+                  source constraint: one person per camera per cluster
+                  size   constraint: cluster size ≤ N cameras
 
-No second pass, no appearance rescue.
+            betas are view-invariant and weighted above appearance. There is NO geometric
+            fallback — when the three gates leave a person ambiguous, it stays isolated.
+
+Phase-2 clusters never share a camera (source constraint), so they introduce no new
+same-camera conflicts; conflict resolution and global-ID assignment are unchanged from v4.
 """
 
 from __future__ import annotations
@@ -33,7 +42,7 @@ from scipy.spatial.transform import Rotation as _Rot
 
 from data.video_dataset import Scene
 
-# ── Constants (delta estimation — identical to v2/v3) ─────────────────────────
+# ── Constants (delta estimation — identical to v2/v3/v4) ──────────────────────
 _MIN_OVERLAP              = 30
 _MIN_DELTA_OVERLAP_FRAMES = 100
 _OVERLAP_PENALTY_K        = 30.0
@@ -41,43 +50,25 @@ _OVERLAP_REF_FRAMES       = 500
 _DELTA_PRIOR_WEIGHT       = 0.0
 _DELTA_PRIOR_SCALE        = 30.0
 
-# ── Constants (v4 assignment) ─────────────────────────────────────────────────
+# ── Constants (Phase 1 — dynamic, identical to v4 Tier-1) ─────────────────────
 _STD_THRESHOLD    = 0.30   # m — max per-joint std over time; above = high-motion
 _TIER1_FALLBACK_N = 2      # take top-N per side if nobody exceeds _STD_THRESHOLD
-_CANON_THR        = 0.75   # Tier-1 acceptance: canonical sim must exceed this
-_CANON_THR_RESCUE = 0.50   # fallback anchor when all Tier-1 pairs fail
-_RMSE_THR         = 0.20   # Tier-2 acceptance: regularised RMSE must be below this (m)
-_LAMBDA_ALPHA     = 0.1    # L2 penalty weight on (λ-1)² in the normalised objective
-_STATIC_FALLBACK_THR = 0.60  # appearance+betas sim threshold when no temporal signal
+_CANON_THR        = 0.75   # acceptance: canonical sim must exceed this
+
+# ── Constants (Phase 2 — static graph clustering) ─────────────────────────────
+_STATIC_SIM_FLOOR = 0.60   # absolute similarity backstop for a static merge
+_STATIC_RATIO_THR = 1.05   # best match must beat runner-up by this ratio (SDS gate)
+_STATIC_BETAS_W   = 0.60   # betas (view-invariant) weighted above appearance
+_STATIC_APP_W     = 0.40
 
 
+class CrossViewReidentifierV5:
+    """Cross-view ReID: dynamic pairwise matching (Phase 1) + global static clustering (Phase 2).
 
-def _app_shape_sim(da: tuple, db: tuple) -> float:
-    """Appearance + shape similarity in [0, 1] between two person descriptors."""
-    (app_a, shape_a, _), (app_b, shape_b, _) = da, db
-    sims = []
-    if app_a is not None and app_b is not None:
-        feats_a, confs_a = app_a
-        feats_b, confs_b = app_b
-        wa = confs_a / (confs_a.sum() + 1e-8)
-        wb = confs_b / (confs_b.sum() + 1e-8)
-        ma = feats_a.T @ wa
-        mb = feats_b.T @ wb
-        na, nb = np.linalg.norm(ma), np.linalg.norm(mb)
-        if na > 1e-8 and nb > 1e-8:
-            sims.append(float(np.dot(ma / na, mb / nb).clip(-1.0, 1.0)))
-    if shape_a is not None and shape_b is not None:
-        cos = float(np.dot(shape_a, shape_b).clip(-1.0, 1.0))
-        sims.append((cos + 1.0) / 2.0)
-    return float(np.mean(sims)) if sims else 0.5
-
-
-class CrossViewReidentifierV4:
-    """Cross-view ReID with motion-split tiered assignment.
-
-    Appearance+shape tiebreaker was tested but reverted: cross-camera appearance
-    features are view-dependent and don't reliably break geometric ties when
-    camera angles differ significantly.
+    Phase 1 is v4's Tier-1 canonical-pose matcher verbatim. Phase 2 replaces v4's
+    geometric Tier-2 with a PME-style single-linkage clustering over the remaining
+    singletons, using view-invariant betas + appearance and conservative-by-default
+    merge gates (mutual best + discriminability ratio). No geometric fallback.
     """
 
     _THRESHOLD         = 0.50
@@ -102,6 +93,11 @@ class CrossViewReidentifierV4:
         shape_weight: float = _SHAPE_WEIGHT,
         pose_weight: float = _POSE_WEIGHT,
         match_rmse_thr: float = _MATCH_RMSE_THR,
+        static_sim_floor: float = _STATIC_SIM_FLOOR,
+        static_ratio_thr: float = _STATIC_RATIO_THR,
+        static_betas_weight: float = _STATIC_BETAS_W,
+        static_app_weight: float = _STATIC_APP_W,
+        reid_ckpt: str | None = None,
     ) -> None:
         self.droid_weights      = droid_weights if droid_weights is not None else self._DROID_WEIGHTS
         self.droid_root         = droid_root    if droid_root    is not None else self._DROID_ROOT
@@ -112,6 +108,21 @@ class CrossViewReidentifierV4:
         self.shape_weight      = shape_weight
         self.pose_weight       = pose_weight
         self.match_rmse_thr    = match_rmse_thr
+        self.static_sim_floor    = static_sim_floor
+        self.static_ratio_thr    = static_ratio_thr
+        self.static_betas_weight = static_betas_weight
+        self.static_app_weight   = static_app_weight
+        self.reid_ckpt           = reid_ckpt
+        self._reid = None        # TransReIDExtractor, lazy-built on first use
+
+    def _get_reid(self):
+        """Lazy TransReID extractor (cross-view appearance). None if no ckpt configured."""
+        if self.reid_ckpt is None:
+            return None
+        if self._reid is None:
+            from preprocessing.transreid_extractor import TransReIDExtractor
+            self._reid = TransReIDExtractor(self.reid_ckpt)
+        return self._reid
 
     def match_across_views(
         self,
@@ -124,7 +135,7 @@ class CrossViewReidentifierV4:
         scene_id  = scene.scene_id
         scene_dir = Path(next(iter(video_dirs.values()))).parent
         if not dry_run and (scene_dir / "cross_view_reid.json").exists():
-            logging.info(f"  Scene {scene_id}: cross-view ReID v4 already done, skipping")
+            logging.info(f"  Scene {scene_id}: cross-view ReID v5 already done, skipping")
             return
         if frames_dirs is None:
             frames_dirs = {}
@@ -153,7 +164,7 @@ class CrossViewReidentifierV4:
     ) -> None:
         video_ids = list(video_dirs.keys())
 
-        # ── Data loading (identical to v2/v3) ─────────────────────────────────
+        # ── Data loading (identical to v2/v3/v4) ──────────────────────────────
         person_descs  : dict[str, dict[int, tuple]] = {}
         person_pids   : dict[str, list[int]]        = {}
         person_kpts3d : dict[str, dict[int, tuple]] = {}
@@ -449,9 +460,7 @@ class CrossViewReidentifierV4:
         )
         _single_image_mode = max_track_len == 1
 
-        camera_pair_offsets: dict[str, int] = {}
-
-        # ── Appearance helpers (identical to v2/v3) ────────────────────────────
+        # ── Appearance helpers (identical to v2/v3/v4) ─────────────────────────
 
         def _chamfer_sim(fa, ca, fb, cb) -> float:
             S = fa @ fb.T
@@ -514,7 +523,7 @@ class CrossViewReidentifierV4:
                     sim_mat[i, j] += w_pose * s; wgt_mat[i, j] += w_pose
             return np.where(wgt_mat > 0, sim_mat / wgt_mat, 0.0)
 
-        # ── Geometry helpers (identical to v2/v3) ──────────────────────────────
+        # ── Geometry helpers (identical to v2/v3/v4) ───────────────────────────
 
         def _overlap_factor(n_frames: int) -> float:
             if n_frames <= 0:
@@ -526,7 +535,7 @@ class CrossViewReidentifierV4:
         def _delta_prior_cost(delta: int) -> float:
             return _DELTA_PRIOR_WEIGHT * abs(int(delta)) / _DELTA_PRIOR_SCALE
 
-        def _get_aligned_flat(pid_b, vid_b, pid_a, vid_a, delta, min_overlap=_MIN_OVERLAP):
+        def _get_aligned_flat(pid_b, vid_b, pid_a, vid_a, delta):
             """Returns (cam_b_kpts, cam_a_kpts) both [T*J, 3] at co-visible frames."""
             kb = person_kpts3d.get(vid_b, {}); ka = person_kpts3d.get(vid_a, {})
             if pid_b not in kb or pid_a not in ka:
@@ -535,7 +544,7 @@ class CrossViewReidentifierV4:
             fb2i = {int(f): i for i, f in enumerate(frames_b)}
             fa2i = {int(f): i for i, f in enumerate(frames_a)}
             common = sorted(f for f in fb2i if f + delta in fa2i)
-            if len(common) < min_overlap:
+            if len(common) < _MIN_OVERLAP:
                 return None, None
             ib = [fb2i[f] for f in common]; ia = [fa2i[f + delta] for f in common]
             return kpts_b[ib].reshape(-1, 3), kpts_a[ia].reshape(-1, 3)
@@ -564,14 +573,14 @@ class CrossViewReidentifierV4:
                 return [d for d, _ in ranked[:k]]
             return [d for _, d in peaks[:k]]
 
-        def _constrained_fit(assignment, vid_b, vid_a, delta, max_iter=10, min_overlap=_MIN_OVERLAP):
+        def _constrained_fit(assignment, vid_b, vid_a, delta, max_iter=10):
             pairs = []
             for pb, pa in assignment:
-                src, dst = _get_aligned_flat(pb, vid_b, pa, vid_a, delta, min_overlap=min_overlap)
+                src, dst = _get_aligned_flat(pb, vid_b, pa, vid_a, delta)
                 if src is None:
                     continue
                 valid = np.isfinite(src).all(axis=1) & np.isfinite(dst).all(axis=1)
-                if valid.sum() < min_overlap:
+                if valid.sum() < _MIN_OVERLAP:
                     continue
                 pairs.append((pb, src[valid], dst[valid]))
             if not pairs:
@@ -613,7 +622,7 @@ class CrossViewReidentifierV4:
             r    = float(np.sqrt(((pred - dst) ** 2).sum(1).mean()))
             return (r if np.isfinite(r) else float("inf")), lam
 
-        # ── Delta estimation (identical to v2/v3) ──────────────────────────────
+        # ── Delta estimation (identical to v2/v3/v4) ───────────────────────────
 
         def _pair_delta_candidates(vid_a: str, vid_b: str) -> dict:
             pids_a = person_pids[vid_a]; pids_b = person_pids[vid_b]
@@ -734,13 +743,12 @@ class CrossViewReidentifierV4:
             )
             return {key: int(round(clock[key[0]] - clock[key[1]])) for key in pair_data}
 
-        # ── v4 assignment helpers ──────────────────────────────────────────────
+        # ── Phase 1 helper: canonical similarity at fixed δ ────────────────────
 
         def _canon_sim_at_delta(
             pose_a: np.ndarray, frames_a: np.ndarray,
             pose_b: np.ndarray, frames_b: np.ndarray,
             delta: int,
-            min_overlap: int = _MIN_OVERLAP,
         ) -> float:
             """Canonical joint cosine similarity between two persons at a fixed δ."""
             fa_dc = pose_a - pose_a.mean(axis=0)
@@ -755,72 +763,27 @@ class CrossViewReidentifierV4:
                 for i in range(len(frames_a))
                 if int(frames_a[i]) - delta in fb_idx
             ]
-            if len(rows) < min_overlap:
+            if len(rows) < _MIN_OVERLAP:
                 return 0.0
             ia, ib = zip(*rows)
             sims = np.sum(fa_n[list(ia)] * fb_n[list(ib)], axis=1)
             return max(0.0, float(sims.mean()))
 
-        def _regularized_pair_rmse(
-            R: np.ndarray, t: np.ndarray,
-            pid_b: int, vid_b: str,
-            pid_a: int, vid_a: str,
-            delta: int,
-            min_overlap: int = _MIN_OVERLAP,
-        ) -> float:
-            """
-            Given fixed (R, t) mapping cam_b → cam_a, fit (λ_a, λ_b) for the pair via:
+        # ── Phase 1: dynamic (high-motion) matching — v4 Tier-1 verbatim ───────
 
-              minimise  (1/M) ‖λ_a · dst  −  λ_b · V‖²  +  α·(λ_a−1)²  +  α·(λ_b−1)²
-
-            where V = R @ src + t  (cam_b joints projected into cam_a frame),
-            dst = cam_a joints, M = T·J·3 (normalises for track length / joint count).
-
-            Returns the RMSE after fitting (in metres), or inf if no co-visible frames.
-            """
-            src, dst = _get_aligned_flat(pid_b, vid_b, pid_a, vid_a, delta, min_overlap=min_overlap)
-            if src is None:
-                return float("inf")
-            valid = np.isfinite(src).all(axis=1) & np.isfinite(dst).all(axis=1)
-            if valid.sum() < min_overlap:
-                return float("inf")
-            src, dst = src[valid], dst[valid]   # [N, 3], N = T*J
-
-            V = (R @ src.T).T + t               # [N, 3]
-            d = dst.flatten()                   # [N*3]
-            v = V.flatten()                     # [N*3]
-            M = float(len(d))
-
-            dd = float(d @ d) / M
-            vv = float(v @ v) / M
-            dv = float(d @ v) / M
-
-            # 2×2 system: [dd+α, -dv; -dv, vv+α][λ_a; λ_b] = [α; α]
-            det = (dd + _LAMBDA_ALPHA) * (vv + _LAMBDA_ALPHA) - dv * dv
-            if abs(det) < 1e-10:
-                return float("inf")
-
-            lam_a = ((vv + _LAMBDA_ALPHA) * _LAMBDA_ALPHA + dv * _LAMBDA_ALPHA) / det
-            lam_b = ((dd + _LAMBDA_ALPHA) * _LAMBDA_ALPHA + dv * _LAMBDA_ALPHA) / det
-
-            lam_a = max(0.1, min(10.0, lam_a))
-            lam_b = max(0.1, min(10.0, lam_b))
-
-            resid = lam_a * dst - lam_b * V     # [N, 3]
-            rmse  = float(np.sqrt((resid ** 2).sum(1).mean()))
-            return rmse if np.isfinite(rmse) else float("inf")
-
-        def _tiered_assign(
+        def _dynamic_assign(
             vid_a: str, vid_b: str, pdata: dict, delta_bar: int,
             single_image: bool = False,
         ) -> list[tuple[int, int, float]]:
             """
-            Two-tier assignment at fixed delta_bar.
+            Pairwise dynamic matching at fixed delta_bar (unchanged from v4 Tier-1).
 
-            Tier 1 — high-motion persons: canonical sim → Hungarian → accept ≥ CANON_THR.
-                      If no person exceeds STD_THRESHOLD, fall back to top-TIER1_FALLBACK_N.
-            Geometry — ALS fit from Tier-1 anchors only.
-            Tier 2 — static persons: regularised per-pair LS → RMSE → Hungarian → accept < RMSE_THR.
+            High-motion persons (pose_std > STD_THRESHOLD, or top-TIER1_FALLBACK_N if none)
+            are matched via canonical joint similarity → Hungarian → accept ≥ CANON_THR.
+            Unmatched persons are simply left as singletons for the Phase-2 static clustering.
+            (No rescue anchor: it existed in v4 only to seed Tier-2 geometry, which is gone.)
+            In single_image mode all persons are treated as dynamic and pose cosine sim is
+            computed directly (DC removal would zero a single frame).
             """
             pids_a_s = pdata["pids_a_s"]
             pids_b_s = pdata["pids_b_s"]
@@ -829,12 +792,10 @@ class CrossViewReidentifierV4:
 
             # ── Motion split (skipped in single-image mode) ────────────────────
             if single_image:
-                high_a   = []
-                high_b   = []
-                static_a = list(pids_a_s)
-                static_b = list(pids_b_s)
+                high_a = list(pids_a_s)
+                high_b = list(pids_b_s)
                 logging.info(
-                    f"  [{vid_a}↔{vid_b}] single-image: all {len(static_a)}a/{len(static_b)}b → Tier-2"
+                    f"  [{vid_a}↔{vid_b}] single-image: all {len(high_a)}a/{len(high_b)}b → dynamic"
                 )
             else:
                 stds_a = {pa: _track_std(vid_a, pa) for pa in pids_a_s}
@@ -845,23 +806,16 @@ class CrossViewReidentifierV4:
 
                 if not high_a:
                     high_a = sorted(pids_a_s, key=lambda p: -stds_a[p])[:_TIER1_FALLBACK_N]
-                    logging.info(f"  [{vid_a}↔{vid_b}] Tier-1 fallback (cam_a): top-{_TIER1_FALLBACK_N} by std")
+                    logging.info(f"  [{vid_a}↔{vid_b}] dynamic fallback (cam_a): top-{_TIER1_FALLBACK_N} by std")
                 if not high_b:
                     high_b = sorted(pids_b_s, key=lambda p: -stds_b[p])[:_TIER1_FALLBACK_N]
-                    logging.info(f"  [{vid_a}↔{vid_b}] Tier-1 fallback (cam_b): top-{_TIER1_FALLBACK_N} by std")
-
-                high_a_set = set(high_a)
-                high_b_set = set(high_b)
-                static_a   = [pa for pa in pids_a_s if pa not in high_a_set]
-                static_b   = [pb for pb in pids_b_s if pb not in high_b_set]
+                    logging.info(f"  [{vid_a}↔{vid_b}] dynamic fallback (cam_b): top-{_TIER1_FALLBACK_N} by std")
 
                 logging.info(
-                    f"  [{vid_a}↔{vid_b}] motion split: "
-                    f"Tier1 {len(high_a)}a/{len(high_b)}b  "
-                    f"Tier2 {len(static_a)}a/{len(static_b)}b"
+                    f"  [{vid_a}↔{vid_b}] dynamic candidates: {len(high_a)}a/{len(high_b)}b"
                 )
 
-            # ── Tier 1: canonical similarity ───────────────────────────────────
+            # ── Canonical similarity → Hungarian ───────────────────────────────
             Na_h, Nb_h = len(high_a), len(high_b)
             canon_sim = np.zeros((Na_h, Nb_h), dtype=np.float32)
             for i, pa in enumerate(high_a):
@@ -879,139 +833,166 @@ class CrossViewReidentifierV4:
                         if pa not in kd_a or pb not in kd_b:
                             continue
                         canon_sim[i, j] = _canon_sim_at_delta(
-                            pose_a, kd_a[pa][0], pose_b, kd_b[pb][0], delta_bar,
+                            pose_a, kd_a[pa][0], pose_b, kd_b[pb][0], delta_bar
                         )
 
             ri, ci = linear_sum_assignment(1.0 - canon_sim)
-            tier1_pairs: list[tuple[int, int]] = []
+            dyn_pairs: list[tuple[int, int]] = []
             for r, c in zip(ri, ci):
                 pa, pb = high_a[r], high_b[c]
                 if canon_sim[r, c] >= _CANON_THR:
-                    tier1_pairs.append((pa, pb))
+                    dyn_pairs.append((pa, pb))
                     logging.info(
-                        f"  Tier-1 accept {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
+                        f"  dynamic accept {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
                         f"canon_sim={canon_sim[r,c]:.3f}"
                     )
                 else:
                     logging.info(
-                        f"  Tier-1 REJECT {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
+                        f"  dynamic REJECT {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
                         f"canon_sim={canon_sim[r,c]:.3f}"
                     )
 
-            # Rescue anchor: if all Tier-1 rejected, use best pair above floor as soft anchor
-            if not tier1_pairs and len(ri) > 0:
-                best_idx = max(range(len(ri)), key=lambda k: canon_sim[ri[k], ci[k]])
-                best_sim = float(canon_sim[ri[best_idx], ci[best_idx]])
-                if best_sim >= _CANON_THR_RESCUE:
-                    pa, pb = high_a[ri[best_idx]], high_b[ci[best_idx]]
-                    logging.info(
-                        f"  [{vid_a}↔{vid_b}] rescue anchor {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
-                        f"canon_sim={best_sim:.3f}"
-                    )
-                    tier1_pairs = [(pa, pb)]
-
-            accepted: list[tuple[int, int, float]] = [
-                (pa, pb, float(canon_sim[
-                    high_a.index(pa), high_b.index(pb)
-                ]))
-                for pa, pb in tier1_pairs
+            return [
+                (pa, pb, float(canon_sim[high_a.index(pa), high_b.index(pb)]))
+                for pa, pb in dyn_pairs
             ]
 
-            # Demote unmatched Tier-1 persons into the static pool for Tier-2
-            matched_a = {pa for pa, _ in tier1_pairs}
-            matched_b = {pb for _, pb in tier1_pairs}
-            demoted_a = [pa for pa in high_a if pa not in matched_a]
-            demoted_b = [pb for pb in high_b if pb not in matched_b]
-            if demoted_a or demoted_b:
-                logging.info(
-                    f"  [{vid_a}↔{vid_b}] demoting to Tier-2: "
-                    f"{vid_a}:{demoted_a}  {vid_b}:{demoted_b}"
-                )
-            static_a = static_a + demoted_a
-            static_b = static_b + demoted_b
+        # ── Phase 2: global static clustering on singletons ────────────────────
 
-            # ── Geometry: ALS fit ──────────────────────────────────────────────
-            R_ref, t_ref = None, None
-            if single_image and static_a and static_b:
-                # Bootstrap R_ref from best single-anchor pair (lowest RMSE from ALS)
-                best_rmse, best_R, best_t = float("inf"), None, None
-                for pa in static_a:
-                    for pb in static_b:
-                        res = _constrained_fit(
-                            [(pb, pa)], vid_b, vid_a, delta_bar, min_overlap=1
-                        )
-                        if res is not None and res[3] < best_rmse:
-                            best_rmse, best_R, best_t = res[3], res[0], res[1]
-                if best_R is not None:
-                    R_ref, t_ref = best_R, best_t
-                    logging.info(
-                        f"  [{vid_a}↔{vid_b}] single-image anchor ALS  rmse={best_rmse:.3f}"
-                    )
-                else:
-                    logging.info(f"  [{vid_a}↔{vid_b}] single-image: no valid anchor — Tier-2 skipped")
-            elif tier1_pairs:
-                res = _constrained_fit(
-                    [(pb, pa) for pa, pb in tier1_pairs], vid_b, vid_a, delta_bar
-                )
-                if res is not None:
-                    R_ref, t_ref = res[0], res[1]
-                    logging.info(
-                        f"  [{vid_a}↔{vid_b}] Tier-1 ALS  "
-                        f"({len(tier1_pairs)} anchors)  rmse={res[3]:.3f}"
-                    )
-            else:
-                logging.info(
-                    f"  [{vid_a}↔{vid_b}] no Tier-1 accepted pairs — Tier-2 skipped"
-                )
+        def _static_cluster() -> None:
+            """
+            Single-linkage graph clustering over every person still in a singleton
+            UF component, using a view-invariant betas + appearance feature.
 
-            # ── Tier 2: static persons via regularised LS ──────────────────────
-            _mo = 1 if single_image else _MIN_OVERLAP
-            if R_ref is not None and static_a and static_b:
-                Na_s, Nb_s = len(static_a), len(static_b)
-                rmse_mat = np.full((Na_s, Nb_s), float("inf"), dtype=np.float64)
-                for i, pa in enumerate(static_a):
-                    for j, pb in enumerate(static_b):
-                        rmse_mat[i, j] = _regularized_pair_rmse(
-                            R_ref, t_ref, pb, vid_b, pa, vid_a, delta_bar,
-                            min_overlap=_mo,
-                        )
+            An edge (i, j) is merged, strongest-first, only if all of:
+              - sim(i, j) ≥ static_sim_floor                       (absolute backstop)
+              - i and j are mutual best matches across cameras     (relative evidence)
+              - sim(i, j) beats each node's runner-up by ratio_thr (discriminability)
+              - the two clusters share no camera                   (source constraint)
+              - the merged cluster spans ≤ N cameras               (size constraint)
+            Ambiguous persons are left isolated; there is no geometric fallback.
+            """
+            comps = _get_components()
+            singletons = [m[0] for m in comps.values() if len(m) == 1]
+            if len(singletons) < 2:
+                logging.info(f"  [static] {len(singletons)} singleton(s) — clustering skipped")
+                return
 
-                ri2, ci2 = linear_sum_assignment(
-                    np.where(np.isfinite(rmse_mat), rmse_mat, 1e6)
-                )
-                for r, c in zip(ri2, ci2):
-                    pa, pb = static_a[r], static_b[c]
-                    if not np.isfinite(rmse_mat[r, c]) or rmse_mat[r, c] >= _RMSE_THR:
-                        logging.info(
-                            f"  Tier-2 REJECT {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
-                            f"rmse={rmse_mat[r,c]:.3f}  (thr={_RMSE_THR:.3f})"
-                        )
+            # ── Per-node feature: appearance + L2 betas ────────────────────────
+            # Appearance = TransReID view-invariant descriptor when a ckpt is
+            # configured and frames are available; otherwise fall back to the
+            # DINOv3 conf-weighted gallery mean. Betas always from body params.
+            reid = self._get_reid()
+            feats: dict[tuple, tuple] = {}
+            for node in singletons:
+                vid, pid = node
+                desc = person_descs.get(vid, {}).get(pid)
+                if desc is None:
+                    continue
+                app_raw, shape_feat, _ = desc
+                app_vec = None
+                fdir = frames_dirs.get(vid)
+                if reid is not None and fdir is not None:
+                    jdir = Path(video_dirs[vid]) / "json_data"
+                    cam_suffix = str(vid).split("_")[-1]
+                    try:
+                        app_vec = reid.person_feature(fdir, jdir, cam_suffix, pid)
+                    except Exception as e:
+                        logging.warning(f"  [static] TransReID failed {vid}:P{pid} ({e}); falling back to DINOv3")
+                        app_vec = None
+                if app_vec is None and app_raw is not None:   # DINOv3 fallback
+                    f, c = app_raw
+                    w = c / (c.sum() + 1e-8)
+                    m = f.T @ w
+                    n = float(np.linalg.norm(m))
+                    if n > 1e-8:
+                        app_vec = (m / n).astype(np.float32)
+                if app_vec is not None or shape_feat is not None:
+                    feats[node] = (app_vec, shape_feat)
+            nodes = [n for n in singletons if n in feats]
+            if len(nodes) < 2:
+                logging.info("  [static] <2 nodes with features — clustering skipped")
+                return
+
+            w_b, w_a = self.static_betas_weight, self.static_app_weight
+
+            def _sim(ni: tuple, nj: tuple) -> float:
+                ai, si = feats[ni]; aj, sj = feats[nj]
+                num = 0.0; den = 0.0
+                if si is not None and sj is not None:
+                    num += w_b * ((float(np.dot(si, sj).clip(-1.0, 1.0)) + 1.0) / 2.0); den += w_b
+                if ai is not None and aj is not None:
+                    num += w_a * ((float(np.dot(ai, aj).clip(-1.0, 1.0)) + 1.0) / 2.0); den += w_a
+                return num / den if den > 0 else 0.0
+
+            # ── Cross-camera candidate similarities per node ───────────────────
+            cand: dict[tuple, list] = {n: [] for n in nodes}
+            for a in range(len(nodes)):
+                for b in range(a + 1, len(nodes)):
+                    ni, nj = nodes[a], nodes[b]
+                    if ni[0] == nj[0]:
                         continue
-                    conf = float(1.0 - rmse_mat[r, c] / _RMSE_THR)
-                    accepted.append((pa, pb, conf))
-                    logging.info(
-                        f"  Tier-2 accept {vid_a}:P{pa} ↔ {vid_b}:P{pb}  "
-                        f"rmse={rmse_mat[r,c]:.3f}  conf={conf:.3f}"
-                    )
+                    s = _sim(ni, nj)
+                    cand[ni].append((s, nj)); cand[nj].append((s, ni))
+            best:   dict[tuple, tuple] = {}
+            second: dict[tuple, float] = {}
+            for n in nodes:
+                lst = sorted(cand[n], key=lambda x: -x[0])
+                best[n]   = lst[0] if lst else (0.0, None)
+                second[n] = lst[1][0] if len(lst) > 1 else 0.0
 
-            return accepted
+            # ── Eligible edges: mutual-best ∧ floor ∧ ratio ────────────────────
+            eligible: list[tuple] = []
+            for a in range(len(nodes)):
+                for b in range(a + 1, len(nodes)):
+                    ni, nj = nodes[a], nodes[b]
+                    if ni[0] == nj[0]:
+                        continue
+                    s = _sim(ni, nj)
+                    if s < self.static_sim_floor:
+                        continue
+                    if best[ni][1] != nj or best[nj][1] != ni:
+                        continue  # not mutual best
+                    ratio_i = s / (second[ni] + 1e-8)
+                    ratio_j = s / (second[nj] + 1e-8)
+                    if ratio_i < self.static_ratio_thr or ratio_j < self.static_ratio_thr:
+                        continue  # ambiguous — leave isolated
+                    eligible.append((s, ni, nj))
+            eligible.sort(key=lambda x: -x[0])
 
-        # ── All-pairs: delta candidates → consensus → tiered assign ───────────
+            # ── Greedy single-linkage merge with source + size constraints ─────
+            n_cams = len(active_vids)
+
+            def _root_cams(root: tuple) -> set:
+                return {n[0] for n in nodes if _find(n) == root}
+
+            n_merged = 0
+            for s, ni, nj in eligible:
+                if _find(ni) == _find(nj):
+                    continue
+                cams_i = _root_cams(_find(ni))
+                cams_j = _root_cams(_find(nj))
+                if cams_i & cams_j:
+                    continue  # source constraint: one person per camera per cluster
+                if len(cams_i | cams_j) > n_cams:
+                    continue  # size constraint
+                edges.append((float(s), ni, nj))
+                _union(ni, nj)
+                n_merged += 1
+                logging.info(
+                    f"  [static] merge {ni[0]}:P{ni[1]} ↔ {nj[0]}:P{nj[1]}  sim={s:.3f}"
+                )
+            logging.info(
+                f"  [static] clustered {len(nodes)} singleton(s) → {n_merged} merge(s)"
+            )
+
+        # ── All-pairs: delta candidates → consensus → Phase 1 → Phase 2 ───────
+        camera_pair_offsets: dict[str, int] = {}
+
         if _single_image_mode:
             logging.info(
-                f"Scene {scene_id}: single-image mode (max_track_len={max_track_len})"
+                f"Scene {scene_id}: single-image mode (max_track_len={max_track_len}) — Phase 1 skipped, all → Phase 2 clustering"
             )
-            for ii, vid_a in enumerate(active_vids):
-                for vid_b in active_vids[ii + 1:]:
-                    pdata = {
-                        "pids_a_s": person_pids[vid_a],
-                        "pids_b_s": person_pids[vid_b],
-                    }
-                    matches = _tiered_assign(vid_a, vid_b, pdata, delta_bar=0, single_image=True)
-                    camera_pair_offsets[f"{vid_a}→{vid_b}"] = 0
-                    for pa, pb, conf in matches:
-                        edges.append((conf, (vid_a, pa), (vid_b, pb)))
-                        _union((vid_a, pa), (vid_b, pb))
 
         if not _single_image_mode:
             pair_data: dict[tuple, dict] = {}
@@ -1020,15 +1001,17 @@ class CrossViewReidentifierV4:
                     pair_data[(vid_a, vid_b)] = _pair_delta_candidates(vid_a, vid_b)
 
             consensus = _solve_consensus_offsets(pair_data)
+
+            # Phase 1 — pairwise dynamic matching
             for (vid_a, vid_b), pdata in pair_data.items():
                 delta_bar = consensus[(vid_a, vid_b)]
-                matches   = _tiered_assign(vid_a, vid_b, pdata, delta_bar)
+                matches   = _dynamic_assign(vid_a, vid_b, pdata, delta_bar)
                 camera_pair_offsets[f"{vid_a}→{vid_b}"] = delta_bar
                 for pa, pb, conf in matches:
                     edges.append((conf, (vid_a, pa), (vid_b, pb)))
                     _union((vid_a, pa), (vid_b, pb))
 
-        # ── Conflict resolution (identical to v2/v3) ───────────────────────────
+        # ── Conflict resolution (identical to v2/v3/v4) ────────────────────────
         def _get_components() -> dict[tuple, list[tuple]]:
             comps: dict[tuple, list[tuple]] = {}
             for _v in active_vids:
@@ -1036,6 +1019,10 @@ class CrossViewReidentifierV4:
                     _node = (_v, _p)
                     comps.setdefault(_find(_node), []).append(_node)
             return comps
+
+        # Phase 2 — global static clustering on the remaining singletons
+        # In single-image mode all persons are singletons (Phase 1 skipped) so this handles everything
+        _static_cluster()
 
         def _find_path_min_edge(src: tuple, dst: tuple) -> int:
             conflict_root = _find(src)
@@ -1097,7 +1084,7 @@ class CrossViewReidentifierV4:
 
         _resolve_conflicts()
 
-        # ── Global ID assignment (identical to v2/v3) ──────────────────────────
+        # ── Global ID assignment (identical to v2/v3/v4) ───────────────────────
         comps = _get_components()
         global_remap: dict[str, dict[int, int]] = {v: {} for v in active_vids}
         pending_single: list[tuple[int, list[tuple]]] = []
@@ -1121,13 +1108,13 @@ class CrossViewReidentifierV4:
         n_comps  = len(comps)
         n_remaps = sum(len(m) for m in global_remap.values())
         logging.info(
-            f"Scene {scene_id}: v4 → {n_comps} global person(s), "
+            f"Scene {scene_id}: v5 → {n_comps} global person(s), "
             f"{n_remaps} remap(s) across {len(active_vids)} view(s)"
         )
 
         if dry_run:
             print(
-                f"\n[DRY RUN v4] Scene {scene_id}: {n_comps} global persons, "
+                f"\n[DRY RUN v5] Scene {scene_id}: {n_comps} global persons, "
                 f"camera pair offsets: {camera_pair_offsets}"
             )
             for vid_id, remap in global_remap.items():
@@ -1137,7 +1124,7 @@ class CrossViewReidentifierV4:
                     print(f"  {vid_id}: no remaps needed")
             return
 
-        # ── Apply remaps (identical to v3) ────────────────────────────────────
+        # ── Apply remaps (identical to v3/v4) ──────────────────────────────────
         for vid_id, remap in global_remap.items():
             if not remap:
                 continue
@@ -1147,12 +1134,12 @@ class CrossViewReidentifierV4:
             for old_id, new_id in remap.items():
                 src = body_dir / f"person_{old_id}.npz"
                 if src.exists():
-                    tmp = body_dir / f"person_{old_id}.v4tmp.npz"
+                    tmp = body_dir / f"person_{old_id}.v5tmp.npz"
                     src.rename(tmp)
                     tmp_renames.append((tmp, body_dir / f"person_{new_id}.npz"))
             for tmp, dst in tmp_renames:
                 if dst.exists():
-                    logging.warning(f"{vid_id}: v4 remap — {dst.name} already exists, discarding")
+                    logging.warning(f"{vid_id}: v5 remap — {dst.name} already exists, discarding")
                     tmp.unlink()
                 else:
                     tmp.rename(dst)
