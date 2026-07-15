@@ -45,7 +45,7 @@ from preprocessing.run_vggt import VGGTPreprocessor
 from preprocessing.run_mapanything import MapAnythingScaleEstimator
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction_v2 import ParametersExtractor
-from preprocessing.cross_view_reid_v2 import CrossVideoReidentifierV2
+from preprocessing.cross_view_v4 import CrossViewReidentifierV4
 from synchronize_videos.synchronizer import Synchronizer
 from utilities.body_data import load_person_smplx_pose
 from utilities.visualize_segmented_reids import visualize_reid
@@ -220,7 +220,7 @@ def process_scene(
     scene: EgoHumansScene,
     segmenter: PersonSegmenter,
     estimator: ParametersExtractor,
-    reidentifier: CrossVideoReidentifierV2,
+    reidentifier: CrossViewReidentifierV4,
     output_dir: str | Path,
     vggt_weights: str,
     vggt_devices: list[str],
@@ -526,11 +526,7 @@ def main():
             reid_match_window=getattr(CONFIG.parameters_extraction, "reid_match_window", 5),
             rich_data_root=None,
         )
-        reidentifier = CrossVideoReidentifierV2(
-            threshold=getattr(CONFIG.parameters_extraction, "cross_view_reid_threshold", 0.4),
-            appearance_weight=getattr(CONFIG.parameters_extraction, "cross_view_appearance_weight", 0.5),
-            shape_weight=getattr(CONFIG.parameters_extraction, "cross_view_shape_weight", 0.2),
-            pose_weight=getattr(CONFIG.parameters_extraction, "cross_view_pose_weight", 0.3),
+        reidentifier = CrossViewReidentifierV4(
             droid_weights=getattr(CONFIG.data, "droid_weights", None),
             slam_cams=getattr(CONFIG.parameters_extraction, "slam_cams", None),
         )

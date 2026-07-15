@@ -100,9 +100,12 @@ def _undistort_camera(args: tuple) -> str:
     out_dir.mkdir(exist_ok=True)
 
     K, D, W, H = calib["K"], calib["D"], calib["W"], calib["H"]
-    # Compute optimal new camera matrix (keeps all pixels, no black borders cropped)
+    # Compute new camera matrix. balance=0.0 crops to the fully-valid region so the
+    # output has NO black borders (balance=1.0 keeps full FOV but leaves black
+    # half-moon borders that corrupt VGGT/SAM3D). Raise toward ~0.3 to trade a
+    # little border back for more FOV.
     K_new = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
-        K, D, (W, H), np.eye(3), balance=1.0
+        K, D, (W, H), np.eye(3), balance=0.0
     )
     map1, map2 = cv2.fisheye.initUndistortRectifyMap(
         K, D, np.eye(3), K_new, (W, H), cv2.CV_16SC2
