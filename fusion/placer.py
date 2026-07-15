@@ -159,8 +159,17 @@ class BodyPlacer:
         scene_output_dir: str | Path,
         smplx_model_path: str | Path,
         crop_meta_path: str | Path | None = None,
+        cam_pid_remap: dict[str, dict[int, int]] | None = None,
     ) -> None:
         self.scene_dir = Path(scene_output_dir)
+
+        # Optional per-camera person-id remap: {camera_name: {global_pid: disk_pid}}.
+        # When provided, person files are read as person_{disk_pid}.npz but keyed
+        # internally by the global pid, so callers can use globally-consistent ids
+        # even when the on-disk per-camera ids differ (e.g. EgoExo4D manual_reid,
+        # where cross-view ReID is unreliable). Default {} -> disk_pid == global_pid,
+        # i.e. unchanged behavior (used by the RICH pipeline).
+        self._cam_pid_remap = cam_pid_remap or {}
 
         import sys
         _repo_root = Path(__file__).parent.parent
@@ -262,12 +271,41 @@ class BodyPlacer:
     # Public API
     # ------------------------------------------------------------------
 
-    def load_mapanything_scale(self) -> np.ndarray | None:
+    _SCALE_MODE_FILES = {
+        "centered": "mapanything_scale_centered.npy",
+        "baseline": "mapanything_scale_baseline.npy",
+    }
+
+    def load_mapanything_scale(
+        self,
+        filename: str = "mapanything_scale_centered.npy",
+        scale_mode: str | None = None,
+        smooth: str = "none",
+    ) -> np.ndarray | None:
         """Load per-frame scale from MapAnything preprocessing output, if available.
 
+        ``scale_mode`` (preferred) selects the estimator output by name:
+        ``"centered"`` = legacy conditioned depth-ratio scale, ``"baseline"`` =
+        images-only camera-baseline scale (unbiased on wide-FOV rigs). When
+        given it overrides ``filename``. ``filename`` is kept for direct callers.
+
+        ``smooth`` denoises the per-frame estimate. VGGT is run per-frame, so
+        each frame is an independent reconstruction with its own arbitrary scale;
+        the scene's *physical* metric scale is constant, so per-frame variation is
+        estimation noise. ``"median"`` collapses to one robust scalar per scene
+        (kills the frame-to-frame jitter that inflates world-aligned metrics).
+        ``"none"`` (default) keeps the raw per-frame array unchanged.
         Returns ``(T,)`` float32 or None when the file is absent or mismatched.
         """
-        path = self.scene_dir / "mapanything_scale_centered.npy"
+        if scale_mode is not None:
+            try:
+                filename = self._SCALE_MODE_FILES[scale_mode]
+            except KeyError:
+                raise ValueError(
+                    f"unknown scale_mode {scale_mode!r}; "
+                    f"choose from {list(self._SCALE_MODE_FILES)}"
+                )
+        path = self.scene_dir / filename
         if not path.exists():
             return None
         scale = np.load(path).astype(np.float32)
@@ -277,6 +315,12 @@ class BodyPlacer:
                 f"mapanything_scale.npy has shape {scale.shape}, expected ({self.T},) — ignoring"
             )
             return None
+        if smooth == "median":
+            valid = scale[scale > 0]
+            if valid.size:
+                scale = np.full_like(scale, float(np.median(valid)))
+        elif smooth != "none":
+            raise ValueError(f"unknown smooth {smooth!r}; choose 'none' or 'median'")
         return scale
 
     def estimate_scale_per_frame(
@@ -370,8 +414,10 @@ class BodyPlacer:
         sam3d_betas_sum: dict[int, np.ndarray] = {}
         sam3d_betas_cnt: dict[int, int] = {}
         for cam_dir in self._cam_dirs:
+            _inv = {v: g for g, v in self._cam_pid_remap.get(cam_dir.name, {}).items()}  # disk->global
             for body_file in sorted((cam_dir / "body_data").glob("person_*.npz")):
-                pid = int(body_file.stem.split("_")[1])
+                _disk = int(body_file.stem.split("_")[1])
+                pid = _inv.get(_disk, _disk)
                 d_b = np.load(body_file, allow_pickle=False)
                 if "smplx_betas" not in d_b.files:
                     continue
@@ -387,9 +433,11 @@ class BodyPlacer:
         # cam_data[k][pid] = {gt_map, fk, kp2d}
         cam_data: dict[int, dict[int, dict]] = {}
         for k, cam_dir in enumerate(self._cam_dirs):
+            _inv = {v: g for g, v in self._cam_pid_remap.get(cam_dir.name, {}).items()}  # disk->global
             cam_data[k] = {}
             for body_file in sorted((cam_dir / "body_data").glob("person_*.npz")):
-                pid = int(body_file.stem.split("_")[1])
+                _disk = int(body_file.stem.split("_")[1])
+                pid = _inv.get(_disk, _disk)
                 d = np.load(body_file, allow_pickle=False)
                 required = {"smplx_betas", "smplx_body_pose", "pred_keypoints_2d", "frame_indices"}
                 if not required.issubset(d.files):
@@ -543,6 +591,178 @@ class BodyPlacer:
                   f"frames_with_bones={len(counts)}/{self.T}")
         return result
 
+    def estimate_scale_human_reference(
+        self,
+        min_cams: int = 2,
+        frame_start: int = 0,
+    ) -> np.ndarray:
+        """Return per-frame VGGT scale (metres / VGGT unit) from a self-consistent human reference.
+
+        Same multi-view triangulation as :meth:`estimate_scale_triangulated`,
+        but the metric reference is the bone length taken directly from SAM3D
+        ``pred_keypoints_3d`` (native-metric MHR70 landmarks) instead of an FK
+        joint-centre distance:
+
+            scale = L_metric / L_vggt
+              L_metric = median_cams ||kp3d[b] - kp3d[a]||   (SAM3D metric 3D)
+              L_vggt   = ||X_b - X_a||                        (DLT-triangulate kp2d)
+
+        Because ``kp2d`` is exactly the projection of ``kp3d`` (identical MHR70
+        surface landmarks), the surface-vs-joint-centre offset cancels top and
+        bottom — no ``_BONE_CALIB_FACTORS`` correction is needed. This estimator
+        needs no fused pose, no betas, and no FK, so it is MapAnything- and
+        fusion-independent.
+
+        Args:
+            min_cams: Minimum cameras that must observe both endpoints.
+            frame_start: Global frame index of local index 0 (for vggt_t mapping).
+
+        Returns:
+            ``(T,)`` float32 — one scale per global frame index; frames with no
+            bone observations fall back to the global median.
+
+        Raises:
+            RuntimeError: If no valid triangulated bone samples were found.
+        """
+        from collections import defaultdict
+
+        # ── Load body data per (cam_idx, pid): {gt_map, kp2d, kp3d} ────────────
+        cam_data: dict[int, dict[int, dict]] = {}
+        for k, cam_dir in enumerate(self._cam_dirs):
+            _inv = {v: g for g, v in self._cam_pid_remap.get(cam_dir.name, {}).items()}  # disk->global
+            cam_data[k] = {}
+            for body_file in sorted((cam_dir / "body_data").glob("person_*.npz")):
+                _disk = int(body_file.stem.split("_")[1])
+                pid = _inv.get(_disk, _disk)
+                d = np.load(body_file, allow_pickle=False)
+                required = {"pred_keypoints_2d", "pred_keypoints_3d", "frame_indices"}
+                if not required.issubset(d.files):
+                    continue
+                gt_map = {int(gt): lt for lt, gt in enumerate(d["frame_indices"])}
+                cam_data[k][pid] = {
+                    "gt_map": gt_map,
+                    "kp2d":   d["pred_keypoints_2d"],
+                    "kp3d":   d["pred_keypoints_3d"],
+                }
+
+        all_pids: set[int] = set()
+        for k in cam_data:
+            all_pids.update(cam_data[k].keys())
+
+        global_ts_by_pid: dict[int, set[int]] = defaultdict(set)
+        for k in cam_data:
+            for pid, bd in cam_data[k].items():
+                global_ts_by_pid[pid].update(bd["gt_map"].keys())
+
+        frame_samples: dict[int, list[float]] = defaultdict(list)
+        n_bones_used: dict[int, int] = {}
+
+        for pid in sorted(all_pids):
+            for global_t in sorted(global_ts_by_pid[pid]):
+                vggt_t = global_t - frame_start
+                if vggt_t < 0 or vggt_t >= self.T:
+                    continue
+
+                # Score candidate bones by #cameras observing both endpoints.
+                bone_scores: list[tuple[int, tuple]] = []
+                for bone in _SCALE_BONE_CANDIDATES:
+                    mhr_a, mhr_b = bone[0], bone[1]
+                    n_cams = 0
+                    for k in range(self.K):
+                        if not self.cam_valid[vggt_t, k]: continue
+                        bd = cam_data.get(k, {}).get(pid)
+                        if bd is None or global_t not in bd["gt_map"]: continue
+                        if mhr_a < bd["kp2d"].shape[1] and mhr_b < bd["kp2d"].shape[1]:
+                            n_cams += 1
+                    if n_cams >= min_cams:
+                        bone_scores.append((n_cams, bone))
+
+                bone_scores.sort(key=lambda x: x[0], reverse=True)
+                selected_bones = [b for _, b in bone_scores[:_N_BEST_BONES]]
+                n_bones_used[global_t] = n_bones_used.get(global_t, 0) + len(selected_bones)
+
+                for mhr_a, mhr_b in selected_bones:
+                    pts_a: list[tuple[float, float]] = []
+                    pts_b: list[tuple[float, float]] = []
+                    Pmats: list[np.ndarray] = []
+                    metric_lengths: list[float] = []
+
+                    for k in range(self.K):
+                        if not self.cam_valid[vggt_t, k]:
+                            continue
+                        bd = cam_data.get(k, {}).get(pid)
+                        if bd is None or global_t not in bd["gt_map"]:
+                            continue
+                        local_t = bd["gt_map"][global_t]
+
+                        if mhr_a >= bd["kp2d"].shape[1] or mhr_b >= bd["kp2d"].shape[1]:
+                            continue
+
+                        oc = self.original_coords[vggt_t, k]
+                        os_ = self.original_size[vggt_t, k]
+                        W_orig, H_orig = float(os_[0]), float(os_[1])
+                        x1, y1, x2, y2 = oc
+                        off_x, off_y = self._cam_offset(k)
+
+                        u_a, v_a = self._orig_to_vggt(bd["kp2d"][local_t, mhr_a], oc, W_orig, H_orig, off_x, off_y)
+                        u_b, v_b = self._orig_to_vggt(bd["kp2d"][local_t, mhr_b], oc, W_orig, H_orig, off_x, off_y)
+                        if not (x1 <= u_a < x2 and y1 <= v_a < y2
+                                and x1 <= u_b < x2 and y1 <= v_b < y2):
+                            continue
+
+                        K_mat = self.intrinsics[vggt_t, k].astype(np.float64)
+                        E_mat = self.extrinsics[vggt_t, k].astype(np.float64)
+                        pts_a.append((u_a, v_a))
+                        pts_b.append((u_b, v_b))
+                        Pmats.append(K_mat @ E_mat)
+                        metric_lengths.append(float(np.linalg.norm(
+                            bd["kp3d"][local_t, mhr_b] - bd["kp3d"][local_t, mhr_a]
+                        )))
+
+                    if len(pts_a) < min_cams:
+                        continue
+
+                    try:
+                        X_a = self._triangulate_dlt(pts_a, Pmats)
+                        X_b = self._triangulate_dlt(pts_b, Pmats)
+                    except Exception:
+                        continue
+
+                    L_vggt = float(np.linalg.norm(X_b - X_a))
+                    if L_vggt < 1e-4:
+                        continue
+
+                    L_metric = float(np.median(metric_lengths))
+                    if L_metric < 0.05:
+                        continue
+
+                    # No _BONE_CALIB_FACTORS: kp3d and kp2d are the same surface
+                    # landmarks, so the offset cancels in the ratio.
+                    s = L_metric / L_vggt
+                    if 0.1 < s < 100.0:
+                        frame_samples[global_t].append(s)
+
+        all_samples = [s for sl in frame_samples.values() for s in sl]
+        if not all_samples:
+            raise RuntimeError(
+                "No valid human-reference bone samples found. "
+                "Check that body_data/ files exist and at least two cameras share valid frames."
+            )
+
+        global_scale = float(np.median(all_samples))
+        result = np.full(self.T, global_scale, dtype=np.float32)
+        for global_t, slist in frame_samples.items():
+            vggt_t = global_t - frame_start
+            if 0 <= vggt_t < self.T and slist:
+                result[vggt_t] = float(np.median(slist))
+
+        if n_bones_used:
+            counts = list(n_bones_used.values())
+            print(f"  [scale-human] bones/frame: mean={np.mean(counts):.1f}  "
+                  f"min={min(counts)}  max={max(counts)}  "
+                  f"frames_with_bones={len(counts)}/{self.T}")
+        return result
+
     def estimate_procrustes_dlt_mhr(
         self,
         scale: float | np.ndarray,
@@ -592,8 +812,10 @@ class BodyPlacer:
         cam_data_all: list[dict[int, dict]] = []
         for cam_dir in self._cam_dirs:
             cam_map: dict[int, dict] = {}
+            remap = self._cam_pid_remap.get(cam_dir.name, {})
             for pid in sorted(all_pids):
-                bf = cam_dir / "body_data" / f"person_{pid}.npz"
+                disk_pid = remap.get(pid, pid)   # global -> on-disk id for this cam
+                bf = cam_dir / "body_data" / f"person_{disk_pid}.npz"
                 if not bf.exists():
                     continue
                 d = np.load(bf, allow_pickle=False)
@@ -782,8 +1004,10 @@ class BodyPlacer:
         cam_data_all: list[dict[int, dict]] = []
         for cam_dir in self._cam_dirs:
             cam_map: dict[int, dict] = {}
+            remap = self._cam_pid_remap.get(cam_dir.name, {})
             for pid in sorted(all_pids):
-                bf = cam_dir / "body_data" / f"person_{pid}.npz"
+                disk_pid = remap.get(pid, pid)   # global -> on-disk id for this cam
+                bf = cam_dir / "body_data" / f"person_{disk_pid}.npz"
                 if not bf.exists():
                     continue
                 d = np.load(bf, allow_pickle=False)

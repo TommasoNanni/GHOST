@@ -33,7 +33,6 @@ from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
 from fusion.fusion_module_v2 import PoseFusionModule
 from fusion.placer import BodyPlacer
-from utilities.rich_gender_plugin import resolve_smplx_models
 
 # Import PnP placement helpers from inference.py (same scripts/ dir)
 _SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -232,11 +231,7 @@ def main(
             cam_persons[pid_num] = {k: d[k] for k in d.files}
         raw_body.append(cam_persons)
 
-    _gender_json = Path(__file__).resolve().parent.parent / "resource" / "rich_gender.json"
-    _smplx_arg = (
-        resolve_smplx_models(scene_dir.name, Path(CONFIG.data.smplx_model_path).parent, _gender_json)
-        if _gender_json.exists() else Path(CONFIG.data.smplx_model_path)
-    )
+    _smplx_arg = Path(CONFIG.data.smplx_model_path)
 
     # SAM3D kp2d are in uncropped source pixels; VGGT cameras live in centered-crop
     # space. crop_meta.json (next to the centered images) reconciles them in the placer.

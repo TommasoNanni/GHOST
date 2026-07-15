@@ -54,7 +54,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from fusion.fusion_module_v2 import PoseFusionModule
 from fusion.placer import BodyPlacer
-from utilities.rich_gender_plugin import resolve_smplx_models
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -323,14 +322,7 @@ def _run_placer(
     orient_R          : (T, P, 3, 3) float32, NaN where invisible
     vggt_cameras      : (T, K, 8) float32, visualizer camera format
     """
-    _gender_json = _REPO_ROOT / "resource" / "rich_gender.json"
-    if isinstance(smplx_model_path, dict):
-        _smplx_arg = smplx_model_path
-    elif _gender_json.exists():
-        _smplx_arg = resolve_smplx_models(scene_dir.name, Path(smplx_model_path).parent, _gender_json)
-    else:
-        _smplx_arg = smplx_model_path
-    placer = BodyPlacer(scene_dir, _smplx_arg, crop_meta_path=crop_meta_path)
+    placer = BodyPlacer(scene_dir, smplx_model_path, crop_meta_path=crop_meta_path)
     P = len(all_pids)
     pid_to_slot = {pid: i for i, pid in enumerate(all_pids)}
 

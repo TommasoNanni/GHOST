@@ -133,13 +133,23 @@ class ParametersExtractor:
 
     @staticmethod
     def _is_estimated(video_dir: Path) -> bool:
-        """Return True if body estimation has already been run for this video.
+        """Return True only if body estimation for this video is fully complete.
 
-        Uses the existence of any person_*.npz file as the completion marker,
-        which is robust to runs that were interrupted before appearance_gallery.npz
-        was written.
+        Completion is marked by a ``body_data/.done`` sentinel written after all
+        per-person ``person_*.npz`` files, the appearance gallery and the re-ID
+        remap have been persisted.  A video interrupted part-way (some
+        ``person_*.npz`` already written, no ``.done``) returns False so it is
+        re-queued and *resumes*: ``_process_video_core`` re-runs the SAM3D frame
+        loop (deterministic → same canonical IDs) but skips every person whose
+        ``person_*.npz`` already exists, so the expensive per-person SMPL-X
+        optimisation is never redone.
+
+        Legacy videos completed before the ``.done`` sentinel existed are
+        recognised by the presence of ``appearance_gallery.npz`` (written last in
+        the old bulk-save path).
         """
-        return any((Path(video_dir) / "body_data").glob("person_*.npz"))
+        body = Path(video_dir) / "body_data"
+        return (body / ".done").exists() or (body / "appearance_gallery.npz").exists()
 
     def _init_sam3d(self) -> None:
         """Lazy-load the SAM3D Body estimator."""
@@ -459,6 +469,10 @@ class ParametersExtractor:
         frame_dir = Path(frames_dir) if frames_dir else video_path / "frames"
         body_dir = video_path / "body_data"
         body_dir.mkdir(exist_ok=True)
+        done_marker = body_dir / ".done"
+        if done_marker.exists():
+            logging.info(f"{gpu_label}{video_id}: already complete, skipping")
+            return
 
         json_files = sorted(json_dir.glob("*.json"))
         if not json_files:
@@ -736,11 +750,51 @@ class ParametersExtractor:
                     (frame_idx, body_cpu, person_id, mask_key, img_h, img_w)
                 )
 
+        # Prune non-person tracks BEFORE the expensive Pass-2 optimisation.
+        # A hand, phone, or other object may survive the segmentation
+        # fill-ratio filter yet SAM3D never fits a real body to it.  Require
+        # ≥30% of a track's frames to have valid 3D keypoints; drop the rest so
+        # we never spend optimiser time on them.  pred_keypoints_3d is set in
+        # Pass 1, so this is safe to evaluate here.
+        _MIN_BODY_HIT_RATIO = 0.30
+        pruned_ids: list[int] = []
+        for pid, frames in list(tracks.items()):
+            n_total = len(frames)
+            n_valid = sum(1 for fd in frames.values() if "pred_keypoints_3d" in fd)
+            if n_total > 0 and (n_valid / n_total) < _MIN_BODY_HIT_RATIO:
+                pruned_ids.append(pid)
+                del tracks[pid]
+                pending_conversion.pop(pid, None)
+        if pruned_ids:
+            logging.info(
+                f"{gpu_label}{video_id}: pruned {len(pruned_ids)} non-person "
+                f"track(s) with low body-fit rate: {pruned_ids}"
+            )
+        if not tracks:
+            logging.warning(
+                f"{gpu_label}{video_id}: no body detections remain after pruning"
+            )
+            if _mask_zip is not None:
+                _mask_zip.close()
+            done_marker.touch()
+            return
+
         # Pass 2: batched SMPL-X conversion + SMPL-X-based confidence override.
         # One optimizer run per person track (all frames batched together).
+        # Each person is written to person_<id>.npz the moment its optimisation
+        # finishes (atomic write), so a job killed mid-Pass-2 keeps every person
+        # completed so far and a resume skips them via the npz-exists check.
         if pending_conversion:
             _smplx_device = next(converter._smpl_model.parameters()).device
             for canonical_id, frame_list in pending_conversion.items():
+                # Resume: if this person was already optimised and saved by an
+                # earlier (interrupted) run, skip the expensive conversion.
+                if (body_dir / f"person_{canonical_id}.npz").exists():
+                    logging.info(
+                        f"{gpu_label}{video_id}: person {canonical_id} already "
+                        f"saved, skipping optimisation"
+                    )
+                    continue
                 frame_list.sort(key=lambda x: x[0])
                 sam3d_outputs = [entry[1] for entry in frame_list]
                 try:
@@ -757,6 +811,12 @@ class ParametersExtractor:
                         f"{gpu_label}Batched SMPLX conversion failed person "
                         f"{canonical_id} in {video_id}: {_e}",
                         exc_info=True,
+                    )
+                    # Still persist the model-agnostic params (matches the old
+                    # bulk-save behaviour) so the person is not lost, and mark it
+                    # saved so a resume does not retry the failing conversion.
+                    ParametersExtractor._save_one_person(
+                        canonical_id, tracks.get(canonical_id, {}), body_dir, param_keys
                     )
                     continue
 
@@ -888,6 +948,12 @@ class ParametersExtractor:
                                     f"{canonical_id} frame {frame_idx}: {_ce}"
                                 )
 
+                # Persist this person now (atomic) so an interrupted Pass 2
+                # keeps every person completed so far.
+                ParametersExtractor._save_one_person(
+                    canonical_id, tracks.get(canonical_id, {}), body_dir, param_keys
+                )
+
         if _mask_zip is not None:
             _mask_zip.close()
 
@@ -895,42 +961,11 @@ class ParametersExtractor:
         person_feat_buffer = reidentifier.feature_buffer
         id_remap = reidentifier.id_remap
 
-        if not tracks:
-            logging.warning(f"{gpu_label}{video_id}: no body detections")
-            return
-
-        # Prune tracks where SAM3D failed to produce body params in most
-        # frames.  A hand, phone, or other non-person object may survive the
-        # segmentation fill-ratio filter (e.g. the propagated bbox grows but
-        # the mask stays tiny) yet SAM3D will still fail to fit a real body
-        # model to it.  Require ≥30% of a track's frames to have valid 3D
-        # keypoints; tracks below this are almost certainly not people.
-        _MIN_BODY_HIT_RATIO = 0.30
-        pruned_ids: list[int] = []
-        for pid, frames in list(tracks.items()):
-            n_total = len(frames)
-            n_valid = sum(
-                1 for fdata in frames.values()
-                if "pred_keypoints_3d" in fdata
-            )
-            if n_total > 0 and (n_valid / n_total) < _MIN_BODY_HIT_RATIO:
-                pruned_ids.append(pid)
-                del tracks[pid]
-        if pruned_ids:
-            logging.info(
-                f"{gpu_label}{video_id}: pruned {len(pruned_ids)} non-person "
-                f"track(s) with low body-fit rate: {pruned_ids}"
-            )
-
-        if not tracks:
-            logging.warning(
-                f"{gpu_label}{video_id}: no body detections remain after pruning"
-            )
-            return
-
-        ParametersExtractor._save_body_data_static(
-            tracks, body_dir, video_id, param_keys
-        )
+        # Per-person body data was already written incrementally inside Pass 2
+        # (atomic person_<id>.npz saves); pruning happened before Pass 2, so
+        # every surviving track is on disk.  Regenerate the summary from disk so
+        # it reflects persons saved across this and any earlier resumed run.
+        ParametersExtractor._write_summary(body_dir, video_id, gpu_label)
 
         # Persist per-person appearance feature matrices for cross-view re-ID.
         # Each person gets a (N, D) matrix of L2-normalised DINOv3 features,
@@ -1003,6 +1038,12 @@ class ParametersExtractor:
                 video_path, id_remap, gpu_label
             )
 
+        # All per-person npz, the appearance gallery and the re-ID remap are now
+        # on disk — mark the video complete so the resume guard skips it.  The
+        # remap above runs exactly once because .done gates all re-entry.
+        done_marker.touch()
+        logging.info(f"{gpu_label}{video_id}: complete → body_data/.done")
+
     @staticmethod
     def _save_body_data_static(
         tracks: dict[int, dict[int, dict]],
@@ -1067,6 +1108,84 @@ class ParametersExtractor:
         print(
             f"  {video_id}: saved body data for {len(summary['persons'])} "
             f"persons ({total_frames} total frame estimates) -> {body_dir}"
+        )
+
+    @staticmethod
+    def _person_arrays(
+        frames: dict[int, dict],
+        param_keys: tuple[str, ...],
+    ) -> dict[str, np.ndarray] | None:
+        """Stack one person's per-frame params into savez-ready arrays."""
+        sorted_idxs = sorted(frames.keys())
+        if not sorted_idxs:
+            return None
+        arrays: dict[str, np.ndarray] = {
+            "frame_indices": np.array(sorted_idxs, dtype=np.int32),
+        }
+        all_keys: set[str] = set()
+        for fi in sorted_idxs:
+            all_keys.update(frames[fi].keys())
+        for key in list(param_keys) + ["bbox"]:
+            if key not in all_keys:
+                continue
+            vals = []
+            for fi in sorted_idxs:
+                v = frames[fi].get(key)
+                if v is not None:
+                    vals.append(v)
+                else:
+                    ref = next(
+                        (frames[fj][key] for fj in sorted_idxs if key in frames[fj]),
+                        None,
+                    )
+                    vals.append(np.zeros_like(ref) if ref is not None else None)
+            if any(v is None for v in vals):
+                continue
+            arrays[key] = np.stack(vals, axis=0)
+        return arrays
+
+    @staticmethod
+    def _save_one_person(
+        person_id: int,
+        frames: dict[int, dict],
+        body_dir: Path,
+        param_keys: tuple[str, ...],
+    ) -> None:
+        """Atomically write a single ``person_<id>.npz``.
+
+        The file is written to a temp path and renamed, so a job killed mid-write
+        never leaves a truncated ``person_*.npz`` that the resume guard would
+        mistake for a completed person.
+        """
+        arrays = ParametersExtractor._person_arrays(frames, param_keys)
+        if arrays is None:
+            return
+        npz_path = body_dir / f"person_{person_id}.npz"
+        tmp_path = body_dir / f".person_{person_id}.tmp"
+        with open(tmp_path, "wb") as fh:          # file object → no .npz suffix munging
+            np.savez(fh, **arrays)
+        tmp_path.replace(npz_path)                # atomic on POSIX
+
+    @staticmethod
+    def _write_summary(body_dir: Path, video_id: str, gpu_label: str = "") -> None:
+        """(Re)build body_params_summary.json from the person_*.npz on disk."""
+        summary = {"video_id": video_id, "persons": {}}
+        for npz_path in sorted(body_dir.glob("person_*.npz")):
+            pid = npz_path.stem.split("_", 1)[1]
+            with np.load(str(npz_path)) as d:
+                fidx = d["frame_indices"]
+                n = int(len(fidx))
+                summary["persons"][pid] = {
+                    "num_frames": n,
+                    "frame_range": [int(fidx[0]), int(fidx[-1])] if n else [0, 0],
+                    "param_shapes": {k: list(d[k].shape) for k in d.files},
+                }
+        with open(body_dir / "body_params_summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+        total = sum(p["num_frames"] for p in summary["persons"].values())
+        print(
+            f"  {video_id}: saved body data for {len(summary['persons'])} "
+            f"persons ({total} total frame estimates) -> {body_dir}"
         )
 
     @staticmethod
