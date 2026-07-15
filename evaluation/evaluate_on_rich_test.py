@@ -618,6 +618,8 @@ def evaluate_scene(
     gt_split:         str = "test",
     modalities:       list[int] | None = None,
     exclude_cameras:  list[str] | None = None,
+    scale_mode:       str = "centered",
+    scale_smooth:     str = "none",
 ) -> dict[str, float] | None:
     """Modalities:
       1 = pred cameras + pred scale + pred pose
@@ -820,16 +822,24 @@ def evaluate_scene(
                 if pid in sam3d_betas_by_pid:
                     sam3d_betas_map[bf] = sam3d_betas_by_pid[pid]
 
-        pred_scale_pf = placer.load_mapanything_scale()
-        if pred_scale_pf is not None:
-            logger.info(f"  [scale] using MapAnything  median={float(np.median(pred_scale_pf)):.4f}")
+        if scale_mode == "human":
+            pred_scale_pf = placer.estimate_scale_human_reference(frame_start=frame_start)
+            if scale_smooth == "median":
+                _valid = pred_scale_pf[pred_scale_pf > 0]
+                if _valid.size:
+                    pred_scale_pf = np.full_like(pred_scale_pf, float(np.median(_valid)))
+            logger.info(f"  [scale] using human-reference (smooth={scale_smooth})  median={float(np.median(pred_scale_pf)):.4f}")
         else:
-            pred_scale_pf = placer.estimate_scale_triangulated(
-                fused_pose_by_pid=fused_pose_by_pid,
-                pred_betas_map=sam3d_betas_map,
-                frame_start=frame_start,
-            )
-            logger.info(f"  [scale] using triangulated  median={float(np.median(pred_scale_pf)):.4f}")
+            pred_scale_pf = placer.load_mapanything_scale(scale_mode=scale_mode, smooth=scale_smooth)
+            if pred_scale_pf is not None:
+                logger.info(f"  [scale] using MapAnything ({scale_mode}, smooth={scale_smooth})  median={float(np.median(pred_scale_pf)):.4f}")
+            else:
+                pred_scale_pf = placer.estimate_scale_triangulated(
+                    fused_pose_by_pid=fused_pose_by_pid,
+                    pred_betas_map=sam3d_betas_map,
+                    frame_start=frame_start,
+                )
+                logger.info(f"  [scale] using triangulated  median={float(np.median(pred_scale_pf)):.4f}")
     except Exception as e:
         logger.warning(f"  Scale estimation failed: {e} — skipping")
         return None
@@ -932,10 +942,18 @@ def evaluate_scene(
         pid for pid, cnt in pid_cam_count.items() if cnt >= max(1, K_cams - 1)
     }
 
-    # Run M1 placement to get trans_dict for matching
+    # Run placement to get trans_dict for matching. Use a CANONICAL scale
+    # (MA-baseline) independent of the tested --scale so that ghost↔GT matching
+    # is identical across scale modes — otherwise a wrong tested scale can flip
+    # which ghost pid is matched to GT (harness artifact, not a method effect).
+    # The tested pred_scale_pf still drives every per-modality metric below.
+    match_scale = placer.load_mapanything_scale(
+        filename="mapanything_scale_baseline.npy", smooth="median")
+    if match_scale is None:
+        match_scale = pred_scale_pf
     try:
         trans_dict_m1, _ = placer.estimate_procrustes_dlt_mhr(
-            scale=pred_scale_pf,
+            scale=match_scale,
             all_pids=set(all_pids),
             pred_betas_by_pid=betas_by_pid,
             fused_pose_by_pid=fused_pose_by_pid,
@@ -979,14 +997,13 @@ def evaluate_scene(
     # Gendered GT joints (for M1–M8: GT params are gendered-model parameters).
     gt_joints, gt_roots = _build_gt_joints(placer)
 
-    # M9 (gender-blind): a NEUTRAL-SMPL-X placer + neutral GT joints, so the
-    # prediction AND the GT are FK'd with the neutral model — an unbiased,
-    # gender-free version of M1.  Built only when M9 is requested.
-    placer_neutral = None
-    gt_joints_neutral = gt_roots_neutral = None
+    # M2–M10 use neutral pred FK (reflects the actual inference pipeline).
+    # GT joints use gendered FK for all modalities except M9 (which is fully neutral).
+    # M1 is the only fully gendered modality (pred FK + GT FK) — gender oracle upper bound.
+    neutral_path = smplx_model_path.parent / "SMPLX_NEUTRAL.pkl"
+    placer_neutral = BodyPlacer(scene_dir, neutral_path, crop_meta_path=crop_meta_path)
+    gt_joints_neutral, gt_roots_neutral = None, None
     if 9 in (modalities or []):
-        neutral_path = smplx_model_path.parent / "SMPLX_NEUTRAL.pkl"
-        placer_neutral = BodyPlacer(scene_dir, neutral_path, crop_meta_path=crop_meta_path)
         gt_joints_neutral, gt_roots_neutral = _build_gt_joints(placer_neutral)
 
     # Pre-build GT pose arrays (for M4): (T, P, 54, 6)
@@ -1039,7 +1056,8 @@ def evaluate_scene(
         6: "M6: pred-cam + pred-scale + pred-pose + GT-transl",
         7: "M7: pred-ray + GT-depth (depth oracle)",
         8: "M8: Sapiens-DLT + pred-scale + pred-pose",
-        9: "M9: pred-cam + pred-scale + pred-pose (gender-blind: neutral SMPL-X for pred AND GT)",
+        9: "M9: pred-cam + pred-scale + pred-pose (fully neutral: neutral pred FK + neutral GT)",
+        10: "M10: pred-cam + pred-scale + pred-pose (neutral pred FK, gendered GT)",
     }
 
     orig_extrinsics = placer.extrinsics    # save original VGGT extrinsics
@@ -1084,10 +1102,10 @@ def evaluate_scene(
             pid: pose_for_placer[:, pid_to_slot[pid]] for pid in all_pids
         }
 
-        # M9 is gender-blind: route placement, pred-FK and GT joints through the
-        # neutral-SMPL-X placer / neutral GT arrays.  All other modalities use the
-        # gendered placer and gendered GT.
-        active_placer = placer_neutral if modality == 9 else placer
+        # M1: fully gendered (pred FK + GT FK) — gender oracle upper bound.
+        # M9: fully neutral (pred FK + GT FK).
+        # All others (M2–M8, M10): neutral pred FK + gendered GT FK.
+        active_placer = placer if modality == 1 else placer_neutral
         gt_joints_use = gt_joints_neutral if modality == 9 else gt_joints
         gt_roots_use  = gt_roots_neutral  if modality == 9 else gt_roots
 
@@ -1291,6 +1309,15 @@ def main() -> None:
                         help="Comma-separated modalities to run: 1,2,3,4 (default: 1). "
                              "1=pred-cam+pred-scale+pred-pose, 2=pred-cam+GT-scale+pred-pose, "
                              "3=GT-cam+GT-scale+pred-pose, 4=GT-cam+GT-scale+GT-pose (oracle).")
+    parser.add_argument("--scale",              default="centered",
+                        choices=["centered", "baseline", "human"],
+                        help="MapAnything scale variant for pred-scale modalities "
+                             "(centered=legacy depth-ratio, baseline=images-only camera baselines, "
+                             "human=MA-free self-consistent human-reference triangulation).")
+    parser.add_argument("--scale_smooth",       default="none",
+                        choices=["none", "median"],
+                        help="Temporal denoise of per-frame scale: median=one robust scalar "
+                             "per scene (kills VGGT per-frame jitter).")
     args = parser.parse_args()
     args.modalities = [int(x.strip()) for x in args.modalities.split(",")]
 
@@ -1334,6 +1361,8 @@ def main() -> None:
             gt_split=args.gt_split,
             modalities=args.modalities,
             exclude_cameras=skip_cameras.get(scene_dir.name),
+            scale_mode=args.scale,
+            scale_smooth=args.scale_smooth,
         )
         if result is not None:
             all_results.append(result)
@@ -1367,7 +1396,8 @@ def main() -> None:
         6: "M6 GT-transl       ",
         7: "M7 GT-depth        ",
         8: "M8 sapiens-DLT     ",
-        9: "M9 gender-blind    ",
+        9: "M9 fully-neutral   ",
+        10: "M10 neutral-pred   ",
     }
     modalities_run = sorted(args.modalities)
     col_w = 20

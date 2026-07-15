@@ -31,7 +31,9 @@ pixi run python evaluation/evaluate_on_rich_test.py \
     --device            cuda \
     --gt_split          test \
     --max_scenes        52 \
-    --modalities        9
+    --modalities        "${MOD:-9}" \
+    --scale             "${SCALE:-centered}" \
+    --scale_smooth      "${SCALE_SMOOTH:-none}"
 
 echo ""
 echo "Done: $(date)"
