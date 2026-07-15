@@ -78,12 +78,23 @@ def extract_frame(s3, src_path: str, size: int, frame_idx: int) -> bytes | None:
         container = av.open(f)
         video = container.streams.video[0]
         fps = float(video.average_rate)
-        target_us = int(frame_idx / fps * 1_000_000)
-        container.seek(target_us)
-        img = None
+        # Seek to the nearest keyframe at/before the target, then decode FORWARD to
+        # the exact frame. av.seek() lands on a keyframe; taking the first decoded
+        # frame returns that keyframe (up to a GOP early), NOT frame_idx — a silent
+        # temporal error that puts a moving subject up to ~0.5 m from ground truth
+        # (frame_aligned_videos share keyframes, so every camera pulls the same
+        # wrong instant). Decode until the frame whose pts reaches the target,
+        # keeping the last frame <= target as an EOF fallback.
+        target_pts = int(round(frame_idx / fps / video.time_base))
+        container.seek(target_pts, stream=video)
+        chosen = None
         for frame in container.decode(video):
-            img = frame.to_ndarray(format="bgr24")
-            break
+            if frame.pts is None:
+                continue
+            chosen = frame
+            if frame.pts >= target_pts:
+                break
+        img = chosen.to_ndarray(format="bgr24") if chosen is not None else None
         container.close()
     except Exception as e:
         print(f"    [ERR] {src_path}: {e}")

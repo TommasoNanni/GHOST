@@ -22,7 +22,14 @@ def get_source_maps(s3):
             Bucket='ego4d-consortium-sharing', Key=key)['Body'].read().decode())
 
     pose_entries = load('egoexo-public/v2/ego_pose_pseudo_gt/manifest.json')
-    uid_to_pose = {e['uid']: e['paths'][0]['source_path'] for e in pose_entries}
+    # Each uid carries BOTH a body and a hand pseudo-GT entry. Keep only the body
+    # one — otherwise the hand entry (last-wins in a dict comprehension) overwrites
+    # it and we store 42 hand keypoints with zero body joints.
+    uid_to_pose = {}
+    for e in pose_entries:
+        for p in e['paths']:
+            if '/body/' in p['source_path']:
+                uid_to_pose[e['uid']] = p['source_path']
 
     ann_entries = load('egoexo-public/v2/annotations/manifest.json')
     uid_to_ann = {}
@@ -66,7 +73,10 @@ def download_gt(manifest_path: str, out_dir: str):
         # --- keypoint GT ---
         kp_path = take_out / 'keypoints_gt.json'
         if not kp_path.exists():
-            src = uid_to_pose.get(uid) or uid_to_ann.get(uid)
+            # Prefer MANUAL annotation over automatic pseudo-GT: all 182 val takes
+            # have a manual body annotation, triangulated from more views (higher
+            # quality) than the automatic 2-view pseudo-GT.
+            src = uid_to_ann.get(uid) or uid_to_pose.get(uid)
             raw = json.loads(fetch_s3(s3, src))
             # keys are frame indices as strings
             frame_key = str(frame_idx)
