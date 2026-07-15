@@ -268,8 +268,14 @@ def visualize_smplx(
         try:
             from configuration import CONFIG
             smplx_model_path = getattr(CONFIG.data, "smplx_model_path", None)
-        except Exception:
-            pass
+        except Exception as exc:
+            import traceback
+            print(f"  WARNING: could not resolve smplx_model_path from CONFIG "
+                  f"({type(exc).__name__}: {exc}) → pass --smplx-model-path explicitly.")
+            traceback.print_exc()
+        if not smplx_model_path:
+            print("  WARNING: CONFIG.data.smplx_model_path is unset/empty → "
+                  "mesh disabled, skeleton fallback. Pass --smplx-model-path.")
 
     video_dir = Path(video_dir)
     frame_dir = frames_dir if frames_dir is not None else video_dir / "frames"
@@ -334,7 +340,7 @@ def visualize_smplx(
             with open(json_path) as f:
                 labels: dict = json.load(f).get("labels", {})
 
-            frame_idx = int(fi_str.split("_")[0])
+            frame_idx = int(fi_str.split("_")[-1])   # handles "001114" and "frame_001114"
 
             # Load per-frame mask
             mask_key = json_path.stem + ".npy"

@@ -1,26 +1,25 @@
-"""Visualise re-identified segmentation tracks as an annotated mp4.
+"""Visualise re-identified person tracks as an annotated mp4.
 
-Reads all required data from a single video output directory:
-  - mask_data.npz     per-frame uint16 masks (pixel value = canonical person ID)
-  - json_data/        per-frame bbox + label metadata
-  - body_data/
-      reid_id_mapping.json   raw SAM2 id → canonical id (written by BodyParameterEstimator)
+Boxes and IDs are read **directly from ``body_data/person_<id>.npz``** — the
+canonical, post-reid tracks that the evaluation consumes — NOT from
+``json_data/`` or ``mask_data.npz``.
 
-Original frames are read from the frames_dir argument (co-located with the
-source data at data/<scene>/<video_id>/frames/).  Pass ``frames_dir`` explicitly;
-if omitted the function falls back to ``video_dir/frames/`` for backward
-compatibility.
+Why: ``json_data``/``mask_data`` are remapped after reid with a single *global*
+id→id map, while ``body_data`` is reassigned *per-frame* by the appearance reid.
+Around reid transitions (crossings, gap-severs) these two granularities cannot
+agree, so ``json``/``mask`` ids can point to a different person than
+``person_<id>.npz`` for a handful of frames.  Drawing straight from
+``person_<id>.npz`` guarantees the label in the video is the same identity the
+eval uses — coherent by construction — so the video is safe to read off for
+manual cross-view reid.
 
-Renders one mp4 with:
-  - a coloured translucent mask per person
-  - a bounding box and ID label per person
-  - for re-identified persons: the original SAM2 ID(s) that were merged
-    are shown in the label, e.g. "P1  [SAM2: 7, 12]"
+Each ``person_<id>.npz`` stores ``frame_indices`` and ``bbox`` (the original
+detection bbox, passed through from segmentation); we draw one coloured box +
+``P<id>`` label per person per frame.  If ``reid_id_mapping.json`` is present,
+the merged SAM2 ids are appended to the label, e.g. ``P1 [SAM2: 7, 12]``.
 """
 import argparse
-import io
 import json
-import zipfile
 from pathlib import Path
 
 import cv2
@@ -50,20 +49,21 @@ def visualize_reid(
     fps: int = 30,
     frames_dir: Path | None = None,
 ) -> Path:
-    """Render an mp4 showing re-identified persons with coloured masks and labels.
+    """Render an mp4 of the canonical person tracks (boxes + id labels).
 
     Parameters
     ----------
     video_dir : Path
-        Root output directory for one video, as produced by PersonSegmenter +
-        BodyParameterEstimator.  Must contain mask_data.npz, json_data/, and
-        body_data/.
+        Root output directory for one video.  Must contain ``body_data/`` with
+        ``person_<id>.npz`` files.
     fps : int
         Frame rate for the output mp4.
     frames_dir : Path | None
-        Directory containing the extracted JPEG frames.  Should point to the
-        canonical co-located path (e.g. ``data/<scene>/<video_id>/frames/``).
-        Falls back to ``video_dir/frames/`` when not provided.
+        Directory containing the extracted frames (e.g.
+        ``data/<scene>/<video_id>/frames/``).  Falls back to
+        ``video_dir/frames/`` when not provided.  Frame files must be named by
+        their frame index (e.g. ``00042.jpg``) so they line up with the
+        ``frame_indices`` stored in ``person_<id>.npz``.
 
     Returns
     -------
@@ -71,140 +71,89 @@ def visualize_reid(
         Path to the written mp4 file.
     """
     frame_dir = frames_dir if frames_dir is not None else video_dir / "frames"
-    npz_path  = video_dir / "mask_data.npz"
-    json_dir  = video_dir / "json_data"
     body_dir  = video_dir / "body_data"
 
-    # ── Load re-ID mapping ────────────────────────────────────────────────────
-    # reid_map : raw SAM2 id → canonical id
-    # merged_from : canonical id → [raw SAM2 ids that were merged into it]
-    reid_map: dict[int, int] = {}
-    merged_from: dict[int, list[int]] = {}
+    # ── Load canonical per-person tracks: {pid: {frame_idx: (x1,y1,x2,y2)}} ──
+    tracks: dict[int, dict[int, tuple[int, int, int, int]]] = {}
+    for npz_path in sorted(body_dir.glob("person_*.npz")):
+        try:
+            pid = int(npz_path.stem.split("_")[1])
+        except (IndexError, ValueError):
+            continue
+        with np.load(npz_path) as d:
+            if "frame_indices" not in d.files or "bbox" not in d.files:
+                continue
+            fi = d["frame_indices"]
+            bb = d["bbox"]
+        tracks[pid] = {
+            int(f): tuple(int(round(float(v))) for v in bb[i])
+            for i, f in enumerate(fi)
+        }
+    if not tracks:
+        raise FileNotFoundError(
+            f"No person_*.npz with 'bbox' found in {body_dir}"
+        )
 
+    # Optional: SAM2 ids merged into each canonical id, for the label text.
+    merged_from: dict[int, list[int]] = {}
     for map_filename in ("reid_id_mapping.json", "cross_view_id_mapping.json"):
         map_path = body_dir / map_filename
         if map_path.exists():
             with open(map_path) as f:
                 for k, v in json.load(f).items():
-                    reid_map[int(k)] = int(v)
-    if not reid_map:
-        print(f"  No reid_id_mapping.json found in {body_dir} — rendering without re-ID labels")
-    for raw_id, canon_id in reid_map.items():
-        merged_from.setdefault(canon_id, []).append(raw_id)
+                    merged_from.setdefault(int(v), []).append(int(k))
 
-    # ── Collect sorted frame list ─────────────────────────────────────────────
-    json_files = sorted(json_dir.glob("*.json"))
-    if not json_files:
-        raise FileNotFoundError(f"No JSON metadata files found in {json_dir}")
-
-    if not npz_path.exists():
-        raise FileNotFoundError(f"mask_data.npz not found at {npz_path}")
-
-    # ── Determine output video dimensions from the first readable frame ───────
+    # ── Frame list + dimensions ────────────────────────────────────────────
     _FRAME_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
-
-    def _find_frame(fi_str: str) -> Path | None:
-        for ext in _FRAME_EXTS:
-            p = frame_dir / f"{fi_str}{ext}"
-            if p.exists():
-                return p
-        return None
-
-    H, W = 0, 0
-    for jf in json_files:
-        fi_str = jf.stem.replace("mask_", "")
-        p = _find_frame(fi_str)
-        if p is not None:
-            sample = cv2.imread(str(p))
-            if sample is not None:
-                H, W = sample.shape[:2]
-                break
-    if H == 0:
+    frame_files = sorted(
+        p for p in frame_dir.iterdir() if p.suffix.lower() in _FRAME_EXTS
+    )
+    if not frame_files:
         raise FileNotFoundError(f"No readable frames found in {frame_dir}")
+    sample = cv2.imread(str(frame_files[0]))
+    if sample is None:
+        raise FileNotFoundError(f"Could not read frame {frame_files[0]}")
+    H, W = sample.shape[:2]
 
     out_path = video_dir / f"{video_dir.name}_segmentation_reid.mp4"
     writer = cv2.VideoWriter(
-        str(out_path),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        float(fps),
-        (W, H),
+        str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), float(fps), (W, H)
     )
 
-    with zipfile.ZipFile(str(npz_path), "r") as zf:
-        npz_keys = set(zf.namelist())
+    for frame_path in tqdm(frame_files, desc=f"Rendering {video_dir.name}", leave=False):
+        try:
+            frame_idx = int(frame_path.stem)
+        except ValueError:
+            continue
+        frame = cv2.imread(str(frame_path))
+        if frame is None:
+            continue
 
-        for json_path in tqdm(json_files, desc=f"Rendering {video_dir.name}", leave=False):
-            fi_str = json_path.stem.replace("mask_", "")
-            frame_path = _find_frame(fi_str)
-            if frame_path is None:
+        for pid, per_frame in tracks.items():
+            bbox = per_frame.get(frame_idx)
+            if bbox is None:
                 continue
+            x1, y1, x2, y2 = bbox
+            color = _color(pid)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
-            frame = cv2.imread(str(frame_path))
-            if frame is None:
-                continue
+            label = f"P{pid}"
+            merged = merged_from.get(pid)
+            if merged:
+                label += f"  [SAM2: {', '.join(str(m) for m in merged)}]"
 
-            with open(json_path) as f:
-                labels: dict = json.load(f).get("labels", {})
+            font, font_scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1
+            (tw, th), _ = cv2.getTextSize(label, font, font_scale, thickness)
+            ty = max(y1 - 6, th + 4)
+            cv2.rectangle(
+                frame, (x1, ty - th - 4), (x1 + tw + 6, ty + 2), color, cv2.FILLED
+            )
+            cv2.putText(
+                frame, label, (x1 + 3, ty - 1),
+                font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA,
+            )
 
-            # Load the per-frame mask (already remapped to canonical IDs).
-            mask_key = json_path.stem + ".npy"    # e.g. "mask_000042.npy"
-            mask_img: np.ndarray | None = None
-            if mask_key in npz_keys:
-                with zf.open(mask_key) as mf:
-                    mask_img = np.load(io.BytesIO(mf.read()))
-
-            # 1. Coloured mask overlay (drawn before boxes so boxes stay sharp).
-            if mask_img is not None:
-                overlay = frame.copy()
-                for str_id in labels:
-                    canon_id = int(str_id)
-                    person_mask = mask_img == canon_id
-                    if not person_mask.any():
-                        continue
-                    # Skip degenerate masks (>80% of frame) — render bbox
-                    # only so the issue is visible for debugging.
-                    if int(person_mask.sum()) > 0.80 * H * W:
-                        continue
-                    color = np.array(_color(canon_id), dtype=np.float32)
-                    overlay[person_mask] = (
-                        0.5 * overlay[person_mask] + 0.5 * color
-                    ).astype(np.uint8)
-                frame = overlay
-
-            # 2. Bounding boxes and ID labels.
-            for str_id, info in labels.items():
-                canon_id = int(str_id)
-                color    = _color(canon_id)
-                x1, y1   = int(info["x1"]), int(info["y1"])
-                x2, y2   = int(info["x2"]), int(info["y2"])
-
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-
-                # Label: canonical ID + any SAM2 IDs that were merged into it.
-                label = f"P{canon_id}"
-                merged = merged_from.get(canon_id)
-                if merged:
-                    label += f"  [SAM2: {', '.join(str(m) for m in merged)}]"
-
-                # Solid background chip for legibility.
-                font       = cv2.FONT_HERSHEY_SIMPLEX
-                font_scale = 0.55
-                thickness  = 1
-                (tw, th), _ = cv2.getTextSize(label, font, font_scale, thickness)
-                ty = max(y1 - 6, th + 4)
-                cv2.rectangle(
-                    frame,
-                    (x1, ty - th - 4), (x1 + tw + 6, ty + 2),
-                    color, cv2.FILLED,
-                )
-                cv2.putText(
-                    frame, label,
-                    (x1 + 3, ty - 1),
-                    font, font_scale,
-                    (255, 255, 255), thickness, cv2.LINE_AA,
-                )
-
-            writer.write(frame)
+        writer.write(frame)
 
     writer.release()
     print(f"  Re-ID visualisation saved: {out_path}")
@@ -213,12 +162,12 @@ def visualize_reid(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Visualise re-identified segmentation tracks as an mp4."
+        description="Visualise re-identified person tracks as an mp4 (drawn from body_data)."
     )
     parser.add_argument(
         "--video_dir",
         type=Path,
-        help="Root output directory for one video (contains frames/, mask_data.npz, etc.)",
+        help="Root output directory for one video (contains body_data/, frames/, ...)",
     )
     parser.add_argument(
         "--fps", type=int, default=30, help="Output video frame rate (default: 30)"
