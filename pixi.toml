@@ -47,7 +47,7 @@ mhr = { path = "MHR", editable = true }
 sam-3d-body = { path = "sam-3d-body", editable = true }
 sam3 = {path = "sam3", editable = true}
 detectron2 = { git = "https://github.com/facebookresearch/detectron2.git", rev = "a1ce2f9" }
-moge = { git = "https://github.com/microsoft/MoGe.git" }
+moge = { git = "https://github.com/microsoft/MoGe.git", rev = "07444410f1e33f402353b99d6ccd26bd31e469e8" }
 transformers = ">=4.0"
 addict = "*"
 yapf = "*"
