@@ -808,7 +808,7 @@ class CrossViewReidentifierV7:
         if len(known_pairs) >= 1 and Kc >= 2:
             import torch
             from synchronize_videos.synchronizer import Synchronizer
-            sync = Synchronizer(method="dtw", device="cpu", verbose=False)
+            sync = Synchronizer(device="cpu", verbose=False)
             O = torch.zeros(Kc, Kc)
             Wt = torch.zeros(Kc, Kc)
             vidx = {v: i for i, v in enumerate(active_vids)}

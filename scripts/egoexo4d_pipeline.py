@@ -254,7 +254,7 @@ def process_scene(
                 cam_ids = list(cam_data.keys())
                 print(f"  Cameras: {cam_ids}")
                 print(f"  Common persons: {pids}")
-                sync = Synchronizer(method="cross_corr", device=SYNC_DEVICE, min_overlap=SYNC_MIN_OVERLAP)
+                sync = Synchronizer(device=SYNC_DEVICE, min_overlap=SYNC_MIN_OVERLAP)
                 rng  = np.random.default_rng(SYNC_SEED)
                 results = []
                 for trial in range(SYNC_N_TRIALS):

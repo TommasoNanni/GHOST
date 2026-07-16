@@ -456,7 +456,7 @@ if __name__ == "__main__":
 
     logger.info(f"Found {len(scene_dirs)} scene(s): {[d.name for d in scene_dirs]}")
 
-    sync = Synchronizer(method="cross_corr", use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
+    sync = Synchronizer(use_acceleration_weights=False, device=DEVICE, min_overlap=100, max_shift=MAX_SHIFT, verbose=VERBOSE)
     rng  = np.random.default_rng(SEED)
 
     scene_summaries = []
