@@ -1,5 +1,5 @@
 """
-Unit tests for LossAccumulator in fusion/trainer.py
+Unit tests for LossAccumulator in fusion/trainer_v2.py
 
 No GPU, no model loading, no file I/O.
 """
@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import pytest
 
-from fusion.trainer import LossAccumulator
+from fusion.trainer_v2 import LossAccumulator
 
 
 class TestLossAccumulator:
