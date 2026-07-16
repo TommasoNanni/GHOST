@@ -269,7 +269,7 @@ class FusionDatapoint(Dataset, ABC):
         """Return estimated extrinsics as (3, 4), or None if unavailable.
 
         Camera 0 (reference) returns identity. Other cameras use the
-        single Kabsch-estimated (R, t) stored by the alignment-loading step.
+        single estimated (R, t) stored by the alignment-loading step.
         """
         if cam_calib is None:
             return None
@@ -1445,13 +1445,13 @@ class RICHFusionDatapoint(FusionDatapoint):
         cam_calib: dict | None = None,
         frame_index: int = 0,
     ) -> np.ndarray:
-        """Use the Kabsch-estimated cam-0→cam-i extrinsic for inputs["camera"].
+        """Use the estimated cam-0→cam-i extrinsic for inputs["camera"].
 
         Position 7 carries the GT focal length from calibration instead of the
         predicted focal — it is used as fixed context, not predicted by the network.
 
-        Falls back to identity rotation + body_transl_cam if no Kabsch extrinsics
-        are available for this camera/frame.
+        Falls back to identity rotation + body_transl_cam if no estimated
+        extrinsics are available for this camera/frame.
         """
         intr = cam_calib.get("intrinsics") if cam_calib else None
         focal_gt = float(intr[0, 0]) if intr is not None else float(focal_length)
@@ -1693,273 +1693,6 @@ class RICHFusionDatapoint(FusionDatapoint):
 
 
 # ======================================================================
-# DNA-Rendering subclass (ghost pipeline output + SMC calibration, no GT)
-# ======================================================================
-
-class DNARenderingFusionDatapoint(FusionDatapoint):
-    """Loads body data from ghost pipeline + cameras from DNA-Rendering annots.
-
-    Expected ghost pipeline output::
-
-        scene_dir/
-            <cam_id>/
-                body_data/
-                    person_1.npz
-                    ...
-            camera_alignment.npz    (optional Kabsch alignment)
-
-    Calibration is read from a ``<scene>_annots.smc`` HDF5 file using
-    :func:`~data.video_dataset.dna_load_calibration`.  No GT body parameters
-    are loaded yet — targets mirror predictions (self-supervised mode).
-
-    Constructor kwargs
-    ------------------
-    annots_path : str | Path
-        Path to the ``<scene>_annots.smc`` annotation file.  A warning is
-        emitted if absent; camera tokens fall back to ``pred_cam_t``.
-    """
-
-    def convert_pose(
-        self,
-        body_pose_params: np.ndarray,
-        hand_pose_params: np.ndarray | None,
-        global_rot: np.ndarray,
-    ) -> np.ndarray:
-        """Convert SMPL-X axis-angle params → [J, 6] 6D rotation.
-
-        Identical layout to :class:`RICHFusionDatapoint`.
-        """
-        J = self.num_joints
-        out = np.zeros((J, 6), dtype=np.float32)
-        if body_pose_params is None or global_rot is None:
-            return out
-        try:
-            from scipy.spatial.transform import Rotation as SciR
-        except Exception:
-            return out
-
-        go = np.asarray(global_rot, dtype=np.float32).reshape(1, 3)
-        bp = np.asarray(body_pose_params, dtype=np.float32).reshape(-1, 3)
-        parts = [go, bp]
-        if hand_pose_params is not None:
-            hp = np.asarray(hand_pose_params, dtype=np.float32).reshape(-1, 3)
-            parts.append(hp)
-        aa = np.concatenate(parts, axis=0)
-        if aa.shape[0] < J:
-            aa = np.concatenate(
-                [aa, np.zeros((J - aa.shape[0], 3), dtype=np.float32)], axis=0
-            )
-        try:
-            mats = SciR.from_rotvec(aa).as_matrix()
-        except Exception:
-            return out
-        sixd = np.concatenate([mats[:, 0, :], mats[:, 1, :]], axis=1)
-        out[:J] = sixd[:J]
-        return out
-
-    def load_body_data(self, **kwargs: Any) -> None:
-        """Load ghost pipeline NPZ predictions (same layout as RICH/EgoExo)."""
-        self._cam_dirs = sorted(
-            d
-            for d in self.scene_dir.iterdir()
-            if d.is_dir() and (d / "body_data").is_dir()
-        )
-        for cam_dir in self._cam_dirs:
-            body_dir = cam_dir / "body_data"
-            persons: dict[int, dict[str, np.ndarray]] = {}
-            for npz_path in sorted(body_dir.glob("person_*.npz")):
-                pid = int(npz_path.stem.split("_")[1])
-                data = dict(np.load(str(npz_path), allow_pickle=False))
-                persons[pid] = {k: data[k] for k in self._NPZ_FIELDS if k in data}
-            self._raw.append(persons)
-            logger.debug(f"  {cam_dir.name}: loaded {len(persons)} person(s)")
-
-    def load_cameras(self, **kwargs: Any) -> None:
-        """Load GT calibration from ``_annots.smc`` and optional Kabsch estimates.
-
-        Steps:
-        1. Parse R/T/K for each camera from the SMC annotation file.
-        2. Drop cameras with no calibration from ``_cam_dirs`` / ``_raw``.
-        3. Re-express GT cameras relative to cam-0 (same convention as RICH).
-        4. Attach Kabsch-estimated extrinsics from ``camera_alignment.npz`` as
-           ``estimated_extrinsics`` so :meth:`convert_camera` can use them.
-        """
-        from scipy.spatial.transform import Rotation as SciR
-        from data.video_dataset import dna_load_calibration
-
-        annots_path = kwargs.get("annots_path")
-        raw_calib: dict[str, dict[str, np.ndarray]] = {}
-        if annots_path is not None and Path(annots_path).exists():
-            raw_calib = dna_load_calibration(Path(annots_path))
-        else:
-            if annots_path is not None:
-                logger.warning(
-                    f"Annotation file not found: {annots_path} — "
-                    "cameras will fall back to pred_cam_t"
-                )
-
-        self._cameras = []
-        self._gt_camera_vecs: list[np.ndarray] = []
-        valid_indices: list[int] = []
-
-        # STEP 1 — match ghost camera dirs to DNA calibration.
-        # Primary: exact name match (ghost dir name == HDF5 camera key).
-        # Fallback: positional match by sorted index when no name matches at
-        #           all (e.g. ghost dirs named "cam_00" but HDF5 keys are "0").
-        calib_ids_sorted = sorted(raw_calib.keys())
-        any_name_matched = any(cd.name in raw_calib for cd in self._cam_dirs)
-        if raw_calib and not any_name_matched:
-            logger.warning(
-                f"No ghost camera dir name matched any DNA calibration key "
-                f"(ghost: {[cd.name for cd in self._cam_dirs]}, "
-                f"DNA keys: {calib_ids_sorted}). "
-                f"Falling back to positional matching."
-            )
-
-        for i, cam_dir in enumerate(self._cam_dirs):
-            # Try exact name match first.
-            calib = raw_calib.get(cam_dir.name)
-            matched_by = "name"
-            # Positional fallback: use the i-th sorted calibration entry.
-            if calib is None and not any_name_matched and i < len(calib_ids_sorted):
-                calib = raw_calib[calib_ids_sorted[i]]
-                matched_by = f"position (DNA key '{calib_ids_sorted[i]}')"
-
-            if calib is not None:
-                self._cameras.append(calib)
-                valid_indices.append(i)
-                ext = calib["extrinsics"]  # (3, 4) world → camera
-                q_xyzw = SciR.from_matrix(ext[:3, :3].astype(np.float64)).as_quat()
-                vec = np.zeros(8, dtype=np.float32)
-                vec[:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)  # pytorch3d [qw,qx,qy,qz]
-                vec[4:7] = ext[:3, 3]
-                vec[7] = float(calib["K"][0, 0])  # fx
-                self._gt_camera_vecs.append(vec)
-                logger.debug(f"  {cam_dir.name}: loaded DNA calibration by {matched_by}")
-            else:
-                logger.warning(
-                    f"  No DNA calibration found for camera '{cam_dir.name}' — excluding"
-                )
-
-        if len(valid_indices) < len(self._cam_dirs):
-            self._cam_dirs = [self._cam_dirs[i] for i in valid_indices]
-            self._raw      = [self._raw[i]      for i in valid_indices]
-
-        # STEP 2 — re-express GT cameras relative to cam-0.
-        if self._cameras:
-            ext0 = self._cameras[0]["extrinsics"]
-            R0 = ext0[:3, :3].astype(np.float64)
-            t0 = ext0[:3, 3].astype(np.float64)
-            for i, calib in enumerate(self._cameras):
-                if i == 0:
-                    self._gt_camera_vecs[0][:4] = np.array([1., 0., 0., 0.], dtype=np.float32)
-                    self._gt_camera_vecs[0][4:7] = np.zeros(3, dtype=np.float32)
-                    continue
-                ext_i = calib["extrinsics"]
-                R_rel = ext_i[:3, :3].astype(np.float64) @ R0.T
-                t_rel = ext_i[:3, 3].astype(np.float64) - R_rel @ t0
-                q_xyzw = SciR.from_matrix(R_rel).as_quat()
-                self._gt_camera_vecs[i][:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)
-                self._gt_camera_vecs[i][4:7] = t_rel.astype(np.float32)
-
-        # STEP 3 — optional Kabsch-estimated extrinsics for predicted camera token.
-        align_path = self.scene_dir / "camera_alignment.npz"
-        if align_path.exists():
-            from preprocessing.camera_alignment import CameraAlignment
-            alignment = CameraAlignment.load(align_path)
-            cam0_name = self._cam_dirs[0].name if self._cam_dirs else None
-            for i, cam_dir in enumerate(self._cam_dirs):
-                cam_i_name = cam_dir.name
-                if i == 0:
-                    self._cameras[i]["est_ext_is_reference"] = True
-                elif (cam0_name, cam_i_name) in alignment:
-                    R_arr, t_arr = alignment[(cam0_name, cam_i_name)]
-                    self._cameras[i]["est_ext_R"] = R_arr
-                    self._cameras[i]["est_ext_t"] = t_arr
-                elif (cam_i_name, cam0_name) in alignment:
-                    R_arr, t_arr = alignment[(cam_i_name, cam0_name)]
-                    R_inv = R_arr.T
-                    t_inv = -R_inv @ t_arr
-                    self._cameras[i]["est_ext_R"] = R_inv
-                    self._cameras[i]["est_ext_t"] = t_inv
-                else:
-                    logger.warning(f"No Kabsch alignment for {cam_i_name} ↔ {cam0_name}")
-        else:
-            logger.warning(
-                f"camera_alignment.npz not found in {self.scene_dir} — "
-                "input camera tokens will fall back to pred_cam_t"
-            )
-
-    def load_ground_truth(self, **kwargs: Any) -> None:
-        """No GT body annotations available for DNA-Rendering yet.
-
-        Targets mirror predictions (self-supervised mode).
-        Override this method once GT annotations become available.
-        """
-        self._gt = [{} for _ in self._cam_dirs]
-
-    def convert_camera(
-        self,
-        body_transl_cam: np.ndarray,
-        focal_length: float,
-        global_rot: np.ndarray,
-        cam_calib: dict | None = None,
-        frame_index: int = 0,
-    ) -> np.ndarray:
-        """Build the ``[8]`` camera token: ``[qw, qx, qy, qz, tx, ty, tz, fx]``.
-
-        Uses Kabsch-estimated extrinsics when available; falls back to
-        identity rotation + pred_cam_t.
-        """
-        focal_gt = (
-            float(cam_calib["K"][0, 0])
-            if cam_calib is not None and "K" in cam_calib
-            else float(focal_length)
-        )
-        est = self._get_est_ext(cam_calib)
-        if est is not None:
-            from scipy.spatial.transform import Rotation as SciR
-            q_xyzw = SciR.from_matrix(est[:3, :3]).as_quat()
-            cam = np.zeros(8, dtype=np.float32)
-            cam[:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)
-            cam[4:7] = est[:3, 3]
-            cam[7] = focal_gt
-            return cam
-
-        cam = np.zeros(8, dtype=np.float32)
-        cam[0] = 1.0
-        cam[4:7] = body_transl_cam
-        cam[7] = focal_gt
-        return cam
-
-    def _fill_static_gt_cameras(self, gt_camera: np.ndarray) -> None:
-        for k, vec in enumerate(self._gt_camera_vecs):
-            if k < gt_camera.shape[0]:
-                gt_camera[k] = vec
-
-    def build_gt_targets(
-        self,
-        cam_idx: int,
-        person_slot: int,
-        pid: int,
-        local_idx: int,
-        t: int,
-        pose_out: np.ndarray,
-        shape_out: np.ndarray,
-        camera_out: np.ndarray,
-        kp3d_out: np.ndarray,
-        transl_out: np.ndarray,
-    ) -> None:
-        """Fill the GT camera slot from calibration (other GT fields are zero).
-
-        The camera extrinsic from the annotation file is constant per camera,
-        so we write it unconditionally on every call for this (frame, camera).
-        """
-        if cam_idx < len(self._gt_camera_vecs) and camera_out is not None:
-            camera_out[:] = self._gt_camera_vecs[cam_idx]
-
-
-# ======================================================================
 # EgoHumans subclass
 # ======================================================================
 
@@ -2163,29 +1896,6 @@ class EgoHumansFusionDatapoint(FusionDatapoint):
                 q_xyzw = SciR.from_matrix(R_rel).as_quat()
                 self._gt_camera_vecs[i][:4] = q_xyzw[[3, 0, 1, 2]].astype(np.float32)
                 self._gt_camera_vecs[i][4:7] = t_rel.astype(np.float32)
-
-        # Attach Kabsch-estimated extrinsics if available (same as RICH/DNA).
-        align_path = self.scene_dir / "camera_alignment.npz"
-        if align_path.exists():
-            from preprocessing.camera_alignment import CameraAlignment
-            alignment = CameraAlignment.load(align_path)
-            cam0_name = self._cam_dirs[0].name if self._cam_dirs else None
-            for i, cam_dir in enumerate(self._cam_dirs):
-                cam_name = cam_dir.name
-                if i == 0:
-                    self._cameras[i]["est_ext_is_reference"] = True
-                elif (cam0_name, cam_name) in alignment:
-                    R_arr, t_arr = alignment[(cam0_name, cam_name)]
-                    self._cameras[i]["est_ext_R"] = R_arr
-                    self._cameras[i]["est_ext_t"] = t_arr
-                elif (cam_name, cam0_name) in alignment:
-                    R_arr, t_arr = alignment[(cam_name, cam0_name)]
-                    R_inv = R_arr.T
-                    t_inv = -R_inv @ t_arr
-                    self._cameras[i]["est_ext_R"] = R_inv
-                    self._cameras[i]["est_ext_t"] = t_inv
-                else:
-                    logger.warning(f"No alignment for {cam_name} relative to {cam0_name}")
 
     def load_ground_truth(self, **kwargs: Any) -> None:
         """Load per-frame GT SMPL params and 3D poses from processed_data/.
@@ -2533,7 +2243,7 @@ class EgoHumansFusionDatapoint(FusionDatapoint):
         cam_calib: dict | None = None,
         frame_index: int = 0,
     ) -> np.ndarray:
-        """Build [8] camera token using Kabsch-estimated extrinsics when available."""
+        """Build [8] camera token using estimated extrinsics when available."""
         intr = cam_calib.get("intrinsics") if cam_calib else None
         focal_gt = float(intr[0, 0]) if intr is not None else float(focal_length)
         est = self._get_est_ext(cam_calib)
@@ -2833,7 +2543,6 @@ def build_fusion_dataloader(
     _REGISTRY: dict[str, type[FusionDatapoint]] = {
         "egoexo4d_gt": EgoExo4DGTFusionDatapoint,
         "rich": RICHFusionDatapoint,
-        "dna": DNARenderingFusionDatapoint,
     }
     cls = _REGISTRY.get(dataset_type.lower())
     if cls is None:

@@ -2,8 +2,8 @@
 
 After the automated pipeline runs, person IDs may be inconsistent across
 camera views. This script lets you specify the correct global assignment
-manually in a YAML file, then applies it to every scene and redoes the
-Kabsch camera alignment so the data is ready for fusion training.
+manually in a YAML file, then applies it to every scene so the data is
+ready for fusion training.
 
 Workflow
 --------
@@ -16,7 +16,7 @@ Workflow
 2.  Edit reid_assignments.yaml — fill in the correct {old_id: new_id} entries
     for cameras where the automated ReID was wrong.
 
-3.  Apply all remappings and redo Kabsch for every listed scene:
+3.  Apply all remappings for every listed scene:
 
         pixi run python -m scripts.manual_reid \\
             --scenes-root preprocessing_outputs/rich11_segmentation_test \\
@@ -57,8 +57,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import tyro
 import yaml
-
-from preprocessing.camera_alignment import CameraAlignment
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -238,28 +236,6 @@ def _apply_remap_for_camera(cam_dir: Path, remap: dict[int, int], dry_run: bool)
     _apply_json_remap(cam_dir, remap, dry_run)
 
 
-# ── Kabsch ─────────────────────────────────────────────────────────────────────
-
-def _redo_kabsch(scene_dir: Path, dry_run: bool) -> None:
-    video_dirs = {
-        d.name: d for d in _cam_dirs(scene_dir)
-        if (d / "body_data").exists()
-    }
-    if len(video_dirs) < 2:
-        logger.warning(f"  {scene_dir.name}: fewer than 2 cameras with body_data — skipping Kabsch")
-        return
-
-    aligner = CameraAlignment()
-    alignment = aligner.estimate(video_dirs)
-    if not alignment:
-        logger.warning(f"  {scene_dir.name}: Kabsch produced no pairs")
-        return
-
-    logger.info(f"  {scene_dir.name}: {len(alignment)} pair(s) estimated")
-    if not dry_run:
-        CameraAlignment.save(alignment, scene_dir)
-
-
 # ── main ───────────────────────────────────────────────────────────────────────
 
 def main(
@@ -308,7 +284,8 @@ def main(
             parsed[scene_name] = scene_remaps
 
     if not parsed:
-        logger.info("No non-identity remappings found — only redoing Kabsch for all scenes.")
+        logger.info("No non-identity remappings found — nothing to do.")
+        return
 
     # ── validate all scenes before touching anything ───────────────────────────
     all_errors: list[str] = []
@@ -332,27 +309,15 @@ def main(
         logger.info("[DRY RUN] no files will be modified\n")
 
     # ── apply remaps scene by scene ────────────────────────────────────────────
-    scenes_to_process = sorted(
-        set(parsed.keys()) | {d.name for d in _scene_dirs(scenes_root)}
-    ) if not parsed else sorted(parsed.keys())
-
-    # If assignments only cover some scenes, also redo Kabsch on the rest
-    all_scene_dirs = {d.name: d for d in _scene_dirs(scenes_root)}
+    scenes_to_process = sorted(parsed.keys())
 
     for scene_name in scenes_to_process:
         scene_dir = scenes_root / scene_name
         if not scene_dir.exists():
             continue
-        cam_remaps = parsed.get(scene_name, {})
-        if cam_remaps:
-            logger.info(f"\n[{scene_name}] applying remaps …")
-            for cam_name, remap in cam_remaps.items():
-                _apply_remap_for_camera(scene_dir / cam_name, remap, dry_run)
-        else:
-            logger.info(f"\n[{scene_name}] no remaps — redoing Kabsch only")
-
-        logger.info(f"[{scene_name}] redoing Kabsch …")
-        _redo_kabsch(scene_dir, dry_run)
+        logger.info(f"\n[{scene_name}] applying remaps …")
+        for cam_name, remap in parsed[scene_name].items():
+            _apply_remap_for_camera(scene_dir / cam_name, remap, dry_run)
 
     action = "would update" if dry_run else "updated"
     logger.info(f"\nDone — {action} {len(scenes_to_process)} scene(s).")

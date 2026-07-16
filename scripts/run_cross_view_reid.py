@@ -1,6 +1,6 @@
 """
 Run cross-view person re-identification on pre-computed body_data, followed by
-temporal synchronisation, camera alignment, and geometric post-ReID.
+temporal synchronisation and geometric post-ReID.
 
 Copies body_data/ from SOURCE_DIR into OUTPUT_DIR at the start of each run,
 then runs CrossVideoReidentifier on OUTPUT_DIR (in-place). SOURCE_DIR is never
@@ -10,10 +10,8 @@ mask_data.npz and json_data/ are also copied since match_across_views rewrites t
 """
 import json
 import logging
-import re
 import shutil
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,7 +24,6 @@ sys.path.append(str(Path(__file__).parent.parent / 'MHR' / 'tools' / 'mhr_smpl_c
 
 from configuration import CONFIG
 from preprocessing.parameters_extraction import CrossVideoReidentifier
-from preprocessing.camera_alignment import CameraAlignment
 from preprocessing.geometric_reidentifier import GeometricReidentifier
 from synchronize_videos.synchronizer import Synchronizer
 from utilities.body_data import load_person_smplx_pose
@@ -121,64 +118,6 @@ def _apply_shifts(
     return joints_list, confs_list
 
 
-def _load_gt_cameras_cam0(
-    scene_id: str,
-    cam_ids: list[str],
-    rich_data_root: str,
-) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Load RICH GT cameras expressed in cam-0 frame.
-
-    Parses scan_calibration/{location}/calibration/{cam_num:03d}.xml for each
-    camera, extracts the world-to-camera extrinsic [R|t] (3x4), then computes
-    the cam-0 → cam-i relative transform:
-        R_rel = R_i @ R_0^T
-        t_rel = t_i - R_rel @ t_0
-    so that  X_cami = R_rel @ X_cam0 + t_rel.
-
-    Returns {cam_id: (R_rel, t_rel)}.  cam-0 entry has identity R and zero t.
-    """
-    m = re.match(r'^(.+?)_\d{3}_', scene_id)
-    location = m.group(1) if m else scene_id
-    calib_dir = Path(rich_data_root) / "scan_calibration" / location / "calibration"
-
-    extrinsics: dict[str, np.ndarray] = {}
-    for cam_id in cam_ids:
-        num_m = re.search(r"\d+", cam_id)
-        cam_num = int(num_m.group()) if num_m else cam_ids.index(cam_id)
-        xml_path = calib_dir / f"{cam_num:03d}.xml"
-        if not xml_path.exists():
-            logging.warning(f"GT calib: no XML for {cam_id} at {xml_path}")
-            continue
-        tree = ET.parse(str(xml_path))
-        node = tree.getroot().find("CameraMatrix")
-        if node is None:
-            logging.warning(f"GT calib: no CameraMatrix in {xml_path}")
-            continue
-        rows = int(node.findtext("rows", default="3"))
-        cols = int(node.findtext("cols", default="4"))
-        data = list(map(float, node.findtext("data", default="").split()))
-        extrinsics[cam_id] = np.array(data, dtype=np.float64).reshape(rows, cols)
-
-    if not extrinsics:
-        return {}
-    cam0 = cam_ids[0]
-    if cam0 not in extrinsics:
-        logging.warning(f"GT calib: cam-0 ({cam0}) has no extrinsics — cannot relativise")
-        return {}
-
-    R0 = extrinsics[cam0][:3, :3]
-    t0 = extrinsics[cam0][:3, 3]
-
-    result: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    for cam_id, ext in extrinsics.items():
-        R_i = ext[:3, :3]
-        t_i = ext[:3, 3]
-        R_rel = R_i @ R0.T
-        t_rel = t_i - R_rel @ t0
-        result[cam_id] = (R_rel, t_rel)
-    return result
-
-
 def scan_scenes(output_dir: Path) -> list[tuple[str, dict[str, Path]]]:
     """Return (scene_id, {video_id: video_dir}) for every scene that has body_data."""
     scenes = []
@@ -271,7 +210,7 @@ def main() -> None:
         scene_out_dir = OUTPUT_DIR / scene_id
 
         # Remove stale artefacts so reruns are clean.
-        for stale in ("cross_view_reid.json", "temporal_offsets.json", "camera_alignment.npz"):
+        for stale in ("cross_view_reid.json", "temporal_offsets.json"):
             stale_path = scene_out_dir / stale
             if FORCE and stale_path.exists():
                 print(f"  FORCE: removing existing {stale_path.name}")
@@ -294,7 +233,7 @@ def main() -> None:
                 cam_ids = list(cam_data.keys())
                 print(f"  Cameras: {cam_ids}")
                 print(f"  Common persons: {pids}")
-                sync = Synchronizer(method="cross_corr", device=SYNC_DEVICE, min_overlap=SYNC_MIN_OVERLAP)
+                sync = Synchronizer(device=SYNC_DEVICE, min_overlap=SYNC_MIN_OVERLAP)
                 rng  = np.random.default_rng(SYNC_SEED)
                 all_results = []
                 for trial in range(SYNC_N_TRIALS):
@@ -350,52 +289,6 @@ def main() -> None:
                     )
                     print(f"  Within 1fr  {np.mean([r['within_1'] for r in all_results]) * 100:.1f}%")
                     print(f"  Within 2fr  {np.mean([r['within_2'] for r in all_results]) * 100:.1f}%")
-
-        # ── Camera alignment ──────────────────────────────────────────────────
-        print(f"\n--- Camera alignment ---")
-        alignment = CameraAlignment().estimate(
-            video_dirs, min_correspondences=30, scene_dir=scene_out_dir
-        )
-        if alignment:
-            align_path = CameraAlignment.save(alignment, scene_out_dir)
-            print(f"  Estimated {len(alignment)} camera pair(s) → {align_path}")
-            for (vid_a, vid_b), (R, t) in alignment.items():
-                centre = CameraAlignment.camera_center_in_A(R, t)
-                print(
-                    f"  {vid_a} ← {vid_b}: "
-                    f"|t|={np.linalg.norm(t):.3f} m, "
-                    f"cam_B in A={centre.round(3).tolist()}"
-                )
-        else:
-            print("  WARNING: no camera pairs aligned — check cross-view ReID found shared persons")
-
-        # ── Compare estimated cameras against RICH GT ─────────────────────────
-        cam_ids_ordered = list(video_dirs.keys())
-        gt_cameras = _load_gt_cameras_cam0(scene_id, cam_ids_ordered, DATA_ROOT)
-        if gt_cameras and alignment:
-            cam0_name = cam_ids_ordered[0]
-            print(f"\n  Camera estimation vs GT (world = {cam0_name}):")
-            print(f"  {'Camera':<20}  {'RE (deg)':>10}  {'TE (m)':>8}")
-            print(f"  {'-'*20}  {'-'*10}  {'-'*8}")
-            for cam_i_name in cam_ids_ordered[1:]:
-                if cam_i_name not in gt_cameras:
-                    print(f"  {cam_i_name:<20}  {'no GT':>10}")
-                    continue
-                R_gt, t_gt = gt_cameras[cam_i_name]
-                if (cam0_name, cam_i_name) in alignment:
-                    R_est, t_est = alignment[(cam0_name, cam_i_name)]
-                elif (cam_i_name, cam0_name) in alignment:
-                    R, t = alignment[(cam_i_name, cam0_name)]
-                    R_est, t_est = R.T, -R.T @ t
-                else:
-                    print(f"  {cam_i_name:<20}  {'no estimate':>10}")
-                    continue
-                cos_a = np.clip((np.trace(R_gt.T @ R_est) - 1.0) / 2.0, -1.0, 1.0)
-                re_deg = float(np.degrees(np.arccos(cos_a)))
-                te = float(np.linalg.norm(t_gt - t_est))
-                print(f"  {cam_i_name:<20}  {re_deg:>10.2f}  {te:>8.3f}")
-        elif not gt_cameras:
-            print("  (GT camera comparison skipped — calibration XMLs not found)")
 
         # ── Geometric post-ReID ───────────────────────────────────────────────
         print(f"\n--- Geometric post-ReID ---")

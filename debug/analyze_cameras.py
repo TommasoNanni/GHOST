@@ -1,12 +1,7 @@
 """
-Analyze camera quality for a RICH scene:
-
-1. Compare Kabsch-predicted cameras (from camera_alignment.npz, in cam0 frame)
-   against GT cameras (from scan_calibration XMLs, re-expressed in cam0 frame).
-
-2. Analyze SAM3D body estimates per camera:
-   - Translation (pred_cam_t) vs GT body position in camera frame
-   - Global orientation (smplx_global_orient) vs GT orientation in camera frame
+Analyze SAM3D body estimates vs GT for a RICH scene:
+  - Translation (pred_cam_t) vs GT body position in camera frame
+  - Global orientation (smplx_global_orient) vs GT orientation in camera frame
 
 Example call (copy-paste and change --scene):
     pixi run python debug/analyze_cameras.py \\
@@ -55,7 +50,7 @@ def rotvec_to_mat(rv: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Analyze predicted cameras vs GT for a RICH scene.")
+    parser = argparse.ArgumentParser(description="Analyze predicted SAM3D body estimates vs GT for a RICH scene.")
     parser.add_argument("--scene",     required=True, help="Scene name, e.g. BBQ_001_guitar")
     parser.add_argument("--pred_root", required=True, type=Path,
                         help="Parent output directory that contains the scene folder")
@@ -75,67 +70,22 @@ def main() -> None:
     gt_body    = rich_root / "train_body" / scene
 
     # ──────────────────────────────────────────────
-    # 1. Load GT calibration and compute cam0-relative poses
+    # Load GT camera calibration (used to re-express GT body pose per camera)
     # ──────────────────────────────────────────────
-    print("=" * 60)
-    print("PART 1 — PREDICTED vs GT CAMERAS (cam0 frame)")
-    print("=" * 60)
-
     gt_cams = []
     for i in range(num_cams):
         calib = parse_xml(calib_dir / f"{i:03d}.xml")
         gt_cams.append(calib)
-
-    ext0 = gt_cams[0]['extrinsics']   # (3,4) world→cam0
-    R0, t0 = ext0[:3, :3], ext0[:3, 3]
-
-    # GT relative poses in cam0 frame: x_i = R_rel @ x_0 + t_rel
-    gt_rel = []
-    for i, calib in enumerate(gt_cams):
-        ext_i = calib['extrinsics']
-        R_i, t_i = ext_i[:3, :3], ext_i[:3, 3]
-        R_rel = R_i @ R0.T
-        t_rel = t_i - R_rel @ t0
-        gt_rel.append((R_rel, t_rel))
         intr = calib['intrinsics']
         f_gt = float(intr[0, 0]) if intr is not None else float('nan')
         print(f"  cam_{i:02d}  GT focal = {f_gt:.1f} px")
 
     # ──────────────────────────────────────────────
-    # 2. Load predicted poses from camera_alignment.npz
-    # ──────────────────────────────────────────────
-    from preprocessing.camera_alignment import CameraAlignment
-    alignment = CameraAlignment.load(pred_dir / "camera_alignment.npz")
-
-    print("\n  cam   |  Rot err (°)  |  Trans err (m)  |  pred |t| (m)  |  GT |t| (m)")
-    print("  ------|---------------|-----------------|----------------|---------------")
-
-    for i in range(1, num_cams):
-        cam_name = f"cam_{i:02d}"
-        key = ("cam_00", cam_name)
-        key_inv = (cam_name, "cam_00")
-        if key in alignment:
-            R_pred, t_pred = alignment[key]
-        elif key_inv in alignment:
-            R_inv, t_inv = alignment[key_inv]
-            R_pred = R_inv.T
-            t_pred = -R_pred @ t_inv
-        else:
-            print(f"  {cam_name} | NOT FOUND in alignment")
-            continue
-
-        R_gt, t_gt = gt_rel[i]
-
-        re = rot_error_deg(R_gt, R_pred)
-        te = float(np.linalg.norm(t_pred - t_gt))
-        print(f"  {cam_name} |  {re:10.2f}   |  {te:12.3f}   |  {np.linalg.norm(t_pred):11.3f}   |  {np.linalg.norm(t_gt):.3f}")
-
-    # ──────────────────────────────────────────────
-    # 3. Analyze SAM3D body estimates vs GT body
+    # Analyze SAM3D body estimates vs GT body
     # ──────────────────────────────────────────────
     print("\n")
     print("=" * 60)
-    print("PART 2 — SAM3D BODY ESTIMATES vs GT (per camera)")
+    print("SAM3D BODY ESTIMATES vs GT (per camera)")
     print("=" * 60)
 
     gt_frames: dict[int, dict] = {}
