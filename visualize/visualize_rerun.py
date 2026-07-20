@@ -710,7 +710,9 @@ def _default_blueprint(fps: float):
     """
     import rerun.blueprint as rrb
     return rrb.Blueprint(
-        rrb.Spatial3DView(origin="/world", name="world"),
+        rrb.Spatial3DView(
+            origin="/world", name="world", background=[255, 255, 255],
+        ),
         rrb.TimePanel(timeline=_FRAME_TL, fps=float(fps), state="expanded"),
         collapse_panels=False,
     )
@@ -727,6 +729,10 @@ def run_fusion(
     fps:             float = 30.0,
     depth_stride:    int  = 1,
     depth_conf_thr:  float = 0.5,
+    depth_voxel:     float = 0.02,
+    depth_time_stride: int = 1,
+    depth_mode:      str  = "image",
+    point_radius:    float = 0.01,
     port:            int  = 9090,
     grpc_port:       int  = 9876,
     server_memory_limit: str = "8GiB",
@@ -827,7 +833,8 @@ def run_fusion(
             _send_camera_media(
                 ent, k, scene_name, rich_data_root, frames_dir, frame_start,
                 T, W, H, fps, depth_ctx if show_depth else None, depth_stride,
-                depth_conf_thr, scene_dir,
+                depth_conf_thr, scene_dir, depth_voxel, depth_time_stride,
+                depth_mode, point_radius,
             )
 
         # GT cameras (static frustums) — suppressed together with GT meshes.
@@ -929,20 +936,36 @@ def _load_depth_context(scene_dir: Path, camera: np.ndarray, T: int, K: int):
 def _send_camera_media(
     entity, k, scene_name, rich_data_root, frames_dir, frame_start,
     T, W, H, fps, depth_ctx, depth_stride, depth_conf_thr, scene_dir,
+    depth_voxel=0.0, depth_time_stride=1, depth_mode="image", point_radius=0.01,
 ) -> None:
-    """Single pass over a camera's frames: ship video column (+ depth column).
+    """Single pass over a camera's frames: ship the JPEG video column and,
+    when depth is enabled, the depth cloud.
 
-    Each RICH frame is loaded once and reused for both the JPEG video feed and
-    (when enabled) sampling colours for the depth point cloud.
+    ``depth_mode='image'`` streams a masked metric ``DepthImage`` per frame and
+    lets Rerun back-project it on the GPU — fast to build, small payload, but the
+    3D cloud is colour-mapped by distance.  ``depth_mode='points'`` unprojects on
+    the CPU into an RGB-coloured ``Points3D`` cloud — slow to build, large
+    payload, but keeps the true scene colour.
     """
+    from rerun import datatypes as _rd
+
     blobs: list[bytes] = []
     img_frames: list[int] = []
-    # Depth accumulators.
+    # Points3D accumulators.
     d_pos: list[np.ndarray] = []
     d_col: list[np.ndarray] = []
     d_cnt: list[int] = []
     d_frames: list[int] = []
+    # DepthImage accumulators.
+    di_buf: list[bytes] = []
+    di_fmt: list = []
+    di_intr: list[np.ndarray] = []
+    di_res: list = []
+    di_trans: list[np.ndarray] = []
+    di_mat: list[np.ndarray] = []
+    di_frames: list[int] = []
     mask_cache: dict = {}
+    want_depth = depth_ctx is not None
 
     for t in tqdm(range(T), desc=f"{entity}", unit="frame", leave=False):
         bgr = _load_rich_frame(rich_data_root, scene_name, k, frame_start + t, frames_dir)
@@ -952,17 +975,36 @@ def _send_camera_media(
                 blobs.append(blob)
                 img_frames.append(t)
 
-        if depth_ctx is not None:
-            res = _depth_cloud(
-                depth_ctx, t, k, frame_start, scene_dir, bgr, W, H,
-                depth_stride, depth_conf_thr, mask_cache,
-            )
-            if res is not None:
-                pts, cols = res
-                d_pos.append(pts)
-                d_col.append(cols)
-                d_cnt.append(len(pts))
-                d_frames.append(t)
+        if want_depth and (t % depth_time_stride == 0):
+            if depth_mode == "points":
+                res = _depth_cloud(
+                    depth_ctx, t, k, frame_start, scene_dir, bgr, W, H,
+                    depth_stride, depth_conf_thr, mask_cache, depth_voxel,
+                )
+                if res is not None:
+                    pts, cols = res
+                    d_pos.append(pts)
+                    d_col.append(cols)
+                    d_cnt.append(len(pts))
+                    d_frames.append(t)
+            else:
+                res = _depth_image_frame(
+                    depth_ctx, t, k, frame_start, scene_dir,
+                    depth_stride, depth_conf_thr, mask_cache,
+                )
+                if res is not None:
+                    dimg, intr, R, tvec = res
+                    hd, wd = dimg.shape
+                    di_buf.append(dimg.astype(np.float16).tobytes())
+                    di_fmt.append(_rd.ImageFormat(
+                        width=wd, height=hd,
+                        channel_datatype=_rd.ChannelDatatype.F16,
+                    ))
+                    di_intr.append(intr)
+                    di_res.append([float(wd), float(hd)])
+                    di_trans.append(-(R.T @ tvec))
+                    di_mat.append(R.T)
+                    di_frames.append(t)
 
     if blobs:
         rr.send_columns(
@@ -973,9 +1015,14 @@ def _send_camera_media(
             ),
         )
 
-    if d_frames:
+    if d_frames:                                   # points mode
+        dent = f"world/depth/cam_{k:02d}"
+        # Single static radius broadcasts to every point — no per-point array,
+        # so no size bloat.  Positive value == metres (world scale).
+        rr.log(dent, rr.Points3D.from_fields(radii=[float(point_radius)]),
+               static=True)
         rr.send_columns(
-            f"world/depth/cam_{k:02d}",
+            dent,
             indexes=_time_columns(np.asarray(d_frames, dtype=np.int64), fps),
             columns=rr.Points3D.columns(
                 positions=np.concatenate(d_pos).astype(np.float32),
@@ -983,9 +1030,53 @@ def _send_camera_media(
             ).partition(np.asarray(d_cnt, dtype=np.int64)),
         )
 
+    if di_frames:                                  # image mode
+        dent = f"world/depth/cam_{k:02d}"
+        # Intrinsics/axes are ~fixed per camera → log the Pinhole once, static.
+        rr.log(
+            dent,
+            rr.Pinhole(
+                image_from_camera=di_intr[0],
+                resolution=di_res[0],
+                camera_xyz=rr.ViewCoordinates.RDF,
+                image_plane_distance=0.15,
+            ),
+            static=True,
+        )
+        idx = _time_columns(np.asarray(di_frames, dtype=np.int64), fps)
+        # Per-frame camera pose (captures VGGT's per-frame extrinsic jitter).
+        rr.send_columns(
+            dent, indexes=idx,
+            columns=rr.Transform3D.columns(
+                translation=np.asarray(di_trans, dtype=np.float32),
+                mat3x3=np.asarray(di_mat, dtype=np.float32),
+            ),
+        )
+        # Per-frame depth map — Rerun back-projects it through the Pinhole.
+        rr.send_columns(
+            dent, indexes=idx,
+            columns=rr.DepthImage.columns(
+                buffer=di_buf, format=di_fmt, meter=[1.0] * len(di_frames),
+            ),
+        )
+
+
+def _voxel_downsample(
+    pts: np.ndarray, cols: np.ndarray, voxel: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Keep one point per ``voxel``-sized cell (first hit) — thins redundant
+    same-surface points while preserving geometry and RGB.  Pure numpy, so the
+    per-frame cloud that gets streamed is a fraction of the raw stride-1 grid."""
+    if len(pts) == 0:
+        return pts, cols
+    keys = np.floor(pts / voxel).astype(np.int64)
+    _, idx = np.unique(keys, axis=0, return_index=True)
+    return pts[idx], cols[idx]
+
 
 def _depth_cloud(
     ctx, t, k, frame_start, scene_dir, bgr, W, H, stride, conf_thr, mask_cache,
+    voxel=0.0,
 ) -> Optional[tuple[np.ndarray, np.ndarray]]:
     """Unproject camera k's depth at frame t into world space (RDF, no flip)."""
     depth_mm   = ctx["depth_mm"]
@@ -1029,7 +1120,55 @@ def _depth_cloud(
         colors = bgr[iv, iu][:, ::-1]          # BGR → RGB
     else:
         colors = np.full((len(z), 3), 128, dtype=np.uint8)
-    return pts_world.astype(np.float32), colors
+    pts_world = pts_world.astype(np.float32)
+    if voxel and voxel > 0.0:
+        pts_world, colors = _voxel_downsample(pts_world, colors, voxel)
+    return pts_world, colors
+
+
+def _depth_image_frame(
+    ctx, t, k, frame_start, scene_dir, stride, conf_thr, mask_cache,
+) -> Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    """Build one masked metric-depth map (metres) plus the VGGT intrinsics and
+    extrinsics Rerun needs to back-project it on the GPU.
+
+    Invalid pixels (low confidence, outside the valid crop, or covered by a
+    person) are set to 0 — Rerun does not back-project zero-depth pixels, so the
+    cloud contains only the real background surface.  Returns
+    ``(depth (h,w) float32 metres, intr_ds (3,3), R (3,3), t_scaled (3,))`` or
+    ``None`` when the frame/camera has no usable depth.
+    """
+    depth_mm = ctx["depth_mm"]
+    if (t >= depth_mm.shape[0] or k >= depth_mm.shape[1]
+            or not ctx["depth_valid"][t, k] or not ctx["cam_valid"][t, k]):
+        return None
+
+    h_full, w_full = depth_mm[t, k].shape
+    s = float(ctx["scale"][t])
+    d = depth_mm[t, k][::stride, ::stride].astype(np.float32) / 1000.0 * s
+    conf = ctx["depth_conf"][t, k][::stride, ::stride].astype(np.float32)
+    h_d, w_d = d.shape
+    vv, uu = np.mgrid[0:h_d, 0:w_d]
+    u_full, v_full = uu * stride, vv * stride
+    x1, y1, x2, y2 = ctx["oc"][t, k]
+
+    bg = _person_bg_mask(ctx, k, frame_start + t, h_full, w_full, scene_dir, mask_cache)
+    bg = np.ones((h_d, w_d), bool) if bg is None else bg[::stride, ::stride]
+
+    valid = (
+        (d > 1e-4) & (conf >= conf_thr)
+        & (u_full >= x1) & (u_full < x2) & (v_full >= y1) & (v_full < y2) & bg
+    )
+    if not valid.any():
+        return None
+    d[~valid] = 0.0                              # 0 == no measurement
+
+    intr = ctx["intr"][t, k].astype(np.float64).copy()
+    intr[0, 0] /= stride; intr[1, 1] /= stride   # fx, fy → downsampled pixels
+    intr[0, 2] /= stride; intr[1, 2] /= stride   # cx, cy → downsampled pixels
+    R = ctx["extr"][t, k, :3, :3].astype(np.float64)
+    t_scaled = ctx["extr"][t, k, :3, 3].astype(np.float64) * s
+    return d, intr, R, t_scaled
 
 
 def _person_bg_mask(
