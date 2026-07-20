@@ -457,7 +457,7 @@ def main():
     p.add_argument("--batch_size",        type=int, default=8)
     p.add_argument("--device",            default="cuda")
     p.add_argument("--force",             action="store_true")
-    p.add_argument("--scale_from",        choices=["depth", "baselines"], default="depth",
+    p.add_argument("--scale_from",        choices=["depth", "baselines"], default="baselines",
                    help="depth = legacy conditioned depth-ratio (writes mapanything_scale_centered.npy); "
                         "baselines = images-only camera-baseline ratio (writes mapanything_scale_baseline.npy)")
     args = p.parse_args()

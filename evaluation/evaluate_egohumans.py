@@ -363,11 +363,6 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
             scale = placer.load_mapanything_scale(filename="mapanything_scale_baseline.npy", smooth="median")
             if scale is None:
                 raise RuntimeError("scale_mode=baseline but mapanything_scale_baseline.npy missing/mismatched")
-        elif scale_mode == "human":
-            try:
-                scale = placer.estimate_scale_human_reference(frame_start=fmin)
-            except Exception:
-                scale = placer.load_mapanything_scale()
         else:
             scale = placer.load_mapanything_scale()
         if scale is None:
@@ -589,7 +584,7 @@ def main():
     ap.add_argument("--gt_root", help="camera_ready/<activity> dir with per-scene GT")
     ap.add_argument("--checkpoint")
     ap.add_argument("--smplx_model", default=str(_REPO_ROOT / "body_models" / "SMPLX_NEUTRAL.pkl"))
-    ap.add_argument("--scale", choices=["pred", "triangulated", "baseline", "human"], default="pred")
+    ap.add_argument("--scale", choices=["pred", "triangulated", "baseline"], default="pred")
     ap.add_argument("--temporal", action="store_true", help="use temporal fusion (default: per-frame)")
     ap.add_argument("--scene", default=None)
     ap.add_argument("--dump_dir", default="eval_egohumans/dumps")

@@ -32,7 +32,7 @@ pixi run python evaluation/evaluate_on_rich_test.py \
     --gt_split          test \
     --max_scenes        52 \
     --modalities        "${MOD:-9}" \
-    --scale             "${SCALE:-centered}" \
+    --scale             "${SCALE:-baseline}" \
     --scale_smooth      "${SCALE_SMOOTH:-none}"
 
 echo ""

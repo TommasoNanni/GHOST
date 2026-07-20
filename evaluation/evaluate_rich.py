@@ -621,7 +621,7 @@ def evaluate_scene(
     smplx_model_path: Path,
     gt_split:         str = "test",
     exclude_cameras:  list[str] | None = None,
-    scale_mode:       str = "centered",
+    scale_mode:       str = "baseline",
     scale_smooth:     str = "none",
 ) -> dict[str, float] | None:
     """Run full inference + evaluation for one scene. Returns metric dict or None."""
@@ -727,24 +727,16 @@ def evaluate_scene(
                 if pid in sam3d_betas_by_pid:
                     sam3d_betas_map[bf] = sam3d_betas_by_pid[pid]
 
-        if scale_mode == "human":
-            pred_scale_pf = placer.estimate_scale_human_reference(frame_start=frame_start)
-            if scale_smooth == "median":
-                _valid = pred_scale_pf[pred_scale_pf > 0]
-                if _valid.size:
-                    pred_scale_pf = np.full_like(pred_scale_pf, float(np.median(_valid)))
-            logger.info(f"  [scale] using human-reference (smooth={scale_smooth})  median={float(np.median(pred_scale_pf)):.4f}")
+        pred_scale_pf = placer.load_mapanything_scale(scale_mode=scale_mode, smooth=scale_smooth)
+        if pred_scale_pf is not None:
+            logger.info(f"  [scale] using MapAnything ({scale_mode}, smooth={scale_smooth})  median={float(np.median(pred_scale_pf)):.4f}")
         else:
-            pred_scale_pf = placer.load_mapanything_scale(scale_mode=scale_mode, smooth=scale_smooth)
-            if pred_scale_pf is not None:
-                logger.info(f"  [scale] using MapAnything ({scale_mode}, smooth={scale_smooth})  median={float(np.median(pred_scale_pf)):.4f}")
-            else:
-                pred_scale_pf = placer.estimate_scale_triangulated(
-                    fused_pose_by_pid=fused_pose_by_pid,
-                    pred_betas_map=sam3d_betas_map,
-                    frame_start=frame_start,
-                )
-                logger.info(f"  [scale] using triangulated  median={float(np.median(pred_scale_pf)):.4f}")
+            pred_scale_pf = placer.estimate_scale_triangulated(
+                fused_pose_by_pid=fused_pose_by_pid,
+                pred_betas_map=sam3d_betas_map,
+                frame_start=frame_start,
+            )
+            logger.info(f"  [scale] using triangulated  median={float(np.median(pred_scale_pf)):.4f}")
     except Exception as e:
         logger.warning(f"  Scale estimation failed: {e} — skipping")
         return None
@@ -1040,11 +1032,10 @@ def main() -> None:
                         help="Comma-separated scene names to skip")
     parser.add_argument("--skip_cameras",      default="",
                         help="Per-scene camera exclusions: 'scene:cam1,cam2;scene2:cam3'")
-    parser.add_argument("--scale",              default="centered",
-                        choices=["centered", "baseline", "human"],
+    parser.add_argument("--scale",              default="baseline",
+                        choices=["centered", "baseline"],
                         help="MapAnything scale variant "
-                             "(centered=legacy depth-ratio, baseline=images-only camera baselines, "
-                             "human=MA-free self-consistent human-reference triangulation).")
+                             "(centered=legacy depth-ratio, baseline=images-only camera baselines).")
     parser.add_argument("--scale_smooth",       default="none",
                         choices=["none", "median"],
                         help="Temporal denoise of per-frame scale: median=one robust scalar "
