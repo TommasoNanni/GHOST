@@ -28,7 +28,7 @@ pixi run python evaluation/evaluate_egoexo.py \
     --gt_root     /capstor/scratch/cscs/tnanni/datasets/egoexo4d/gt \
     --smplx_model body_models/SMPLX_NEUTRAL.pkl \
     --checkpoint  checkpoints/fusion_module/best.pt \
-    --scale       "${SCALE_MODE:-pred}" \
+    --scale       "${SCALE_MODE:-baseline}" \
     --reid_map    manual_reid.json
 
 echo ""

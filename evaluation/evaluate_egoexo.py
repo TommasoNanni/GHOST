@@ -34,6 +34,7 @@ import re
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 import torch
 
@@ -84,6 +85,31 @@ GT_TO_COCO: dict[str, int] = {
 
 # manual_reid convention: the single annotated GT subject is labelled group 1.
 GT_PERSON_PID = 1
+
+# Takes excluded for broken ground truth / camera calibration, verified by
+# reprojecting the GT skeleton into every camera (2026-07-20).  These are data
+# defects, not model failures, and must be reported alongside the results.
+EXCLUDED_TAKES: dict[str, str] = {
+    "cmu_soccer16_2":       "cam02 + cam05 miscalibrated; GT joints project behind the camera",
+    "uniandes_dance_002_2":  "GT lower body mistriangulated; reprojection invalid in all 5 cameras",
+    "uniandes_dance_002_11": "same scene and defect as uniandes_dance_002_2, different frame",
+}
+
+# GT joint name -> MHR70 index in SAM3D ``pred_keypoints_2d`` (mirrors
+# fusion/placer.py::_SMPLX_TO_MHR70).  Used to auto-identify the GT subject.
+GT_TO_MHR70: dict[str, int] = {
+    "left-shoulder":  5, "right-shoulder":  6,
+    "left-elbow":     7, "right-elbow":     8,
+    "left-wrist":    62, "right-wrist":    41,
+    "left-hip":       9, "right-hip":      10,
+    "left-knee":     11, "right-knee":     12,
+    "left-ankle":    13, "right-ankle":    14,
+}
+
+# Auto-match acceptance gates (see auto_match_gt_subject).
+_MATCH_RATIO  = 0.60   # best candidate must beat runner-up by this factor
+_MATCH_RES_PX = 12.0   # cross-camera triangulation residual = "same person"
+_MATCH_OFF_CM = 20.0   # triangulated subject must land this close to GT
 
 _COCO_REG: np.ndarray | None = None
 
@@ -246,6 +272,144 @@ def _parse_reid_tokens(tokens: list[str]) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# Automatic GT-subject identification (replaces manual ReID)
+#
+# Manual ReID was only ever needed because the extracted frames were the wrong
+# ones (a decoder bug returned the preceding keyframe), so the GT skeleton did
+# not land on the annotated subject and could not be matched automatically.  With
+# the correct frame the GT reprojects onto the subject, so the correspondence can
+# be recovered — and, crucially, *verified* — without human labelling.
+# ---------------------------------------------------------------------------
+
+def _gopro_cameras(gt_scene_dir: Path) -> dict[str, dict]:
+    """Undistorted-pinhole gopro cameras, scaled to the 1440-wide frame space
+    that ``pred_keypoints_2d`` live in."""
+    cams: dict[str, dict] = {}
+    with open(gt_scene_dir / "gopro_calibs.csv") as f:
+        for row in csv.DictReader(f):
+            K = np.array([[float(row["intrinsics_0"]), 0, float(row["intrinsics_2"])],
+                          [0, float(row["intrinsics_1"]), float(row["intrinsics_3"])],
+                          [0, 0, 1]])
+            D = np.array([[float(row[f"intrinsics_{i}"])] for i in range(4, 8)])
+            W, H = int(row["image_width"]), int(row["image_height"])
+            Knew = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
+                K, D, (W, H), np.eye(3), balance=0.0)
+            t   = np.array([float(row[f"t{a}_world_cam"]) for a in "xyz"])
+            Rwc = SciR.from_quat(
+                [float(row[f"q{a}_world_cam"]) for a in ["x", "y", "z", "w"]]).as_matrix()
+            sx, sy = 1440 / W, 810 / H
+            cams[row["cam_uid"]] = {
+                "Knew": Knew, "Rwc": Rwc, "t": t, "sx": sx, "sy": sy,
+                "P": (np.diag([sx, sy, 1.0]) @ Knew)
+                     @ np.hstack([Rwc.T, (-Rwc.T @ t).reshape(3, 1)]),
+            }
+    return cams
+
+
+def _project(cam: dict, X: np.ndarray) -> np.ndarray | None:
+    """Project a world point; None if it falls behind the camera."""
+    Xc = cam["Rwc"].T @ (X - cam["t"])
+    if Xc[2] <= 0.05:
+        return None
+    return np.array([(cam["Knew"][0, 0] * Xc[0] / Xc[2] + cam["Knew"][0, 2]) * cam["sx"],
+                     (cam["Knew"][1, 1] * Xc[1] / Xc[2] + cam["Knew"][1, 2]) * cam["sy"]])
+
+
+def _dlt(cams: list[dict], uvs: list[np.ndarray]) -> np.ndarray:
+    A: list[np.ndarray] = []
+    for cam, uv in zip(cams, uvs):
+        P = cam["P"]
+        A += [uv[0] * P[2] - P[0], uv[1] * P[2] - P[1]]
+    _, _, Vt = np.linalg.svd(np.array(A))
+    X = Vt[-1]
+    return X[:3] / X[3]
+
+
+def auto_match_gt_subject(
+    ghost_scene_dir: Path,
+    gt_scene_dir: Path,
+    frame_idx: int,
+    gt_joints: dict[str, np.ndarray],
+) -> tuple[dict[str, int] | None, str]:
+    """Identify the annotated GT subject in every camera, or refuse.
+
+    Reprojects the GT skeleton into each gopro camera and takes the nearest
+    detected person, accepting only when the choice is provably unambiguous:
+
+    1. the best candidate must beat the runner-up by ``_MATCH_RATIO`` — a
+       near-tie (e.g. a dance partner) is refused, never guessed;
+    2. the accepted cameras must triangulate to a *single* 3D point (residual
+       <= ``_MATCH_RES_PX``); while inconsistent the worst camera is dropped,
+       which removes miscalibrated views automatically;
+    3. that point must land within ``_MATCH_OFF_CM`` of the GT skeleton.
+
+    Returns ({cam_name: disk_pid}, info) on success, else (None, reason).
+    """
+    cams = _gopro_cameras(gt_scene_dir)
+    picks: dict[str, tuple[float, int, dict[str, np.ndarray]]] = {}
+    notes: list[str] = []
+
+    for cam_id, cam in cams.items():
+        body_dir = ghost_scene_dir / cam_id / "body_data"
+        if not body_dir.exists():
+            continue
+        gt_uv = {n: _project(cam, gt_joints[n]) for n in gt_joints if n in GT_TO_MHR70}
+        use = [n for n, uv in gt_uv.items() if uv is not None]
+        if not use:
+            continue
+        cands: list[tuple[float, int, dict[str, np.ndarray]]] = []
+        for npz in sorted(body_dir.glob("person_*.npz")):
+            d = np.load(str(npz), allow_pickle=False)
+            idx = np.where(d["frame_indices"].astype(int) == frame_idx)[0]
+            if not idx.size:
+                continue
+            k = d["pred_keypoints_2d"][idx[0]]
+            err = float(np.mean([np.linalg.norm(gt_uv[n] - k[GT_TO_MHR70[n]]) for n in use]))
+            cands.append((err, int(npz.stem.split("_")[1]), {n: k[GT_TO_MHR70[n]] for n in use}))
+        if not cands:
+            continue
+        cands.sort(key=lambda c: c[0])
+        if len(cands) == 1 or cands[0][0] < _MATCH_RATIO * cands[1][0]:
+            picks[cam_id] = cands[0]
+        else:
+            notes.append(f"{cam_id}:tie(p{cands[0][1]}@{cands[0][0]:.0f} "
+                         f"vs p{cands[1][1]}@{cands[1][0]:.0f})")
+
+    if len(picks) < 2:
+        return None, "; ".join(notes) or "<2 unambiguous cameras"
+
+    active = list(picks)
+    while len(active) >= 2:
+        shared = set.intersection(*[set(picks[c][2]) for c in active])
+        if not shared:
+            return None, "no shared joints across cameras"
+        res: list[float] = []
+        off: list[float] = []
+        for n in shared:
+            X = _dlt([cams[c] for c in active], [picks[c][2][n] for c in active])
+            rr = [np.linalg.norm(p - picks[c][2][n])
+                  for c in active if (p := _project(cams[c], X)) is not None]
+            if rr:
+                res.append(float(np.mean(rr)))
+            off.append(float(np.linalg.norm(X - gt_joints[n]) * 100))
+        if not res:
+            return None, "triangulation degenerate (behind camera)"
+        m_res, m_off = float(np.mean(res)), float(np.mean(off))
+        if m_res <= _MATCH_RES_PX and m_off <= _MATCH_OFF_CM:
+            info = f"cams={len(active)} res={m_res:.0f}px off={m_off:.0f}cm"
+            if notes:
+                info += " (" + "; ".join(notes) + ")"
+            return {c: picks[c][1] for c in active}, info
+        if len(active) == 2:
+            return None, (f"cams=2 res={m_res:.0f}px off={m_off:.0f}cm "
+                          + "; ".join(notes)).strip()
+        worst = max(active, key=lambda c: picks[c][0])
+        active.remove(worst)
+        notes.append(f"dropped {worst}")
+    return None, "; ".join(notes) or "exhausted cameras"
+
+
+# ---------------------------------------------------------------------------
 # Inference: fusion module -> Procrustes DLT placement -> SMPL-X FK
 #
 # Mirrors evaluate_on_rich_test.py's pipeline (fuse multi-view body pose, then
@@ -394,7 +558,7 @@ def run_fusion_placer(
         ghost_scene_dir, cam_names, valid_mask, global_groups, gt_frame_idx
     )
     if not any(raw):
-        return []
+        return [], None
     all_pids = sorted(global_groups)
 
     # ── Fusion: cross-view attention over K cameras for the single frame ──────
@@ -420,21 +584,46 @@ def run_fusion_placer(
 
     # Metric scale (metres per VGGT unit): pred = MapAnything estimate,
     # gt = oracle from GT cameras, triangulated = multi-view bone-length DLT.
+    # NOTE: never silently fall back to scale 1.0.  The placer scales the subject
+    # while the SE(3) camera alignment scales the rig by mapanything_scale_centered
+    # (~12-25 here), so a unit scale puts the body at a fraction of its true
+    # distance -- metres of W-MPJPE error that looks like a model failure while
+    # PA (scale-invariant) stays perfect.  Bail out loudly instead.
+    scale = None
     if scale_mode == "gt":
         s_gt = _gt_scale(placer, cam_pos_gt)
-        scale = np.full(placer.T, s_gt if s_gt else 1.0, dtype=np.float32)
+        if s_gt:
+            scale = np.full(placer.T, s_gt, dtype=np.float32)
+        else:
+            logger.error(f"{ghost_scene_dir.name}: oracle scale unavailable "
+                         "(<2 cameras matched to GT) — skipping")
     elif scale_mode == "triangulated":
         try:
             scale = placer.estimate_scale_triangulated(
                 fused_pose_by_pid=fused_pose_by_pid, frame_start=gt_frame_idx,
             )
         except Exception as e:
-            logger.warning(f"{ghost_scene_dir.name}: triangulated scale failed ({e}) — using pred")
-            scale = placer.load_mapanything_scale()
-    else:  # pred
-        scale = placer.load_mapanything_scale()
+            logger.warning(f"{ghost_scene_dir.name}: triangulated scale failed ({e}) "
+                           "— falling back to baseline")
+            scale = placer.load_mapanything_scale(scale_mode="baseline")
+    else:  # "baseline" | "centered" -- explicit estimator choice, as in the RICH
+           # and EgoHumans evals.  No smoothing: EgoExo4D is one frame per take,
+           # so a median over a single value is a no-op.
+        scale = placer.load_mapanything_scale(scale_mode=scale_mode)
+        if scale is None:
+            logger.error(
+                f"{ghost_scene_dir.name}: --scale {scale_mode} selected but its .npy is "
+                "missing. Run scripts/run_ma_baseline_egoexo.py to generate the baseline "
+                "scale; refusing to substitute another estimator."
+            )
     if scale is None:
-        scale = np.ones(placer.T, dtype=np.float32)
+        logger.error(f"{ghost_scene_dir.name}: no metric scale available "
+                     f"(scale_mode={scale_mode}) — skipping rather than placing at 1.0")
+        return [], None
+    # The SAME scalar must scale the camera rig in eval_scene; W-MPJPE aligns with
+    # SE(3) (no scale), so any mismatch between the subject's scale and the rig's
+    # displaces the body by their ratio and silently corrupts the metric.
+    scale_used = float(np.asarray(scale).reshape(-1)[0])
 
     try:
         trans_dict, orient_dict = placer.estimate_procrustes_dlt_mhr(
@@ -446,7 +635,7 @@ def run_fusion_placer(
         )
     except Exception as e:
         logger.warning(f"{ghost_scene_dir.name}: placer failed — {e}")
-        return []
+        return [], None
 
     # ── SMPL-X FK: pivot canonical joints about the SMPL-X pelvis, place ──────
     out: list[tuple[int, np.ndarray]] = []
@@ -467,7 +656,7 @@ def run_fusion_placer(
         coco_can   = coco_regressor() @ verts[0].astype(np.float64)    # (17, 3) canonical
         coco_world = (R_mat @ (coco_can - pelvis).T).T + pelvis_world  # (17, 3) metric cam-0
         out.append((pid, coco_world))
-    return out
+    return out, scale_used
 
 
 # ---------------------------------------------------------------------------
@@ -511,10 +700,46 @@ def eval_scene(
         logger.info(f"{ghost_scene_dir.name}: hand-only GT, skipping")
         return None
 
-    # --- Build SE(3) alignment from VGGT metric cameras to GT cameras --------
-    vggt      = np.load(ghost_scene_dir / "vggt_cameras_centered.npz", allow_pickle=False)
-    ma_scale  = float(np.load(ghost_scene_dir / "mapanything_scale_centered.npy")[0])
-    cam_names = [n.decode() if isinstance(n, bytes) else n for n in vggt["camera_names"]]
+    # --- Resolve per-camera person identities -------------------------------
+    # Default: automatic, self-verifying identification of the GT subject.
+    # manual_reid.json, when supplied for a scene, overrides it.
+    global_groups: dict[int, dict[str, int]] = {}
+    if reid_groups:
+        for gpid_str, tokens in reid_groups.items():
+            cam_disk = _parse_reid_tokens(tokens)
+            if cam_disk:
+                global_groups[int(gpid_str)] = cam_disk
+        if not global_groups:
+            logger.warning(f"{ghost_scene_dir.name}: manual reid groups yielded empty map "
+                           "— skipping")
+            return None
+        logger.debug(f"{ghost_scene_dir.name}: using manual reid override")
+    else:
+        picks, info = auto_match_gt_subject(
+            ghost_scene_dir, gt_scene_dir, frame_idx, gt_joints
+        )
+        if picks is None:
+            logger.warning(f"{ghost_scene_dir.name}: auto-match could not verify the GT "
+                           f"subject ({info}) — skipping")
+            return None
+        global_groups = {GT_PERSON_PID: picks}
+        logger.info(f"{ghost_scene_dir.name}: auto-matched GT subject — {info}")
+
+    # --- Inference: fusion -> Procrustes DLT placement -> FK ----------------
+    persons, scale_used = run_fusion_placer(
+        ghost_scene_dir, frame_idx, global_groups, fusion_model, device, smplx_arg,
+        cam_pos_gt, scale_mode,
+    )
+    if not persons or scale_used is None:
+        logger.warning(f"{ghost_scene_dir.name}: no placed predictions for frame {frame_idx}")
+        return None
+
+    # --- SE(3) alignment from VGGT metric cameras to GT cameras --------------
+    # The rig MUST be scaled by the SAME scalar the placer used for the subject.
+    # W-MPJPE aligns with SE(3) (no scale), so a mismatch displaces the body by
+    # the ratio of the two scales and silently corrupts the metric.
+    vggt       = np.load(ghost_scene_dir / "vggt_cameras_centered.npz", allow_pickle=False)
+    cam_names  = [n.decode() if isinstance(n, bytes) else n for n in vggt["camera_names"]]
     extrinsics = vggt["extrinsics"][0]   # (K, 3, 4)
     valid_mask = vggt["valid"][0]
 
@@ -524,8 +749,7 @@ def eval_scene(
             continue
         R_k = extrinsics[k, :, :3]
         t_k = extrinsics[k, :, 3]
-        # Camera centre in VGGT world = -R_k^T @ t_k, scaled to metric
-        center_metric = (-R_k.T @ t_k) * ma_scale
+        center_metric = (-R_k.T @ t_k) * scale_used
         pred_centers.append(center_metric.astype(np.float64))
         gt_centers.append(cam_pos_gt[cam_id])
 
@@ -533,33 +757,7 @@ def eval_scene(
         logger.warning(f"{ghost_scene_dir.name}: <2 valid cameras, skip")
         return None
 
-    R_align, t_align = se3_align(
-        np.stack(pred_centers),
-        np.stack(gt_centers),
-    )
-
-    # --- Resolve per-camera person identities (manual_reid) -----------------
-    if not reid_groups:
-        logger.warning(f"{ghost_scene_dir.name}: no manual reid groups — skipping "
-                       "(fusion/placer need globally-consistent person ids)")
-        return None
-    global_groups: dict[int, dict[str, int]] = {}
-    for gpid_str, tokens in reid_groups.items():
-        cam_disk = _parse_reid_tokens(tokens)
-        if cam_disk:
-            global_groups[int(gpid_str)] = cam_disk
-    if not global_groups:
-        logger.warning(f"{ghost_scene_dir.name}: reid groups yielded empty map — skipping")
-        return None
-
-    # --- Inference: fusion -> Procrustes DLT placement -> FK ----------------
-    persons = run_fusion_placer(
-        ghost_scene_dir, frame_idx, global_groups, fusion_model, device, smplx_arg,
-        cam_pos_gt, scale_mode,
-    )
-    if not persons:
-        logger.warning(f"{ghost_scene_dir.name}: no placed predictions for frame {frame_idx}")
-        return None
+    R_align, t_align = se3_align(np.stack(pred_centers), np.stack(gt_centers))
 
     # --- Build GT joint array for evaluation subset -------------------------
     joint_names   = sorted(gt_joints.keys())
@@ -606,13 +804,25 @@ def main():
                         help="Path to SMPLX_NEUTRAL.pkl (or folder containing it)")
     parser.add_argument("--checkpoint",  required=True,
                         help="PoseFusionModule checkpoint (.pt)")
-    parser.add_argument("--scale", choices=["pred", "triangulated", "gt"], default="pred",
-                        help="Metric scale source: pred=MapAnything, "
-                             "triangulated=multi-view bone DLT, gt=oracle from GT cameras")
+    parser.add_argument("--scale",
+                        choices=["baseline", "centered", "triangulated", "gt"],
+                        default="baseline",
+                        help="Metric scale source. baseline=images-only MapAnything "
+                             "camera-baseline ratio (default, matches RICH/EgoHumans); "
+                             "centered=legacy conditioned depth-ratio; "
+                             "triangulated=multi-view bone DLT; "
+                             "gt=ORACLE from GT cameras (diagnostic only -- an oracle "
+                             "modality, NOT comparable to CHROMM/HSfM or to RICH M10)")
     parser.add_argument("--max_scenes",  type=int, default=None)
     parser.add_argument("--scene",       default=None, help="Evaluate a single scene by name")
     parser.add_argument("--reid_map",    default=str(_REPO_ROOT / "manual_reid.json"),
-                        help="Path to manual_reid.json (default: repo root)")
+                        help="Path to manual_reid.json (only used with --use_manual_reid)")
+    parser.add_argument("--use_manual_reid", action="store_true", default=False,
+                        help="Override automatic GT-subject identification with "
+                             "manual_reid.json. NOTE: those person ids are tied to a "
+                             "specific pipeline run and go stale whenever body_data is "
+                             "regenerated; the automatic matcher is self-verifying and "
+                             "is the default.")
     args = parser.parse_args()
 
     ghost_root = Path(args.ghost_root)
@@ -622,17 +832,25 @@ def main():
     # All annotated global persons are kept (not just person 1) so the placer has
     # the full multi-person context and GT can match the best person.
     reid_map_egoexo: dict[str, dict[str, list[str]]] = {}
-    reid_map_path = Path(args.reid_map)
-    if reid_map_path.exists():
-        with open(reid_map_path) as f:
-            reid_raw = json.load(f)
-        for scene_name, entry in reid_raw.get("egoexo4d", {}).items():
-            groups = entry.get("groups", {})
-            if groups:
-                reid_map_egoexo[scene_name] = groups
-        logger.info(f"Manual reid map loaded: {len(reid_map_egoexo)} scenes with group mappings")
+    if args.use_manual_reid:
+        reid_map_path = Path(args.reid_map)
+        if reid_map_path.exists():
+            with open(reid_map_path) as f:
+                reid_raw = json.load(f)
+            for scene_name, entry in reid_raw.get("egoexo4d", {}).items():
+                groups = entry.get("groups", {})
+                if groups:
+                    reid_map_egoexo[scene_name] = groups
+            logger.warning(
+                f"--use_manual_reid: overriding auto-match for {len(reid_map_egoexo)} scenes. "
+                "These person ids are only valid for the pipeline run they were made on."
+            )
+        else:
+            logger.warning(f"manual_reid.json not found at {reid_map_path} — "
+                           "falling back to automatic matching")
     else:
-        logger.warning(f"manual_reid.json not found at {reid_map_path} — scenes will be skipped")
+        logger.info("GT subject identified automatically (self-verifying matcher); "
+                    "pass --use_manual_reid to override with manual_reid.json")
 
     # Fusion model + device. The placer builds its own SMPL-X model from the path.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -651,6 +869,8 @@ def main():
     skipped_hand = 0
     skipped_missing = 0
 
+    # Broken-GT takes are still evaluated; they are split out in the summary so
+    # both the full-set and the cleaned number are reported from a single run.
     for ghost_scene_dir in scene_dirs:
         if not ghost_scene_dir.is_dir():
             continue
@@ -676,20 +896,45 @@ def main():
         logger.error("No scenes evaluated.")
         return
 
-    w_vals  = [r["w_mpjpe"]  for r in results]
-    pa_vals = [r["pa_mpjpe"] for r in results]
+    kept    = [r for r in results if r["scene"] not in EXCLUDED_TAKES]
+    dropped = [r for r in results if r["scene"] in EXCLUDED_TAKES]
+
+    def _report(label: str, rows: list[dict]) -> None:
+        if not rows:
+            print(f"  {label}: no scenes")
+            return
+        w  = [r["w_mpjpe"]  for r in rows]
+        pa = [r["pa_mpjpe"] for r in rows]
+        # MEAN is the headline: CHROMM / HSfM report means, so it is the
+        # comparable figure. Median is kept alongside as a robustness check.
+        print(f"  {label}  (n={len(rows)})")
+        print(f"    W-MPJPE†   MEAN: {np.mean(w):7.1f} mm      (median {np.median(w):6.1f})")
+        print(f"    PA-MPJPE   MEAN: {np.mean(pa):7.1f} mm      (median {np.median(pa):6.1f})")
 
     print("\n" + "=" * 60)
     print(f"EgoExo4D evaluation — {len(results)} body-GT scenes  [scale={args.scale}]")
     print(f"  Skipped (hand-only GT): {skipped_hand}")
     print(f"  Skipped (missing files): {skipped_missing}")
     print("-" * 60)
-    print(f"  W-MPJPE†   mean: {np.mean(w_vals):6.1f} mm   median: {np.median(w_vals):6.1f} mm")
-    print(f"  PA-MPJPE   mean: {np.mean(pa_vals):6.1f} mm   median: {np.median(pa_vals):6.1f} mm")
+    _report("ALL evaluated scenes", results)
+    print()
+    _report("EXCLUDING broken GT/calibration", kept)
+    if dropped:
+        print(f"\n  Excluded takes ({len(dropped)}) — broken GT/calibration, "
+              f"reported for transparency:")
+        for r in sorted(dropped, key=lambda x: x["scene"]):
+            print(f"    {r['scene']:24s} W={r['w_mpjpe']:7.1f}  PA={r['pa_mpjpe']:6.1f}  "
+                  f"— {EXCLUDED_TAKES[r['scene']]}")
+    missing_excluded = [t for t in EXCLUDED_TAKES if t not in {r["scene"] for r in results}]
+    if missing_excluded:
+        print(f"  (excluded takes not present in results: {missing_excluded})")
     print("-" * 60)
-    print("  PA-MPJPE per joint (mean over scenes):")
+    # Per-joint diagnostic uses the cleaned set: the excluded takes fail in the
+    # legs specifically (mistriangulated knees/ankles, joints behind the camera),
+    # which would distort exactly the per-joint signal this table is read for.
+    print("  PA-MPJPE per joint (mean over scenes, EXCLUDING broken GT/calibration):")
     per_joint: dict[str, list[float]] = {}
-    for r in results:
+    for r in kept:
         for n, e in r.get("pa_per_joint", {}).items():
             per_joint.setdefault(n, []).append(e)
     for n in sorted(per_joint, key=lambda k: -np.mean(per_joint[k])):
