@@ -47,6 +47,9 @@ synchronization:
 fusion:
   checkpoint_dir: "checkpoints/fusion_module"
   use_wandb: true
+  # Feed per-joint confidence to the fusion attention. Off: evaluation never
+  # feeds it, and enabling it hurts (RICH PA 31.4 vs 30.4 mm).
+  use_joint_confidence: false
   architecture:
     embedding_dimension: 128
     temporal_window: 128

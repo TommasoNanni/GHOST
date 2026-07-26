@@ -63,6 +63,17 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger = logging.getLogger("eval_egohumans")
 
 _NUM_JOINTS = 55                       # SMPL-X joints fed to fusion (root + 54)
+
+# PoseFusionModule was TRAINED with a per-joint confidence channel
+# (trainer_v2._MODEL_KEYS includes "joint_mask", fed from the npz key
+# `pred_joint_confidence`), but no evaluation script has ever passed it, so the
+# module silently falls back to `conf = person_visible` broadcast over all 54
+# joints (fusion_module_v2.py:428-429). On EgoHumans 38% of
+# `pred_joint_confidence` entries are exactly 0.0, and confidence enters
+# attention as an additive log(c_i*c_j) bias, so passing it hard-excludes those
+# joint tokens as attention keys. Set by --joint_conf; default False keeps every
+# previously published number reproducible.
+_USE_JOINT_CONF = False
 # COCO-17: 0 nose,1/2 eyes,3/4 ears,5/6 shoulders,7/8 elbows,9/10 wrists,
 #          11/12 hips,13/14 knees,15/16 ankles. Score the 12 limb joints only
 #          (face joints have no clean SMPL-X correspondence).
@@ -266,6 +277,9 @@ def _load_clean_tracks(ghost_scene: Path, cam_names, valid_mask, pids):
                     e["rh"] = d["smplx_right_hand_pose"][t].reshape(-1, 3)
                 if "smplx_betas" in d.files:
                     e["betas"] = d["smplx_betas"][t][:10]
+                # Per-joint confidence (SAM3D occlusion estimate), root included.
+                if "pred_joint_confidence" in d.files:
+                    e["jc"] = d["pred_joint_confidence"][t].reshape(-1)   # (55,)
                 frames_map[int(gfr)] = e
             if frames_map:
                 cam_map[pid] = frames_map
@@ -304,8 +318,9 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
     T = fmax - fmin + 1
 
     # dense per-frame tensors (T,1,K,P,54,6) — temporal length 1 => no temporal attn
-    pose = np.zeros((T, 1, K, P, 54, 6), dtype=np.float32)
-    mask = np.zeros((T, 1, K, P), dtype=np.float32)
+    pose  = np.zeros((T, 1, K, P, 54, 6), dtype=np.float32)
+    mask  = np.zeros((T, 1, K, P), dtype=np.float32)
+    jconf = np.zeros((T, 1, K, P, 54), dtype=np.float32)
     betas_acc = {p: [] for p in pids}
     for k, cam_map in per_cam.items():
         for pid, fm in cam_map.items():
@@ -315,6 +330,12 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
                     t = gfr - fmin
                     pose[t, 0, k, s] = _pack_pose(e)
                     mask[t, 0, k, s] = 1.0
+                    # Root dropped to match `pose`. Default 1.0 when the npz
+                    # predates the key, mirroring data/fusion_dataset.py:486.
+                    jc = e.get("jc")
+                    jconf[t, 0, k, s] = (
+                        jc[1:_NUM_JOINTS] if jc is not None and jc.size >= _NUM_JOINTS else 1.0
+                    )
                     if "betas" in e:
                         betas_acc[pid].append(e["betas"])
     betas_by_pid = {p: (np.mean(v, 0).astype(np.float32) if v else np.zeros(10, np.float32))
@@ -325,11 +346,15 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
             # natural mode: one sequence (1,T,K,P,...) -> temporal attention on
             seq = pose.transpose(1, 0, 2, 3, 4, 5)         # (1,T,K,P,54,6)
             msq = mask.transpose(1, 0, 2, 3)               # (1,T,K,P)
+            jsq = jconf.transpose(1, 0, 2, 3, 4)           # (1,T,K,P,54)
             chunks = []
             for t0 in range(0, T, 512):
                 pt = torch.from_numpy(seq[:, t0:t0 + 512]).to(device)
                 mt = torch.from_numpy(msq[:, t0:t0 + 512]).to(device)
-                chunks.append(fusion_model(pt, mt)[0].cpu().numpy())   # (t,P,54,6)
+                jt = torch.from_numpy(jsq[:, t0:t0 + 512]).to(device)
+                chunks.append(fusion_model(
+                    pt, mt, joint_mask=jt if _USE_JOINT_CONF else None,
+                )[0].cpu().numpy())   # (t,P,54,6)
             fused = np.concatenate(chunks, 0)
         else:
             # Per-frame protocol, but the fusion model is OOD at temporal length 1
@@ -342,7 +367,10 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
             for t0 in range(0, T, bs):
                 pt = torch.from_numpy(pose[t0:t0 + bs]).repeat(1, TEMPORAL_PAD, 1, 1, 1, 1).to(device)
                 mt = torch.from_numpy(mask[t0:t0 + bs]).repeat(1, TEMPORAL_PAD, 1, 1).to(device)
-                chunks.append(fusion_model(pt, mt)[:, 0].cpu().numpy())   # (b,P,54,6)
+                jt = torch.from_numpy(jconf[t0:t0 + bs]).repeat(1, TEMPORAL_PAD, 1, 1, 1).to(device)
+                chunks.append(fusion_model(
+                    pt, mt, joint_mask=jt if _USE_JOINT_CONF else None,
+                )[:, 0].cpu().numpy())   # (b,P,54,6)
             fused = np.concatenate(chunks, 0)              # (T,P,54,6)
 
     # BodyPlacer hard-codes cam/body_data; give it a symlinked view whose
@@ -590,11 +618,26 @@ def main():
     ap.add_argument("--dump_dir", default="eval_egohumans/dumps")
     ap.add_argument("--metrics_only", action="store_true", help="Stage B: aggregate dumps")
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--joint_conf", action="store_true", default=False,
+                    help="Feed the per-joint confidence channel (npz key "
+                         "`pred_joint_confidence`) to the fusion model as "
+                         "joint_mask. The model was TRAINED with it, but no "
+                         "evaluation script has ever passed it -- see "
+                         "_USE_JOINT_CONF. Off by default so published numbers "
+                         "stay reproducible.")
     args = ap.parse_args()
+
+    global _USE_JOINT_CONF
+    _USE_JOINT_CONF = args.joint_conf
 
     dump_dir = Path(args.dump_dir); dump_dir.mkdir(parents=True, exist_ok=True)
     if args.metrics_only:
         aggregate(dump_dir); return
+
+    logger.info(
+        f"joint_mask (per-joint confidence) -> fusion model: "
+        f"{'ON (--joint_conf)' if _USE_JOINT_CONF else 'OFF (legacy default)'}"
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     fusion_model = load_fusion_model(Path(args.checkpoint), device)

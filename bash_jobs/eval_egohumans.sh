@@ -51,6 +51,9 @@ ARGS=(--ghost_root "$GHOST_ROOT" --gt_root "$GT_ROOT"
       --scale "$SCALE" --dump_dir "$DUMP_DIR")
 [ -n "${SCENE:-}" ] && ARGS+=(--scene "$SCENE")
 [ -n "${TEMPORAL:-}" ] && ARGS+=(--temporal)
+# JOINT_CONF=1 feeds the per-joint confidence channel (pred_joint_confidence) to
+# the fusion model as joint_mask. Unset => legacy behaviour, numbers unchanged.
+[ "${JOINT_CONF:-0}" = "1" ] && ARGS+=(--joint_conf)
 
 pixi run python evaluation/evaluate_egohumans.py "${ARGS[@]}"
 

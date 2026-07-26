@@ -59,6 +59,17 @@ _NUM_JOINTS = 55   # SMPL-X joints fed to the fusion model (root + 54)
 # run fusion, and read back the first frame. Gains plateau by T~8-32.
 _TEMPORAL_PAD = 32
 
+# PoseFusionModule was TRAINED with a per-joint confidence channel
+# (trainer_v2._MODEL_KEYS includes "joint_mask", fed from the npz key
+# `pred_joint_confidence`), but every evaluation script has always called the
+# model without it, so the module silently falls back to
+# `conf = person_visible` broadcast over all 54 joints
+# (fusion_module_v2.py:428-429). On EgoExo4D 51% of `pred_joint_confidence`
+# entries are exactly 0.0, and confidence enters attention as an additive
+# log(c_i*c_j) bias, so passing it hard-excludes those joint tokens. Set by
+# --joint_conf; default False keeps every previously published number intact.
+_USE_JOINT_CONF = False
+
 # ---------------------------------------------------------------------------
 # Joint mapping: GT keypoints_gt.json name → SMPL-X body joint index (0-21)
 # ---------------------------------------------------------------------------
@@ -462,6 +473,9 @@ def _load_remapped_raw(
                     entry["lh"] = d["smplx_left_hand_pose"][t].reshape(-1, 3)   # (15, 3)
                 if "smplx_right_hand_pose" in d.files:
                     entry["rh"] = d["smplx_right_hand_pose"][t].reshape(-1, 3)  # (15, 3)
+                # Per-joint confidence (SAM3D occlusion estimate), root included.
+                if "pred_joint_confidence" in d.files:
+                    entry["jc"] = d["pred_joint_confidence"][t].reshape(-1)      # (55,)
                 cam_map[gpid] = entry
                 if "smplx_betas" in d.files:
                     betas_acc[gpid].append(d["smplx_betas"][t][:10])
@@ -476,8 +490,9 @@ def _load_remapped_raw(
 def _build_single_frame_tensors(
     raw: list[dict[int, dict]],
     all_pids: list[int],
-) -> tuple[torch.Tensor, torch.Tensor, dict[int, int]]:
-    """Assemble (1, 1, K, P, 54, 6) pose + (1, 1, K, P) mask for the fusion model.
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[int, int]]:
+    """Assemble (1, 1, K, P, 54, 6) pose + (1, 1, K, P) mask + (1, 1, K, P, 54)
+    per-joint confidence for the fusion model.
 
     Single frame (T=1): EgoExo4D body GT is one annotated frame per scene. Pose
     is 6D, root excluded, matching build_fusion_tensors in the RICH eval.
@@ -487,8 +502,9 @@ def _build_single_frame_tensors(
     J = _NUM_JOINTS - 1   # 54, root excluded
     pid_to_slot = {pid: i for i, pid in enumerate(all_pids)}
 
-    pose = np.zeros((1, K, P, J, 6), dtype=np.float32)
-    mask = np.zeros((1, K, P),       dtype=np.float32)
+    pose  = np.zeros((1, K, P, J, 6), dtype=np.float32)
+    mask  = np.zeros((1, K, P),       dtype=np.float32)
+    jconf = np.zeros((1, K, P, J),    dtype=np.float32)
     for k, cam_map in enumerate(raw):
         for pid, pd in cam_map.items():
             p  = pid_to_slot[pid]
@@ -507,9 +523,14 @@ def _build_single_frame_tensors(
                 )
             pose[0, k, p] = _aa_to_6d(aa)[1:]   # (54, 6), root excluded
             mask[0, k, p] = 1.0
+            # Root dropped to match `pose`. Default 1.0 when the npz predates the
+            # key, mirroring data/fusion_dataset.py:486.
+            jc = pd.get("jc")
+            jconf[0, k, p] = jc[1:1 + J] if jc is not None and jc.size >= 1 + J else 1.0
     return (
-        torch.from_numpy(pose).unsqueeze(0),   # (1, T=1, K, P, 54, 6)
-        torch.from_numpy(mask).unsqueeze(0),   # (1, T=1, K, P)
+        torch.from_numpy(pose).unsqueeze(0),    # (1, T=1, K, P, 54, 6)
+        torch.from_numpy(mask).unsqueeze(0),    # (1, T=1, K, P)
+        torch.from_numpy(jconf).unsqueeze(0),   # (1, T=1, K, P, 54)
         pid_to_slot,
     )
 
@@ -562,13 +583,17 @@ def run_fusion_placer(
     all_pids = sorted(global_groups)
 
     # ── Fusion: cross-view attention over K cameras for the single frame ──────
-    pose_t, mask_t, pid_to_slot = _build_single_frame_tensors(raw, all_pids)
+    pose_t, mask_t, jconf_t, pid_to_slot = _build_single_frame_tensors(raw, all_pids)
     # Replicate the single frame to fill the temporal window (see _TEMPORAL_PAD),
     # run fusion, then read back the first frame only.
-    pose_t = pose_t.repeat(1, _TEMPORAL_PAD, 1, 1, 1, 1)
-    mask_t = mask_t.repeat(1, _TEMPORAL_PAD, 1, 1)
+    pose_t  = pose_t.repeat(1, _TEMPORAL_PAD, 1, 1, 1, 1)
+    mask_t  = mask_t.repeat(1, _TEMPORAL_PAD, 1, 1)
+    jconf_t = jconf_t.repeat(1, _TEMPORAL_PAD, 1, 1, 1)
     with torch.no_grad():
-        fused_t = fusion_model(pose_t.to(device), mask_t.to(device))
+        fused_t = fusion_model(
+            pose_t.to(device), mask_t.to(device),
+            joint_mask=jconf_t.to(device) if _USE_JOINT_CONF else None,
+        )
     fused = fused_t[0, :1].cpu().numpy()   # (1, P, 54, 6) — first frame only
 
     # ── Procrustes DLT placement (translation + global orient) ────────────────
@@ -815,6 +840,13 @@ def main():
                              "modality, NOT comparable to CHROMM/HSfM or to RICH M10)")
     parser.add_argument("--max_scenes",  type=int, default=None)
     parser.add_argument("--scene",       default=None, help="Evaluate a single scene by name")
+    parser.add_argument("--joint_conf",  action="store_true", default=False,
+                        help="Feed the per-joint confidence channel (npz key "
+                             "`pred_joint_confidence`) to the fusion model as "
+                             "joint_mask. The model was TRAINED with it, but no "
+                             "evaluation script has ever passed it -- see "
+                             "_USE_JOINT_CONF. Off by default so published "
+                             "numbers stay reproducible.")
     parser.add_argument("--reid_map",    default=str(_REPO_ROOT / "manual_reid.json"),
                         help="Path to manual_reid.json (only used with --use_manual_reid)")
     parser.add_argument("--use_manual_reid", action="store_true", default=False,
@@ -824,6 +856,13 @@ def main():
                              "regenerated; the automatic matcher is self-verifying and "
                              "is the default.")
     args = parser.parse_args()
+
+    global _USE_JOINT_CONF
+    _USE_JOINT_CONF = args.joint_conf
+    logger.info(
+        f"joint_mask (per-joint confidence) -> fusion model: "
+        f"{'ON (--joint_conf)' if _USE_JOINT_CONF else 'OFF (legacy default)'}"
+    )
 
     ghost_root = Path(args.ghost_root)
     gt_root    = Path(args.gt_root)

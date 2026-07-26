@@ -97,7 +97,10 @@ def _process_scene(scene_dir: Path, mc: MetricCollection) -> bool:
     try:
         pose_cam    = inputs["pose"].float()        # (T, K, P, J, 6)
         person_mask = inputs["person_mask"].bool()  # (T, K, P)
-        joint_mask  = inputs["joint_mask"].float()  # (T, K, P, J)
+        # Absent unless fusion.use_joint_confidence; fall back to uniform weights.
+        _jm = inputs.get("joint_mask")
+        joint_mask  = (_jm.float() if _jm is not None
+                       else torch.ones(pose_cam.shape[:-1], dtype=torch.float32))
 
         gt_pose  = targets["pose"].float()          # (T, P, J, 6)
         gt_shape = targets["shape"].float()         # (T, P, 10)

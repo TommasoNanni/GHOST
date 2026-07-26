@@ -46,6 +46,27 @@ from utilities.smplx_utilities import get_smplx_joints
 logger = logging.getLogger(__name__)
 
 
+def _use_joint_confidence() -> bool:
+    from configuration import CONFIG as _CONFIG
+    return bool(getattr(_CONFIG.fusion, "use_joint_confidence", False))
+
+
+def _remap_conf_to_packed(conf: np.ndarray, num_joints: int = 55) -> np.ndarray:
+    """Reindex `pred_joint_confidence` into the `convert_pose` layout.
+
+    Confidence is canonical SMPL-X (jaw 22, eyes 23/24, hands from 25); convert_pose
+    concatenates [root, body, l.hand, r.hand] and zero-pads, skipping jaw and eyes,
+    so hands sit 3 slots earlier. Padding slots hold no joint and stay at 1.0.
+    """
+    if conf.shape[-1] < num_joints:
+        return conf
+    out = np.ones(conf.shape[:-1] + (num_joints,), dtype=np.float32)
+    out[..., 0:22]  = conf[..., 0:22]
+    out[..., 22:37] = conf[..., 25:40]
+    out[..., 37:52] = conf[..., 40:55]
+    return out
+
+
 class FusionDatapoint(Dataset, ABC):
     """Abstract multi-view temporal-window dataset for SST fusion.
 
@@ -480,7 +501,9 @@ class FusionDatapoint(Dataset, ABC):
                     # --- Joint mask (per-joint confidence from occlusion estimation) ---
                     jc = pdata.get("pred_joint_confidence")
                     if jc is not None:
-                        jc_frame = jc[li] if jc.ndim > 1 else jc
+                        jc_frame = _remap_conf_to_packed(
+                            jc[li] if jc.ndim > 1 else jc, J
+                        )
                         joint_mask[t, k, p_slot, :min(J, len(jc_frame))] = jc_frame[:J]
                     else:
                         joint_mask[t, k, p_slot, :] = 1.0
@@ -543,10 +566,13 @@ class FusionDatapoint(Dataset, ABC):
             "body_transl_cam_in": torch.from_numpy(body_transl_cam), # body_transl_cam_in: body root position in camera k's local frame (from pred_cam_t).
             "shape": torch.from_numpy(shape),
             "camera": torch.from_numpy(camera),
-            "joint_mask": torch.from_numpy(joint_mask),
             "person_mask": torch.from_numpy(person_mask),            # (T, K, P) bool
             "kp2d": torch.from_numpy(kp2d),                         # (T, K, P, 70, 2) SAM3D 2D keypoints, pixel space
         }
+        # Off by default: evaluation never feeds joint_mask, so training stays
+        # symmetric with it. best.pt was trained with it on (and unremapped).
+        if _use_joint_confidence():
+            inputs["joint_mask"] = torch.from_numpy(joint_mask)
         # gt_valid: True for frames that have real GT annotations.
         # Frames with all-zero gt_body_transl_world have no RICH annotation and must be
         # excluded from supervised losses (pose MSE, shape MSE, etc.).

@@ -73,6 +73,42 @@ logger = logging.getLogger(__name__)
 _N_SMPL_JOINTS = 24
 _J24_OPERATOR: np.ndarray | None = None
 
+# PoseFusionModule was TRAINED with a per-joint confidence channel
+# (trainer_v2._MODEL_KEYS includes "joint_mask", fed from the npz key
+# `pred_joint_confidence`), but no evaluation script has ever passed it, so the
+# module silently falls back to `conf = person_visible` broadcast over all 54
+# joints (fusion_module_v2.py:428-429). On RICH test 43% of
+# `pred_joint_confidence` entries are exactly 0.0, and confidence enters
+# attention as an additive log(c_i*c_j) bias, so passing it hard-excludes those
+# joint tokens. Set by --joint_conf; default False keeps every previously
+# published number reproducible.
+_USE_JOINT_CONF = False
+
+# `pred_joint_confidence` is written by Pass 2 of preprocessing/parameters_extraction_v2.py
+# from the SMPL-X model's own joints, so it follows the CANONICAL SMPL-X order:
+#     0 pelvis | 1-21 body | 22 jaw | 23/24 eyes | 25-39 left hand | 40-54 right hand
+# The pose tensor is packed differently — [global_orient(1), body(21), left_hand(15),
+# right_hand(15)] then zero-padded to 55 — i.e. jaw and both eyes are SKIPPED. From slot 22
+# on, the two layouts describe different joints: every hand slot is offset by 3, packed
+# left-hand joints 0-2 receive jaw/eye confidence (which is ~0 always, since those joints sit
+# inside the head mesh and the z-buffer marks them self-occluded), and the three zero-padding
+# slots collect real right-hand values. Root and all 21 body joints ARE aligned, so the
+# body-only metrics are unaffected; hands leak in only as attention keys.
+# The same misalignment is present in data/fusion_dataset.py:669-674, so the model was
+# TRAINED this way — enabling the fix at inference is therefore a mild distribution shift,
+# not a strict correction. Set by --fix_conf_alignment; only meaningful with --joint_conf.
+_FIX_CONF_ALIGNMENT = False
+
+
+def _remap_conf_to_packed(conf: np.ndarray) -> np.ndarray:
+    """(..., 55) canonical-SMPL-X confidence -> (..., 55) packed-pose layout."""
+    out = np.ones(conf.shape, dtype=np.float32)
+    out[..., 0:22]  = conf[..., 0:22]    # root + 21 body joints (already aligned)
+    out[..., 22:37] = conf[..., 25:40]   # left hand
+    out[..., 37:52] = conf[..., 40:55]   # right hand
+    out[..., 52:55] = 1.0                # zero-pad slots: no joint behind them, stay neutral
+    return out
+
 
 def _verts_to_smpl24(verts: np.ndarray) -> np.ndarray:
     """Map SMPL-X mesh vertices (10475, 3) -> 24 SMPL joints (24, 3) in the same frame."""
@@ -518,6 +554,28 @@ def load_scene_body_data(
     cam_dirs = sorted(d for d in scene_dir.iterdir()
                       if d.is_dir() and (d / "body_data").is_dir()
                       and d.name not in exclude_cameras)
+
+    # Drop cameras absent from the VGGT npz (i.e. no extrinsics), matching
+    # BodyPlacer._cam_dirs (fusion/placer.py:262-268) and the training-time
+    # contract in data/fusion_dataset.py:1214-1217 ("the rest of the pipeline
+    # only sees cameras with valid extrinsics"). Without this the fusion model
+    # is handed K cameras while the DLT places from K-1, and an uncalibrated
+    # camera pollutes the per-pid betas average.
+    _npz = scene_dir / "vggt_cameras_centered.npz"
+    if _npz.exists():
+        _z = np.load(_npz, allow_pickle=True)
+        _names = {
+            (n.decode() if isinstance(n, bytes) else str(n))
+            for n in _z["camera_names"]
+        }
+        _dropped = [d.name for d in cam_dirs if d.name not in _names]
+        if _dropped:
+            logger.warning(
+                f"  dropping {len(_dropped)} camera(s) with no VGGT extrinsics: "
+                f"{', '.join(_dropped)}"
+            )
+            cam_dirs = [d for d in cam_dirs if d.name in _names]
+
     raw: list[dict[int, dict]] = []
     for cam_dir in cam_dirs:
         cam_persons: dict[int, dict] = {}
@@ -532,8 +590,8 @@ def load_scene_body_data(
 def build_fusion_tensors(
     raw: list[dict[int, dict]],
     num_joints: int = 55,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int], int]:
-    """Assemble (1, T, K, P, J-1, 6), mask, shape tensors for the fusion model."""
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[int], int]:
+    """Assemble (1, T, K, P, J-1, 6), mask, shape, joint-confidence tensors."""
     all_pids   = sorted({pid for cam in raw for pid in cam})
     all_frames = sorted({int(fi) for cam in raw for pd in cam.values()
                          for fi in pd["frame_indices"]})
@@ -549,6 +607,7 @@ def build_fusion_tensors(
     pose_arr  = np.zeros((T, K, P, J, 6),  dtype=np.float32)
     mask_arr  = np.zeros((T, K, P),        dtype=np.float32)
     shape_arr = np.zeros((T, K, P, 10),    dtype=np.float32)
+    jconf_arr = np.zeros((T, K, P, J),     dtype=np.float32)
 
     for k, cam in enumerate(raw):
         for pid, pdata in cam.items():
@@ -561,6 +620,14 @@ def build_fusion_tensors(
             lh    = pdata.get("smplx_left_hand_pose")
             rh    = pdata.get("smplx_right_hand_pose")
             betas = pdata.get("smplx_betas")
+            # Per-joint confidence (SAM3D occlusion estimate), (n_frames, 55).
+            jconf = pdata.get("pred_joint_confidence")
+            if jconf is not None and jconf.ndim == 2 and jconf.shape[1] >= num_joints:
+                if _FIX_CONF_ALIGNMENT:
+                    jconf = _remap_conf_to_packed(jconf[:, :num_joints])
+                jconf = jconf[:, 1:num_joints]          # drop root, (n_frames, 54)
+            else:
+                jconf = None
 
             for local_t, global_t in enumerate(fi):
                 t = int(global_t) - frame_start
@@ -578,6 +645,9 @@ def build_fusion_tensors(
                     )
                 pose_arr[t, k, p]  = _aa_to_6d(aa)[1:]   # root excluded
                 mask_arr[t, k, p]  = 1.0
+                # Default 1.0 when the npz predates the key, mirroring
+                # data/fusion_dataset.py:486.
+                jconf_arr[t, k, p] = jconf[local_t] if jconf is not None else 1.0
                 if betas is not None:
                     shape_arr[t, k, p] = betas[local_t, :10]
 
@@ -585,6 +655,7 @@ def build_fusion_tensors(
         torch.from_numpy(pose_arr).unsqueeze(0),
         torch.from_numpy(mask_arr).unsqueeze(0),
         torch.from_numpy(shape_arr).unsqueeze(0),
+        torch.from_numpy(jconf_arr).unsqueeze(0),
         all_pids,
         frame_start,
     )
@@ -623,6 +694,7 @@ def evaluate_scene(
     exclude_cameras:  list[str] | None = None,
     scale_mode:       str = "baseline",
     scale_smooth:     str = "none",
+    centered_root:    Path | None = None,
 ) -> dict[str, float] | None:
     """Run full inference + evaluation for one scene. Returns metric dict or None."""
     logger.info(f"\n{'─'*60}")
@@ -640,7 +712,7 @@ def evaluate_scene(
 
     # ── 2. Fusion model ───────────────────────────────────────────────────────
     try:
-        pose_t, mask_t, shape_t, all_pids, frame_start = build_fusion_tensors(raw)
+        pose_t, mask_t, shape_t, jconf_t, all_pids, frame_start = build_fusion_tensors(raw)
     except RuntimeError as e:
         logger.warning(f"  {e} — skipping")
         return None
@@ -652,6 +724,7 @@ def evaluate_scene(
     with torch.no_grad():
         fused_pose_t = fusion_model(
             pose_t.to(device), mask_t.to(device),
+            joint_mask=jconf_t.to(device) if _USE_JOINT_CONF else None,
         )
     fused_pose  = fused_pose_t[0].cpu().numpy()                                  # (T, P, 54, 6)
 
@@ -683,7 +756,8 @@ def evaluate_scene(
         # SAM3D kp2d are in uncropped source pixels; VGGT cameras live in
         # centered-crop space. crop_meta.json (written by center_images.py next
         # to the centered images) supplies the per-camera offset to reconcile them.
-        crop_meta_path = rich_root / f"centered_{gt_split}" / scene_name / "crop_meta.json"
+        _centered = centered_root or (rich_root / f"centered_{gt_split}")
+        crop_meta_path = _centered / scene_name / "crop_meta.json"
         placer = BodyPlacer(scene_dir, _smplx_arg, crop_meta_path=crop_meta_path)
     except Exception as e:
         logger.warning(f"  BodyPlacer init failed: {e} — skipping")
@@ -1026,6 +1100,13 @@ def main() -> None:
                         help="Limit evaluation to first N scenes (for debugging).")
     parser.add_argument("--gt_split",          default="test",
                         help="GT body split: 'test' or 'train'")
+    parser.add_argument("--joint_conf",        action="store_true", default=False,
+                        help="Feed the per-joint confidence channel (npz key "
+                             "`pred_joint_confidence`) to the fusion model as "
+                             "joint_mask. The model was TRAINED with it, but no "
+                             "evaluation script has ever passed it -- see "
+                             "_USE_JOINT_CONF. Off by default so published "
+                             "numbers stay reproducible.")
     parser.add_argument("--scenes",            default="",
                         help="Comma-separated scene names to evaluate (default: all)")
     parser.add_argument("--skip_scenes",       default="",
@@ -1040,7 +1121,20 @@ def main() -> None:
                         choices=["none", "median"],
                         help="Temporal denoise of per-frame scale: median=one robust scalar "
                              "per scene (kills VGGT per-frame jitter).")
+    parser.add_argument("--centered_root",      type=Path, default=None,
+                        help="Dir holding <scene>/crop_meta.json from the centered-image step. "
+                             "Default: <rich_root>/centered_<gt_split>. The sqsh CANNOT be "
+                             "mounted under rich_root itself (Lustre forbids FUSE mounts over "
+                             "it), so mount it node-local (e.g. /tmp) and pass the mount here. "
+                             "Without it the placer silently runs with offsets = 0.")
     args = parser.parse_args()
+
+    global _USE_JOINT_CONF
+    _USE_JOINT_CONF = args.joint_conf
+    logger.info(
+        f"joint_mask (per-joint confidence) -> fusion model: "
+        f"{'ON (--joint_conf)' if _USE_JOINT_CONF else 'OFF (legacy default)'}"
+    )
 
     device = torch.device(args.device)
     logger.info(f"Device: {device}")
@@ -1080,6 +1174,7 @@ def main() -> None:
             device=device,
             smplx_model_path=args.smplx_model,
             gt_split=args.gt_split,
+            centered_root=args.centered_root,
             exclude_cameras=skip_cameras.get(scene_dir.name),
             scale_mode=args.scale,
             scale_smooth=args.scale_smooth,

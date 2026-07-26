@@ -63,8 +63,11 @@ def main():
 
     err = geodesic_deg(R_inp, R_gt)   # (T, K, P, J)
 
-    # joint_mask: (T, K, P, J) — only consider frames where joint was observed
-    jm = inputs["joint_mask"]  # (T, K, P, J)
+    # joint_mask: (T, K, P, J) — only consider frames where joint was observed.
+    # Absent unless fusion.use_joint_confidence; fall back to "all observed".
+    jm = inputs.get("joint_mask")
+    if jm is None:
+        jm = torch.ones((T, K, P, J), dtype=torch.float32)
 
     print("\n--- Per-joint input error vs GT (geodesic degrees) ---")
     print(f"{'Joint':>12}  {'mean_all':>10}  {'mean_obs':>10}  {'obs_rate':>10}")

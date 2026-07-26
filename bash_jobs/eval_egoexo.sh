@@ -23,13 +23,23 @@ echo "========================="
 echo "Job ID: $SLURM_JOB_ID  |  Start: $(date)"
 echo ""
 
+# JOINT_CONF=1 feeds the per-joint confidence channel (pred_joint_confidence) to
+# the fusion model as joint_mask. The model was trained with it but no evaluation
+# script has ever passed it. Unset => legacy behaviour, numbers unchanged.
+#   sbatch --export=ALL,JOINT_CONF=1 bash_jobs/eval_egoexo.sh
+JOINT_CONF_FLAG=""
+if [ "${JOINT_CONF:-0}" = "1" ]; then
+    JOINT_CONF_FLAG="--joint_conf"
+fi
+
 pixi run python evaluation/evaluate_egoexo.py \
     --ghost_root  /iopsstor/scratch/cscs/tnanni/ghost_outputs/egoexo4d \
     --gt_root     /capstor/scratch/cscs/tnanni/datasets/egoexo4d/gt \
     --smplx_model body_models/SMPLX_NEUTRAL.pkl \
     --checkpoint  checkpoints/fusion_module/best.pt \
     --scale       "${SCALE_MODE:-baseline}" \
-    --reid_map    manual_reid.json
+    --reid_map    manual_reid.json \
+    ${JOINT_CONF_FLAG}
 
 echo ""
 echo "Done: $(date)"
