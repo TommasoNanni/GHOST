@@ -1,18 +1,31 @@
-"""Evaluate ghost pipeline on RICH test set — progressive oracle ablations.
+"""Evaluate ghost pipeline on RICH test set — PLACEMENT-METHOD comparison (P1, P2).
 
-Runs M2 -> M3 -> M4 in order, each substituting one more component with
-ground truth, to attribute total error to a specific stage of the pipeline:
+The eval core here (loaders, GT matching, metrics, cam_10 filter, crop_meta,
+scale handling, joint convention) is IDENTICAL to evaluation/ablations.py and
+evaluation/evaluate_rich.py. The ONLY thing that changes between this script and
+the production number is *how the root translation + global orientation are
+recovered* — the "placement" step. Every other component (pred camera, pred
+scale, pred pose, neutral pred FK vs gendered GT FK) is held at the production
+config; NO GT camera/scale/pose is substituted.
 
-  M2: pred-cam + GT-scale   + pred-pose   (removes scale error)
-  M3: GT-cam   + GT-scale   + pred-pose   (removes camera error too)
-  M4: GT-cam   + GT-scale   + GT-pose     (full oracle — fusion-model ceiling)
+The production placement method is multi-view DLT triangulation
+(`BodyPlacer.estimate_procrustes_dlt_mhr`, = the prod M10 number in
+evaluate_rich.py: WA-MPJPE-100 50.4 / W-MPJPE-100 70.4). This script compares it
+against two weaker placement baselines, implemented as STANDALONE functions in
+this file (they are NOT methods on BodyPlacer — the shared class is untouched;
+they take a constructed BodyPlacer instance and read its attributes):
 
-Reading the table: M2-M9(prod) gap = scale error. M3-M2 gap = camera error.
-M4-M3 gap = pose/fusion error (the irreducible floor given perfect placement).
+  P1 = mean-SAM3D-root — average the per-camera SAM3D root (smplx_transl +
+       smplx_global_orient) in the shared world frame. No triangulation. Tests
+       whether multi-view geometry beats averaging monocular guesses.
+  P2 = depth-readout   — read the VGGT depth map at each 2D keypoint, backproject,
+       Procrustes. Tests whether keypoint geometry beats raw depth readout.
 
-For the honest production number (no oracle substitutions), see
-evaluation/evaluate_rich.py (M10). For the full M1-M10 modality zoo, see
-evaluation/evaluate_on_rich_test.py.
+Both are expected to LOSE to DLT (that is the point — they defend the
+triangulation design). Compare their *-100 rows against the prod M10 rung.
+
+For the honest production number, see evaluation/evaluate_rich.py (M10).
+For the oracle camera/scale/pose ladder, see evaluation/ablations.py (M2/M3/M4).
 
 Metrics (all in millimetres unless noted):
   WA-MPJPE     — World-Aligned MPJPE: single Sim(3) over ALL frames jointly.
@@ -29,7 +42,7 @@ CHROMM evaluates on 100-frame segments, so compare against the *-100 rows.
 
 Usage
 -----
-    python evaluation/ablations.py \\
+    python evaluation/placing_approaches.py \\
         --ghost_output_root /path/to/ghost_outputs/rich_test \\
         --rich_root         /path/to/rich \\
         --checkpoint        /path/to/fusion_checkpoint.pt \\
@@ -50,6 +63,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation as SciR
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -57,14 +71,18 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from fusion.fusion_module_v2 import PoseFusionModule
-from fusion.placer import BodyPlacer
+# _SMPLX_TO_MHR70 / _6d_to_aa_batch are module-level helpers in fusion.placer —
+# imported (not re-implemented) so the standalone placement functions below use
+# the exact same joint mapping + 6D->axis-angle convention as the DLT baseline.
+from fusion.placer import BodyPlacer, _SMPLX_TO_MHR70, _6d_to_aa_batch
 from utilities.rich_gender_plugin import resolve_smplx_models
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# Modalities run, in order. Fixed for this script — see module docstring.
-_MODALITIES = (2, 3, 4)
+# Placement methods compared, in order. P1 = mean-SAM3D-root, P2 = depth-readout.
+# (See module docstring; the DLT baseline is the prod M10 number.)
+_MODALITIES = (1, 2)
 
 # Evaluation joint convention: the 24 SMPL joints (NOT the SMPL-X body joints), to
 # match the WHAM/DuoMo/CHROMM RICH protocol. SMPL-X mesh vertices are mapped to SMPL
@@ -632,13 +650,338 @@ def load_fusion_model(checkpoint: Path, device: torch.device) -> PoseFusionModul
 
 
 # ---------------------------------------------------------------------------
-# Per-scene evaluation (M2 -> M3 -> M4)
+# Per-scene evaluation (P1, P2 — placement method varies, everything else = prod)
 # ---------------------------------------------------------------------------
 
+# ===========================================================================
+# Standalone placement methods (P1, P2)
+#
+# These are the ONLY thing that differs from the production eval. They are
+# module-level functions, NOT methods on BodyPlacer — the shared class is left
+# untouched. Each takes a constructed BodyPlacer `placer` and reads its public +
+# helper attributes (extrinsics, intrinsics, cam_valid, _cam_dirs, _smplx_fk,
+# _mapper, _orig_to_vggt, _cam_offset, depth_mm, ...) from the outside.
+#
+# Both return the same contract as BodyPlacer.estimate_procrustes_dlt_mhr:
+#   translations : {pid: {global_frame_idx: pelvis_world (3,)}}
+#   orientations : {pid: {global_frame_idx: R (3,3)}}
+# so the downstream reconstruction/metric code is identical for every method.
+#
+# Shared world-frame lift (matches the DLT baseline's metric world):
+#   X_world = R_e^T @ (X_cam_metric - scale * t_e)
+#   R_world = R_e^T @ R_cam
+# where [R_e|t_e] = placer.extrinsics[t, k] is the VGGT camera-from-world
+# extrinsic (t_e in VGGT units) and X_cam_metric is in metres.
+# ===========================================================================
+
+
+def estimate_mean_sam3d_root(
+    placer,
+    scale,
+    all_pids,
+    pred_betas_by_pid,
+    fused_pose_by_pid=None,
+    frame_start=0,
+    min_cams=1,
+    smooth_window=15,
+):
+    """P1 — mean of the per-camera SAM3D root. No triangulation.
+
+    Each camera's SAM3D output already carries a monocular guess of the root:
+    ``smplx_global_orient`` (canonical->camera rotation) and ``smplx_transl``
+    (camera-frame pelvis offset). Lift each per-camera guess into the shared
+    VGGT world frame, then average — arithmetic mean for the pelvis translation,
+    chordal SO(3) mean for the orientation. This is the "fuse the monocular
+    guesses" baseline that DLT triangulation is compared against.
+
+    The pelvis in camera metres is ``J0(betas) + smplx_transl`` (SMPL-X
+    global_orient pivots about joint 0, so pelvis position is independent of
+    pose/orient). ``fused_pose_by_pid`` is accepted for signature parity but is
+    NOT used — this baseline deliberately consumes only the raw SAM3D root.
+    """
+    # Preload per-(cam, pid) SAM3D root params.
+    cam_data_all: list[dict[int, dict]] = []
+    for cam_dir in placer._cam_dirs:
+        cam_map: dict[int, dict] = {}
+        remap = placer._cam_pid_remap.get(cam_dir.name, {})
+        for pid in sorted(all_pids):
+            disk_pid = remap.get(pid, pid)
+            bf = cam_dir / "body_data" / f"person_{disk_pid}.npz"
+            if not bf.exists():
+                continue
+            d = np.load(bf, allow_pickle=False)
+            if not {"smplx_transl", "smplx_global_orient", "frame_indices"}.issubset(d.files):
+                continue
+            fi = d["frame_indices"].astype(int)
+            cam_map[pid] = {
+                "local_t": {int(g): int(l) for l, g in enumerate(fi)},
+                "transl":  d["smplx_transl"],
+                "orient":  d["smplx_global_orient"],
+            }
+        cam_data_all.append(cam_map)
+
+    translations: dict[int, dict[int, np.ndarray]] = {}
+    orientations: dict[int, dict[int, np.ndarray]] = {}
+
+    for pid in sorted(all_pids):
+        betas = pred_betas_by_pid.get(pid, np.zeros(10, dtype=np.float32))
+        # Canonical pelvis J0(betas): zero-pose zero-orient FK gives the same
+        # joint-0 the eval pivots on (rotation pivots about pelvis).
+        J0 = placer._smplx_fk(
+            betas[np.newaxis],
+            np.zeros((1, 63), dtype=np.float32),
+            np.zeros((1, 3), dtype=np.float32),
+            pid=pid,
+        )[0, 0].astype(np.float64)                       # (3,)
+
+        all_frames: set[int] = set()
+        for cm in cam_data_all:
+            if pid in cm:
+                all_frames.update(cm[pid]["local_t"].keys())
+
+        trans_out: dict[int, np.ndarray] = {}
+        orient_out: dict[int, np.ndarray] = {}
+
+        for global_t in sorted(all_frames):
+            vggt_t = global_t - frame_start
+            if vggt_t < 0 or vggt_t >= placer.T:
+                continue
+            s = float(scale[vggt_t]) if isinstance(scale, np.ndarray) else float(scale)
+
+            pelvis_list: list[np.ndarray] = []
+            R_list:      list[np.ndarray] = []
+            for k, cm in enumerate(cam_data_all):
+                if pid not in cm or global_t not in cm[pid]["local_t"]:
+                    continue
+                if not placer.cam_valid[vggt_t, k]:
+                    continue
+                lt = cm[pid]["local_t"][global_t]
+                ext = placer.extrinsics[vggt_t, k].astype(np.float64)
+                R_e, t_e = ext[:3, :3], ext[:3, 3]
+                pelvis_cam = J0 + cm[pid]["transl"][lt].astype(np.float64)   # metres
+                R_cam = SciR.from_rotvec(cm[pid]["orient"][lt]).as_matrix()
+                pelvis_list.append(R_e.T @ (pelvis_cam - s * t_e))
+                R_list.append(R_e.T @ R_cam)
+
+            if len(pelvis_list) < min_cams:
+                continue
+
+            trans_out[global_t] = np.mean(pelvis_list, axis=0).astype(np.float32)
+            orient_out[global_t] = (
+                SciR.from_matrix(np.stack(R_list)).mean().as_matrix().astype(np.float32)
+            )
+
+        translations[pid] = trans_out
+        orientations[pid] = orient_out
+
+    _smooth_translations(translations, smooth_window)
+    return translations, orientations
+
+
+def estimate_depth_readout(
+    placer,
+    scale,
+    all_pids,
+    pred_betas_by_pid,
+    fused_pose_by_pid=None,
+    frame_start=0,
+    min_cams=1,
+    min_joints=3,
+    smooth_window=15,
+    depth_patch=1,
+):
+    """P2 — back-project each 2D keypoint using the VGGT depth map, then Procrustes.
+
+    Structurally identical to BodyPlacer.estimate_procrustes_dlt_mhr (same MHR70
+    keypoints, same FK canonical skeleton, same Procrustes step) except Step 1 is
+    replaced: instead of DLT-triangulating a joint across views, each camera's 2D
+    keypoint is back-projected to 3D using the depth read straight from
+    vggt_depth_centered.npz at that pixel:
+
+        X_cam = s * (depth/1000) * K^-1 @ [u, v, 1]     (metric camera frame;
+                                                         depth is in VGGT units, s makes it metric)
+
+    Per-camera world estimates of a joint are averaged. Expected to lose to
+    triangulation: limb keypoints frequently land on background pixels, reading a
+    wildly wrong depth (documented up to ~50% error). ``depth_patch`` reads a
+    (2p+1)^2 median around the pixel to blunt that; it does not fix occlusion.
+    """
+    if placer.depth_mm is None:
+        raise RuntimeError(
+            f"estimate_depth_readout requires vggt_depth_centered.npz (not found in {placer.scene_dir})"
+        )
+    _, _, H_d, W_d = placer.depth_mm.shape
+
+    cam_data_all: list[dict[int, dict]] = []
+    for cam_dir in placer._cam_dirs:
+        cam_map: dict[int, dict] = {}
+        remap = placer._cam_pid_remap.get(cam_dir.name, {})
+        for pid in sorted(all_pids):
+            disk_pid = remap.get(pid, pid)
+            bf = cam_dir / "body_data" / f"person_{disk_pid}.npz"
+            if not bf.exists():
+                continue
+            d = np.load(bf, allow_pickle=False)
+            if not {"pred_keypoints_2d", "frame_indices", "smplx_body_pose"}.issubset(d.files):
+                continue
+            fi = d["frame_indices"].astype(int)
+            cam_map[pid] = {
+                "local_t":   {int(g): int(l) for l, g in enumerate(fi)},
+                "kp2d":      d["pred_keypoints_2d"],
+                "body_pose": d["smplx_body_pose"],
+            }
+        cam_data_all.append(cam_map)
+
+    _JOINTS = sorted(j for j in _SMPLX_TO_MHR70 if _SMPLX_TO_MHR70[j] in placer._mapper._index)
+
+    translations: dict[int, dict[int, np.ndarray]] = {}
+    orientations: dict[int, dict[int, np.ndarray]] = {}
+
+    for pid in sorted(all_pids):
+        betas = pred_betas_by_pid.get(pid, np.zeros(10, dtype=np.float32))
+        all_frames: set[int] = set()
+        for cm in cam_data_all:
+            if pid in cm:
+                all_frames.update(cm[pid]["local_t"].keys())
+
+        trans_out: dict[int, np.ndarray] = {}
+        orient_out: dict[int, np.ndarray] = {}
+
+        for global_t in sorted(all_frames):
+            vggt_t = global_t - frame_start
+            if vggt_t < 0 or vggt_t >= placer.T:
+                continue
+            s = float(scale[vggt_t]) if isinstance(scale, np.ndarray) else float(scale)
+
+            # ── Step 1: back-project each joint via depth readout ─────────────
+            joint_world: dict[int, np.ndarray] = {}
+            for smplx_j in _JOINTS:
+                joint_idx = _SMPLX_TO_MHR70[smplx_j]
+                est: list[np.ndarray] = []
+                for k, cm in enumerate(cam_data_all):
+                    if pid not in cm or global_t not in cm[pid]["local_t"]:
+                        continue
+                    if not placer.cam_valid[vggt_t, k]:
+                        continue
+                    kp2d = cm[pid]["kp2d"]
+                    if joint_idx >= kp2d.shape[1]:
+                        continue
+                    lt = cm[pid]["local_t"][global_t]
+
+                    oc  = placer.original_coords[vggt_t, k]
+                    os_ = placer.original_size[vggt_t, k]
+                    W_orig, H_orig = float(os_[0]), float(os_[1])
+                    off_x, off_y = placer._cam_offset(k)
+                    u, v = placer._orig_to_vggt(kp2d[lt, joint_idx], oc, W_orig, H_orig, off_x, off_y)
+                    if not placer._in_bounds(u, v, oc[2], oc[3]):
+                        continue
+
+                    iu, iv = int(round(u)), int(round(v))
+                    if not (0 <= iu < W_d and 0 <= iv < H_d):
+                        continue
+                    p = depth_patch
+                    patch = placer.depth_mm[
+                        vggt_t, k,
+                        max(0, iv - p): iv + p + 1,
+                        max(0, iu - p): iu + p + 1,
+                    ].astype(np.float64)
+                    vals = patch[patch > 0]
+                    if vals.size == 0:
+                        continue
+                    # The stored depth is in VGGT reconstruction units (NOT metres,
+                    # despite the "mm" name): backprojecting depth/1000 alone puts
+                    # the pelvis at ~0.7 m when SAM3D reports ~4.7 m. It is made
+                    # metric by the same scale s that scales the extrinsic t_e — so
+                    # depth AND t_e below are both in metres before the lift.
+                    depth_vggt = float(np.median(vals)) / 1000.0    # VGGT units
+
+                    intr = placer.intrinsics[vggt_t, k].astype(np.float64)
+                    ray  = np.linalg.inv(intr) @ np.array([u, v, 1.0])
+                    X_cam = s * depth_vggt * ray                     # -> metric camera frame
+                    ext = placer.extrinsics[vggt_t, k].astype(np.float64)
+                    R_e, t_e = ext[:3, :3], ext[:3, 3]
+                    est.append(R_e.T @ (X_cam - s * t_e))
+
+                if len(est) >= min_cams:
+                    joint_world[smplx_j] = np.mean(est, axis=0)
+
+            if len(joint_world) < min_joints:
+                continue
+
+            # ── Step 2: FK canonical skeleton (fused pose if available) ───────
+            if fused_pose_by_pid is not None and pid in fused_pose_by_pid:
+                t_local = global_t - frame_start
+                fused_arr = fused_pose_by_pid[pid]
+                if not (0 <= t_local < len(fused_arr)):
+                    continue
+                body_pose_frame = _6d_to_aa_batch(fused_arr[t_local, :21]).reshape(63)
+            else:
+                body_pose_frame = None
+                for cm in cam_data_all:
+                    if pid in cm and global_t in cm[pid]["local_t"]:
+                        body_pose_frame = cm[pid]["body_pose"][cm[pid]["local_t"][global_t]]
+                        break
+            if body_pose_frame is None:
+                continue
+
+            fk, verts = placer._smplx_fk(
+                betas[np.newaxis], body_pose_frame[np.newaxis],
+                np.zeros((1, 3), dtype=np.float32),
+                return_verts=True, pid=pid,
+            )
+            J_can  = fk[0]
+            kp_can = placer._mapper.map(verts[0])
+
+            # ── Step 3: Procrustes — R, t s.t. R @ J_can + t ≈ J_world ────────
+            vis = sorted(joint_world.keys())
+            A = np.stack([joint_world[j] for j in vis], axis=0).astype(np.float64)
+            B = np.stack([kp_can[placer._mapper.index(_SMPLX_TO_MHR70[j])] for j in vis],
+                         axis=0).astype(np.float64)
+            A_mean, B_mean = A.mean(0), B.mean(0)
+            Hm = (B - B_mean).T @ (A - A_mean)
+            U, _, Vt = np.linalg.svd(Hm)
+            d_sign = np.linalg.det(Vt.T @ U.T)
+            R = (Vt.T @ np.diag([1.0, 1.0, d_sign]) @ U.T).astype(np.float32)
+            t = (A_mean - R.astype(np.float64) @ B_mean).astype(np.float32)
+            pelvis_world = (R.astype(np.float64) @ J_can[0].astype(np.float64)
+                            + t.astype(np.float64)).astype(np.float32)
+
+            trans_out[global_t] = pelvis_world
+            orient_out[global_t] = R
+
+        translations[pid] = trans_out
+        orientations[pid] = orient_out
+
+    _smooth_translations(translations, smooth_window)
+    return translations, orientations
+
+
+def _smooth_translations(translations, smooth_window):
+    """Savitzky-Golay smooth each per-pid pelvis trajectory in place.
+
+    Same smoothing baked into BodyPlacer.estimate_procrustes_dlt_mhr
+    (window=15, polyorder=2) so P1/P2 are compared on equal footing with DLT.
+    """
+    if smooth_window <= 0:
+        return
+    w = smooth_window if smooth_window % 2 == 1 else smooth_window + 1
+    for pid, frames in translations.items():
+        sorted_f = sorted(frames)
+        if len(sorted_f) < w:
+            continue
+        traj = np.stack([frames[f] for f in sorted_f])
+        traj_s = savgol_filter(traj, window_length=w, polyorder=2, axis=0)
+        translations[pid] = {f: traj_s[i].astype(np.float32) for i, f in enumerate(sorted_f)}
+
+
 _MODALITY_LABELS = {
-    2: "M2: pred-cam + GT-scale   + pred-pose",
-    3: "M3: GT-cam   + GT-scale   + pred-pose",
-    4: "M4: GT-cam   + GT-scale   + GT-pose  (oracle)",
+    1: "P1: mean-SAM3D-root + pred-cam + pred-scale + pred-pose",
+    2: "P2: depth-readout   + pred-cam + pred-scale + pred-pose",
+}
+
+_PLACER_FUNCS = {
+    1: estimate_mean_sam3d_root,
+    2: estimate_depth_readout,
 }
 
 
@@ -653,10 +996,10 @@ def evaluate_scene(
     exclude_cameras:  list[str] | None = None,
     scale_mode:       str = "baseline",
     scale_smooth:     str = "none",
-    modalities:       list[int] | None = None,
     centered_root:    Path | None = None,
+    modalities:       list[int] | None = None,
 ) -> dict[str, float] | None:
-    """Run full inference + M2/M3/M4 evaluation for one scene. Returns metric dict or None."""
+    """Run full inference + P1/P2 placement eval for one scene. Returns metric dict or None."""
     if modalities is None:
         modalities = list(_MODALITIES)
 
@@ -707,6 +1050,8 @@ def evaluate_scene(
         betas_by_pid.setdefault(pid, np.zeros(10, dtype=np.float32))
 
     # ── 3. Procrustes DLT setup ──────────────────────────────────────────────
+    # `placer` (gendered, resolved per-scene) is only used for GT-joint building
+    # and ghost↔GT pid matching — every actual placement uses `placer_neutral`.
     try:
         _gender_json = _REPO_ROOT / "resource" / "rich_gender.json"
         _smplx_arg = (
@@ -730,66 +1075,13 @@ def evaluate_scene(
             for pid in all_pids
         }
 
-    # ── 3a. Pre-compute GT extrinsics + intrinsics (shared across modalities) ──
+    # ── 3a. GT extrinsics/intrinsics (for camera diagnostics + world frame) ──
     gt_exts_for_scale  = load_gt_extrinsics(scene_name, rich_root)
     gt_intrs_for_scale = load_gt_intrinsics(scene_name, rich_root)
     _ref_name_idx      = int(re.search(r"\d+", cam_dirs[0].name).group()) if cam_dirs else 0
 
-    def _compute_gt_scale() -> float:
-        """GT scale = median(||t_gt_k_rel|| / ||t_vggt_k_med||) over cameras."""
-        if not gt_exts_for_scale:
-            return 1.0
-        E0 = gt_exts_for_scale[_ref_name_idx].astype(np.float64)
-        R0, t0 = E0[:3, :3], E0[:3, 3]
-        vnames = [n.decode() if isinstance(n, bytes) else n for n in placer.camera_names]
-        ratios = []
-        for ki, cn in enumerate(vnames):
-            if ki == 0:
-                continue
-            m = re.search(r"\d+", cn)
-            if not m:
-                continue
-            gidx = int(m.group())
-            if gidx >= len(gt_exts_for_scale):
-                continue
-            Ek   = gt_exts_for_scale[gidx].astype(np.float64)
-            tk_gt = Ek[:3, 3] - Ek[:3, :3] @ R0.T @ t0
-            vmask = placer.cam_valid[:, ki]
-            if not vmask.any():
-                continue
-            t_med = np.median(placer.extrinsics[vmask, ki, :3, 3], axis=0)
-            pn    = np.linalg.norm(t_med)
-            gn    = np.linalg.norm(tk_gt)
-            if pn > 1e-6:
-                ratios.append(gn / pn)
-        return float(np.median(ratios)) if ratios else 1.0
-
-    def _build_gt_camera_extrinsics() -> np.ndarray | None:
-        """Return (T, K, 3, 4) GT extrinsics re-rooted to cam_dirs[0], scale 1.0."""
-        if not gt_exts_for_scale:
-            return None
-        E0   = gt_exts_for_scale[_ref_name_idx].astype(np.float64)
-        R0gt = E0[:3, :3];  t0gt = E0[:3, 3]
-        vnames = [n.decode() if isinstance(n, bytes) else n for n in placer.camera_names]
-        K_     = len(vnames)
-        T_     = placer.T
-        exts   = np.zeros((T_, K_, 3, 4), dtype=np.float64)
-        for ki, cn in enumerate(vnames):
-            m = re.search(r"\d+", cn)
-            if not m:
-                continue
-            gidx = int(m.group())
-            if gidx >= len(gt_exts_for_scale):
-                continue
-            Ek   = gt_exts_for_scale[gidx].astype(np.float64)
-            Rk   = Ek[:3, :3] @ R0gt.T           # re-root rotation
-            tk   = Ek[:3, 3] - Ek[:3, :3] @ R0gt.T @ t0gt  # re-root translation
-            P34  = np.hstack([Rk, tk[:, None]])   # (3, 4)
-            exts[:, ki] = P34[None]               # broadcast over T
-        return exts.astype(np.float32)
-
-    # Pred scale — triangulation-based (more robust than depth-based). Only
-    # feeds camera diagnostics here since M2/M3/M4 all use GT scale.
+    # Pred scale — triangulation-based (more robust than depth-based). Used by
+    # both methods: neither P1 nor P2 substitutes GT scale/camera/pose.
     try:
         sam3d_mean_betas: dict[Path, np.ndarray] = {}
         for cam_dir in cam_dirs:
@@ -827,13 +1119,13 @@ def evaluate_scene(
         logger.warning(f"  Scale estimation failed: {e} — skipping")
         return None
 
-    # ── 4. GT body data + world-to-ref transform (shared) ────────────────────
+    # ── 4. GT body data + world-to-ref transform ──────────────────────────
     gt_body_data = load_gt_body_data(scene_name, rich_root, split=gt_split)
     if not gt_body_data:
         logger.warning(f"  No GT found in {gt_split}_body/ — skipping")
         return None
 
-    gt_exts  = gt_exts_for_scale  # already loaded above
+    gt_exts  = gt_exts_for_scale
     _ref_idx = _ref_name_idx
     if gt_exts and _ref_idx < len(gt_exts):
         E_ref   = gt_exts[_ref_idx].astype(np.float64)
@@ -843,7 +1135,7 @@ def evaluate_scene(
         R_w2ref = np.eye(3, dtype=np.float64)
         t_w2ref = np.zeros(3, dtype=np.float64)
 
-    # ── 4b. Camera diagnostics (pred vs GT, modality-independent) ───────────
+    # ── 4b. Camera diagnostics (pred vs GT) ──────────────────────────────
     cam_rot_err  = float("nan")
     cam_t_cos    = float("nan")
     cam_t_err_cm = float("nan")
@@ -902,22 +1194,18 @@ def evaluate_scene(
             t_err_cms_list = [float(np.linalg.norm(tm * pred_scale_val_diag - tg)) * 100.0
                               for tm, tg in _cam_t_data]
             cam_t_err_cm = float(np.mean(t_err_cms_list))
-        cam_t_err_gt_scale_cm = float("nan")
-        if _cam_t_data and gt_scale_val > 0:
-            cam_t_err_gt_scale_cm = float(np.mean(
-                [float(np.linalg.norm(tm * gt_scale_val - tg)) * 100.0 for tm, tg in _cam_t_data]
-            ))
-    else:
-        cam_t_err_gt_scale_cm = float("nan")
 
     logger.info(
         f"  Cam rot err = {cam_rot_err:.2f}°  cam_t_cos = {cam_t_cos:.4f}  "
-        f"cam_t_err(pred_sc) = {cam_t_err_cm:.1f}cm  cam_t_err(gt_sc) = {cam_t_err_gt_scale_cm:.1f}cm  "
+        f"cam_t_err(pred_sc) = {cam_t_err_cm:.1f}cm  "
         f"pred_scale = {pred_scale_val_diag:.4f}  gt_scale = {gt_scale_val:.4f}  "
         f"scale_err = {scale_err_pct:+.1f}%"
     )
 
-    # ── 5. Ghost↔GT pid matching (canonical scale, independent of --scale) ──
+    # ── 5. Ghost↔GT pid matching (via gendered placer, canonical scale) ──────
+    # Canonical MA-baseline scale is used (independent of --scale) so matching
+    # is identical across scale-mode runs — the tested pred_scale_pf still
+    # drives every metric below.
     K_cams = len(cam_dirs)
     pid_cam_count: dict[int, int] = defaultdict(int)
     for cam_dir in cam_dirs:
@@ -951,7 +1239,7 @@ def evaluate_scene(
         return None
     n_matched = len(pid_match)
 
-    # ── 6. Pre-build GT joints — gendered model (matches M2/M3/M4 convention) ──
+    # ── 6. GT joints — gendered model (P1/P2 both use gendered GT, like prod) ──
     J_body = _N_SMPL_JOINTS
 
     def _build_gt_joints(_plc):
@@ -976,109 +1264,41 @@ def evaluate_scene(
 
     gt_joints, gt_roots = _build_gt_joints(placer)
 
-    # Neutral placer: M2/M3/M4 all use neutral pred FK (reflects the actual
-    # inference pipeline, which never knows subject gender), evaluated
-    # against the gendered GT joints built above.
     neutral_path = smplx_model_path.parent / "SMPLX_NEUTRAL.pkl"
     placer_neutral = BodyPlacer(scene_dir, neutral_path, crop_meta_path=crop_meta_path)
 
-    # Pre-build GT pose array (for M4): (T, P, 54, 6)
-    # Frames without GT data get identity rotations (6D = [1,0,0,0,1,0]) so the
-    # placer doesn't crash; they are excluded from metrics by the valid mask
-    # (gt_joints is NaN for those frames).
-    gt_fused_pose = np.zeros((T, P, 54, 6), dtype=np.float32)
-    gt_fused_pose[..., 0] = 1.0   # r0 = [1,0,0]
-    gt_fused_pose[..., 4] = 1.0   # r1 = [0,1,0]
-    for ghost_pid, gt_pid in pid_match.items():
-        p_slot   = pid_to_slot[ghost_pid]
-        gt_pdata = gt_body_data[gt_pid]
-        for frame_idx, params in gt_pdata.items():
-            t_rel = frame_idx - frame_start
-            if not (0 <= t_rel < T):
-                continue
-            bp_6d = _aa_to_6d(params["body_pose"].reshape(21, 3))  # (21, 6)
-            gt_fused_pose[t_rel, p_slot, :21] = bp_6d
+    fused_pose_by_pid_mod: dict[int, np.ndarray] = {
+        pid: fused_pose[:, pid_to_slot[pid]] for pid in all_pids
+    }
 
-    # GT betas for M4 oracle (betas are person-level constants, average over frames)
-    gt_betas_by_pid: dict[int, np.ndarray] = {}
-    for ghost_pid, gt_pid in pid_match.items():
-        gt_pdata = gt_body_data[gt_pid]
-        betas_list = [params["betas"] for params in gt_pdata.values() if "betas" in params]
-        if betas_list:
-            gt_betas_by_pid[ghost_pid] = np.mean(betas_list, axis=0).astype(np.float32)
-        else:
-            gt_betas_by_pid[ghost_pid] = np.zeros(10, dtype=np.float32)
-
-    # GT camera extrinsics (for M3/M4)
-    gt_cam_exts     = _build_gt_camera_extrinsics()   # (T, K, 3, 4) or None
-    gt_scale_scalar = _compute_gt_scale()
-
-    # ── 7. Per-modality evaluation loop: M2 -> M3 -> M4 ──────────────────────
+    # ── 7. Per-method evaluation loop: P1 -> P2 ──────────────────────────────
     results: dict[str, float] = {
         "n_valid": 0,
         "cam_rot_err": cam_rot_err, "cam_t_cos": cam_t_cos,
-        "cam_t_err_cm": cam_t_err_cm, "cam_t_err_gt_scale_cm": cam_t_err_gt_scale_cm,
+        "cam_t_err_cm": cam_t_err_cm,
         "pred_scale": pred_scale_val_diag, "gt_scale": gt_scale_val,
         "scale_err_pct": scale_err_pct,
     }
-
-    # NOTE: patched onto `placer_neutral`, not `placer` — placer_neutral is the
-    # instance that actually runs estimate_procrustes_dlt_mhr below (all of
-    # M2/M3/M4 use the neutral model), so the GT-camera substitution has to
-    # land on its .extrinsics/.intrinsics/.cam_valid to take effect. BodyPlacer
-    # instances load their own extrinsics independently (fusion/placer.py:198-213)
-    # — patching a different instance is a silent no-op, not a shared-state update.
-    orig_extrinsics = placer_neutral.extrinsics    # save original VGGT extrinsics
-    orig_intrinsics = placer_neutral.intrinsics   # save original VGGT intrinsics
-    orig_cam_valid  = placer_neutral.cam_valid.copy()
-
-    # All of M2/M3/M4 use GT scale — the scalar swap is unconditional.
-    scale_pf_gt = np.full(placer.T, gt_scale_scalar, dtype=np.float32)
 
     for modality in modalities:
         label = _MODALITY_LABELS[modality]
         logger.info(f"\n  [{label}]")
 
-        use_gt_cams = modality in (3, 4)
-        use_gt_pose = modality == 4
-        scale_pf = scale_pf_gt
-
-        # Patch extrinsics for GT cameras (intrinsics stay VGGT's — GT intrinsics
-        # live in a different calibration space, see _build_gt_camera_extrinsics).
-        if use_gt_cams and gt_cam_exts is not None:
-            placer_neutral.extrinsics = gt_cam_exts.astype(np.float32)
-            # With GT cameras metric scale is 1.0
-            scale_pf = np.ones(placer_neutral.T, dtype=np.float32)
-            # Cameras with no GT calibration (e.g. cam_10) have all-zero extrinsics
-            # — mark them invalid so DLT doesn't produce NaN from a zero P matrix.
-            filled = np.any(gt_cam_exts != 0, axis=(0, 2, 3))  # (K,) bool
-            placer_neutral.cam_valid = orig_cam_valid & filled[np.newaxis, :]
-        else:
-            placer_neutral.extrinsics = orig_extrinsics
-            placer_neutral.intrinsics = orig_intrinsics
-
-        pose_for_placer = gt_fused_pose if use_gt_pose else fused_pose
-        betas_for_placer = (gt_betas_by_pid if use_gt_pose
-                            else sam3d_betas_by_pid)
-        fused_pose_by_pid_mod: dict[int, np.ndarray] = {
-            pid: pose_for_placer[:, pid_to_slot[pid]] for pid in all_pids
-        }
-
+        # Standalone placement function (module-level in this file), given the
+        # neutral placer as its first arg — NOT a BodyPlacer method.
+        placer_fn = _PLACER_FUNCS[modality]
         try:
-            trans_dict, orient_dict = placer_neutral.estimate_procrustes_dlt_mhr(
-                scale=scale_pf,
+            trans_dict, orient_dict = placer_fn(
+                placer_neutral,
+                scale=pred_scale_pf,
                 all_pids=set(all_pids),
-                pred_betas_by_pid=betas_for_placer,
+                pred_betas_by_pid=sam3d_betas_by_pid,
                 fused_pose_by_pid=fused_pose_by_pid_mod,
                 frame_start=frame_start,
             )
         except Exception as e:
             logger.warning(f"  [{label}] Placer failed: {e}")
             continue
-        finally:
-            placer_neutral.extrinsics = orig_extrinsics  # always restore
-            placer_neutral.intrinsics = orig_intrinsics
-            placer_neutral.cam_valid  = orig_cam_valid
 
         # Build pred joints
         pred_joints = np.full((T, P, J_body, 3), np.nan, dtype=np.float32)
@@ -1088,13 +1308,13 @@ def evaluate_scene(
             if pid not in pid_to_slot:
                 continue
             p_slot  = pid_to_slot[pid]
-            betas_p = betas_for_placer.get(pid, np.zeros(10, dtype=np.float32))
+            betas_p = sam3d_betas_by_pid.get(pid, np.zeros(10, dtype=np.float32))
             for global_t, pelvis_world in sorted(frames_t.items()):
                 t_rel = int(global_t) - frame_start
                 R_mat = orient_dict.get(pid, {}).get(global_t)
                 if not (0 <= t_rel < T) or R_mat is None:
                     continue
-                body_pose_aa = _6d_to_aa(pose_for_placer[t_rel, p_slot, :21])
+                body_pose_aa = _6d_to_aa(fused_pose[t_rel, p_slot, :21])
                 J_can_smplx, V_can = placer_neutral._smplx_fk(
                     betas_p[np.newaxis],
                     body_pose_aa.reshape(63)[np.newaxis],
@@ -1133,7 +1353,7 @@ def evaluate_scene(
         pa  = metric_pa_mpjpe(pred_joints_m, gt_joints, valid)
         rte = metric_rte(pred_roots_m, gt_roots)
 
-        # Raw root error (pred in VGGT/GT-cam frame, GT in RICH world)
+        # Raw root error (pred in VGGT frame, GT in RICH world)
         raw_errs = []
         orient_errs = []
         for slot, (ghost_pid, gt_pid) in enumerate(sorted(pid_match.items())):
@@ -1181,7 +1401,7 @@ def evaluate_scene(
         results[pfx + "raw_root_err_cm"]    = raw_root_err_cm
         results[pfx + "root_orient_err_deg"] = root_orient_err_deg
 
-    return results if len(results) > 8 else None
+    return results if len(results) > 7 else None
 
 
 # ---------------------------------------------------------------------------
@@ -1190,7 +1410,7 @@ def evaluate_scene(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Evaluate ghost on RICH test set — progressive oracle ablations (M2, M3, M4)."
+        description="Evaluate ghost on RICH test set — placement-method comparison (P1, P2)."
     )
     parser.add_argument("--ghost_output_root", required=True, type=Path,
                         help="Root dir of ghost test outputs (contains scene subdirs).")
@@ -1213,22 +1433,22 @@ def main() -> None:
                         help="Per-scene camera exclusions: 'scene:cam1,cam2;scene2:cam3'")
     parser.add_argument("--scale",              default="baseline",
                         choices=["centered", "baseline"],
-                        help="MapAnything scale variant used only for the pred-scale camera "
-                             "diagnostics (M2/M3/M4 themselves always use GT scale).")
-    parser.add_argument("--scale_smooth",       default="none",
+                        help="MapAnything scale variant "
+                             "(centered=legacy depth-ratio, baseline=images-only camera baselines).")
+    parser.add_argument("--scale_smooth",       default="median",
                         choices=["none", "median"],
                         help="Temporal denoise of per-frame scale: median=one robust scalar "
-                             "per scene (kills VGGT per-frame jitter).")
+                             "per scene (kills VGGT per-frame jitter). Default median to match "
+                             "the prod M10 baseline + oracle ladder (constant scale per scene).")
     parser.add_argument("--centered_root",      type=Path, default=None,
                         help="Dir holding <scene>/crop_meta.json from the centered-image step. "
-                             "Default: <rich_root>/centered_<gt_split>. Point this at a "
-                             "squashfuse mount — the sqsh CANNOT be mounted under rich_root "
-                             "itself (Lustre forbids FUSE mounts over it), so mount it "
-                             "node-local (e.g. /tmp) and pass the mount here.")
+                             "Default: <rich_root>/centered_<gt_split>. The sqsh CANNOT be "
+                             "mounted under rich_root itself (Lustre forbids FUSE mounts over "
+                             "it), so mount it node-local (e.g. /tmp) and pass the mount here.")
     parser.add_argument("--modalities",         default=",".join(str(m) for m in _MODALITIES),
-                        help="Comma-separated subset of the oracle ladder to run: 2,3,4 "
-                             "(default: all). Run them one per job — all three exceed the "
-                             "1:30 debug-partition limit on the full 52-scene test set.")
+                        help="Comma-separated subset of placement methods to run: 1,2 "
+                             "(default: all). Run one per job — both on 52 scenes exceed the "
+                             "1:30 debug-partition limit.")
     args = parser.parse_args()
 
     args.modalities = [int(x.strip()) for x in args.modalities.split(",") if x.strip()]
@@ -1279,8 +1499,8 @@ def main() -> None:
             exclude_cameras=skip_cameras.get(scene_dir.name),
             scale_mode=args.scale,
             scale_smooth=args.scale_smooth,
-            modalities=args.modalities,
             centered_root=args.centered_root,
+            modalities=args.modalities,
         )
         if result is not None:
             all_results.append(result)
@@ -1307,9 +1527,8 @@ def main() -> None:
         return f"{v:>14.4f}"
 
     _MOD_HEADERS = {
-        2: "M2 pred-cam+GT-sc  ",
-        3: "M3 GT-cam+GT-sc    ",
-        4: "M4 oracle          ",
+        1: "P1 mean-SAM3D-root ",
+        2: "P2 depth-readout   ",
     }
     col_w = 20
     mods_run = sorted(args.modalities)
@@ -1348,7 +1567,6 @@ def main() -> None:
     print(f"  {'Cam rot err (°)':<26}  {agg('cam_rot_err'):>14.2f}")
     print(f"  {'Cam t_cos':<26}  {agg('cam_t_cos'):>14.4f}")
     print(f"  {'Cam t_err pred-sc (cm)':<26}  {agg('cam_t_err_cm'):>14.1f}")
-    print(f"  {'Cam t_err GT-sc (cm)':<26}  {agg('cam_t_err_gt_scale_cm'):>14.1f}")
     print(f"  {'Pred scale':<26}  {agg('pred_scale'):>14.4f}")
     print(f"  {'GT scale':<26}  {agg('gt_scale'):>14.4f}")
     print(f"  {'Scale err (%)':<26}  {agg('scale_err_pct'):>13.1f}%")

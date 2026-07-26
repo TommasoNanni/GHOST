@@ -51,15 +51,19 @@ from tqdm import tqdm
 
 
 # ── Colour palette (RGB uint8, one per person, cycles) ───────────────────────
+# Soft, desaturated body colours.  Saturated primaries crush the diffuse
+# shading gradient, which is what makes a mesh read as a flat blob; muted tones
+# (as used in the HSfM / CHROMM figures) let surface detail — face, hands,
+# muscle folds — stay visible.  Pair with vertex normals (see _vertex_normals).
 _PALETTE: list[tuple[int, int, int]] = [
-    (220,  80,  60),   # red
-    ( 60, 200,  60),   # green
-    ( 60,  80, 220),   # blue
-    (210, 210,  40),   # yellow
-    (210,  60, 210),   # magenta
-    ( 40, 210, 210),   # cyan
-    (220, 140,  40),   # orange
-    (160,  60, 160),   # purple
+    (214, 176, 152),   # warm sand
+    (150, 178, 194),   # dusty blue
+    (168, 190, 158),   # sage
+    (206, 178, 196),   # mauve
+    (198, 186, 148),   # khaki
+    (160, 186, 186),   # pale teal
+    (212, 166, 140),   # clay
+    (176, 166, 196),   # lavender
 ]
 
 _FRAME_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
@@ -548,6 +552,34 @@ def _time_columns(frames: np.ndarray, fps: float) -> list:
     ]
 
 
+def _vertex_normals(verts: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Area-weighted vertex normals for (N, V, 3) verts over a fixed topology.
+
+    Without normals Rerun has no surface orientation to light, so a body renders
+    as a flat silhouette ("colored blob").  Supplying them turns on the diffuse
+    shading that makes face traits and muscle folds readable.
+    """
+    n, V = verts.shape[:2]
+    idx = faces.reshape(-1)                                   # (3F,)
+    out = np.zeros((n, V, 3), dtype=np.float32)
+    for i in range(n):
+        v = verts[i]
+        fn = np.cross(v[faces[:, 1]] - v[faces[:, 0]],
+                      v[faces[:, 2]] - v[faces[:, 0]])        # (F,3), area-weighted
+        w = np.repeat(fn, 3, axis=0)                          # (3F,3)
+        for c in range(3):
+            out[i, :, c] = np.bincount(idx, weights=w[:, c], minlength=V)
+    norm = np.linalg.norm(out, axis=-1, keepdims=True)
+    out = out / np.clip(norm, 1e-8, None)
+    # A body mesh is roughly star-shaped, so normals should point away from its
+    # centroid.  If the topology's winding says otherwise, flip once globally —
+    # inward normals would light the surface from the wrong side.
+    centred = verts[0] - verts[0].mean(0)
+    if float(np.einsum("ij,ij->", out[0], centred)) < 0.0:
+        out = -out
+    return out
+
+
 def _send_mesh_column(
     entity: str,
     faces: np.ndarray,
@@ -556,7 +588,7 @@ def _send_mesh_column(
     verts: np.ndarray,        # (N, V, 3) — only the visible frames
     fps: float,
 ) -> None:
-    """Static topology+colour once, then one partitioned vertex-position column."""
+    """Static topology+colour once, then partitioned position + normal columns."""
     n, V = verts.shape[:2]
     if n == 0:
         return
@@ -570,11 +602,13 @@ def _send_mesh_column(
         ),
         static=True,
     )
+    normals = _vertex_normals(verts, np.asarray(faces, dtype=np.int64))
     rr.send_columns(
         entity,
         indexes=_time_columns(frames, fps),
         columns=rr.Mesh3D.columns(
-            vertex_positions=verts.reshape(n * V, 3).astype(np.float32)
+            vertex_positions=verts.reshape(n * V, 3).astype(np.float32),
+            vertex_normals=normals.reshape(n * V, 3).astype(np.float32),
         ).partition(np.full(n, V, dtype=np.int64)),
     )
 
@@ -669,20 +703,37 @@ def _build_smplx_vertices(
 def _load_rich_frame(
     rich_data_root: Path,
     scene_name: str,
-    cam_idx: int,
-    rich_frame_idx: int,
+    cam_name: str,
+    cam_slot: int,
+    frame_idx: int,
     frames_dir: Optional[Path] = None,
 ) -> Optional[np.ndarray]:
-    """Load one RICH frame as BGR uint8, or None.  Mirrors visualize_fusion."""
+    """Load one camera frame as BGR uint8, or None.
+
+    Looks the frame up by the *real* camera name (``cam_name``, e.g. RICH
+    ``cam_03`` or EgoHumans ``cam04``) — slot index ≠ camera number — falling
+    back to the legacy ``cam_{slot:02d}`` directory for old layouts.  Searches
+    the camera dir plus ``frames/`` (RICH) and ``images_undistorted/`` /
+    ``images/`` (EgoHumans exo).  ``cam_num`` = digits of the name.
+    """
     scene_root = frames_dir if frames_dir is not None else rich_data_root / scene_name
-    cam_dir = scene_root / f"cam_{cam_idx:02d}"
-    search_dirs = [cam_dir, cam_dir / "frames"]
-    for stem in (f"{rich_frame_idx:05d}_{cam_idx:02d}", f"{rich_frame_idx:05d}"):
-        for sd in search_dirs:
-            for ext in _FRAME_EXTS:
-                q = sd / f"{stem}{ext}"
-                if q.exists():
-                    return cv2.imread(str(q))
+    digits = "".join(ch for ch in cam_name if ch.isdigit())
+    cam_num = int(digits) if digits else cam_slot
+    cam_dirs = [scene_root / cam_name, scene_root / f"cam_{cam_slot:02d}"]
+    for cam_dir in cam_dirs:
+        # Prefer undistorted frames (what VGGT used → meshes overlay correctly).
+        search_dirs = [cam_dir,
+                       cam_dir / "images_undistorted" / "frames",
+                       cam_dir / "images_undistorted",
+                       cam_dir / "frames",
+                       cam_dir / "images"]
+        for stem in (f"{frame_idx:05d}_{cam_num:02d}",
+                     f"{frame_idx:05d}", f"{frame_idx:05d}_{cam_slot:02d}"):
+            for sd in search_dirs:
+                for ext in _FRAME_EXTS:
+                    q = sd / f"{stem}{ext}"
+                    if q.exists():
+                        return cv2.imread(str(q))
     return None
 
 
@@ -700,7 +751,8 @@ def _decode_cameras(camera: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndar
     return R, camera[..., 4:7], camera[0, :, 7]
 
 
-def _default_blueprint(fps: float):
+def _default_blueprint(fps: float, look_target=None, eye_position=None,
+                       track_entity: Optional[str] = None):
     """Blueprint that makes ``frame`` the active timeline (auto layout otherwise).
 
     Without this the viewer opens on the auto ``log_time`` timeline, where all
@@ -709,9 +761,22 @@ def _default_blueprint(fps: float):
     remain.  Defaulting to ``frame`` makes scrubbing and play animate everything.
     """
     import rerun.blueprint as rrb
+    # Pre-aim the 3D eye at the subjects so the recording opens framed and
+    # centred — otherwise every screenshot needs manual orbiting first.
+    eye = None
+    if look_target is not None:
+        eye = rrb.EyeControls3D(
+            kind=rrb.Eye3DKind.Orbital,
+            look_target=[float(x) for x in look_target],
+            eye_up=[0.0, -1.0, 0.0],          # world is RDF → up is -Y
+            **({"position": [float(x) for x in eye_position]}
+               if eye_position is not None else {}),
+            **({"tracking_entity": track_entity} if track_entity else {}),
+        )
     return rrb.Blueprint(
         rrb.Spatial3DView(
             origin="/world", name="world", background=[255, 255, 255],
+            eye_controls=eye,
         ),
         rrb.TimePanel(timeline=_FRAME_TL, fps=float(fps), state="expanded"),
         collapse_panels=False,
@@ -733,6 +798,7 @@ def run_fusion(
     depth_time_stride: int = 1,
     depth_mode:      str  = "image",
     point_radius:    float = 0.01,
+    track_person:    Optional[int] = None,
     port:            int  = 9090,
     grpc_port:       int  = 9876,
     server_memory_limit: str = "8GiB",
@@ -761,7 +827,15 @@ def run_fusion(
     body_transl_world = d["body_transl_world"]  # (T, P, 3)
     T, P, J, _ = pose.shape
     K = camera.shape[1]
-    print(f"  T={T} frames, P={P} persons, K={K} cameras")
+    # Real camera names (slot order) — needed to locate each camera's frames,
+    # since slot k != cam number (e.g. RICH cam_01,cam_03,… or EgoHumans
+    # cam04,cam05,cam10,cam13).  Falls back to cam_{k:02d} for legacy npz.
+    _cn = d.get("camera_names")
+    if _cn is not None:
+        camera_names = [n.decode() if isinstance(n, bytes) else str(n) for n in _cn]
+    else:
+        camera_names = [f"cam_{k:02d}" for k in range(K)]
+    print(f"  T={T} frames, P={P} persons, K={K} cameras  {camera_names}")
 
     gt_body_pose         = d.get("gt_body_pose")
     gt_body_shape        = d.get("gt_body_shape")
@@ -792,7 +866,7 @@ def run_fusion(
         gt_R, gt_t, gt_focal = _decode_cameras(gt_camera)
 
     # ── image size from first available frame ─────────────────────────────────
-    sample = _load_rich_frame(rich_data_root, scene_name, 0, frame_start, frames_dir)
+    sample = _load_rich_frame(rich_data_root, scene_name, camera_names[0], 0, frame_start, frames_dir)
     H, W = (sample.shape[:2] if sample is not None else (1080, 1920))
 
     # ── optional VGGT depth ───────────────────────────────────────────────────
@@ -827,14 +901,15 @@ def run_fusion(
 
         # Predicted cameras: intrinsics + pose track + video frames.
         for k in tqdm(range(K), desc="Cameras", unit="cam"):
-            ent = f"world/cam_{k:02d}"
+            ent = f"world/{camera_names[k]}"
             _log_pinhole_simple(ent, focal[k], W, H)
             _send_transform_column(ent, R_w2c[:, k], t_w2c[:, k], all_frames, fps)
             _send_camera_media(
-                ent, k, scene_name, rich_data_root, frames_dir, frame_start,
-                T, W, H, fps, depth_ctx if show_depth else None, depth_stride,
-                depth_conf_thr, scene_dir, depth_voxel, depth_time_stride,
-                depth_mode, point_radius,
+                ent, k, camera_names[k], scene_name, rich_data_root, frames_dir,
+                frame_start, T, W, H, fps, depth_ctx if show_depth else None,
+                depth_stride, depth_conf_thr, scene_dir, depth_voxel,
+                depth_time_stride, depth_mode, point_radius,
+                person_verts=pred_verts,
             )
 
         # GT cameras (static frustums) — suppressed together with GT meshes.
@@ -844,12 +919,31 @@ def run_fusion(
                 _log_pinhole_simple(ent, gt_focal[k], W, H)
                 _log_static_transform(ent, gt_R[0, k], gt_t[0, k])
 
+    # ── pre-frame the 3D eye on the subjects ─────────────────────────────────
+    # Aim at the median body position, seen from just behind the median camera,
+    # so the recording opens centred and a screenshot needs no manual orbiting.
+    _tr = body_transl_world[~np.all(body_transl_world == 0, axis=-1)]
+    look_target = np.median(_tr, axis=0) if _tr.size else None
+    eye_position = None
+    if look_target is not None:
+        cam_c = -np.einsum("tkij,tki->tkj", R_w2c, t_w2c)     # (T,K,3) cam centres
+        cam_med = np.median(cam_c.reshape(-1, 3), axis=0)
+        eye_position = look_target + 1.4 * (cam_med - look_target)
+        print(f"View centred on {np.round(look_target, 2)} "
+              f"from {np.round(eye_position, 2)}"
+              + (f", tracking person {track_person}" if track_person is not None else ""))
+    track_entity = (f"world/person_{track_person}/pred"
+                    if track_person is not None else None)
+
+    def _bp():
+        return _default_blueprint(fps, look_target, eye_position, track_entity)
+
     # ── serve or save ─────────────────────────────────────────────────────────
     rr.init("ghost_fusion", spawn=False)
     if save is not None:
         save = Path(save)
         save.parent.mkdir(parents=True, exist_ok=True)
-        rr.save(str(save), default_blueprint=_default_blueprint(fps))
+        rr.save(str(save), default_blueprint=_bp())
         _build()
         print(f"Recording saved  →  {save}")
         return
@@ -857,7 +951,7 @@ def run_fusion(
     server_uri = rr.serve_grpc(
         grpc_port=grpc_port,
         server_memory_limit=server_memory_limit,
-        default_blueprint=_default_blueprint(fps),
+        default_blueprint=_bp(),
     )
     rr.serve_web_viewer(web_port=port, open_browser=False, connect_to=server_uri)
     _build()
@@ -934,13 +1028,17 @@ def _load_depth_context(scene_dir: Path, camera: np.ndarray, T: int, K: int):
 
 
 def _send_camera_media(
-    entity, k, scene_name, rich_data_root, frames_dir, frame_start,
+    entity, k, cam_name, scene_name, rich_data_root, frames_dir, frame_start,
     T, W, H, fps, depth_ctx, depth_stride, depth_conf_thr, scene_dir,
     depth_voxel=0.0, depth_time_stride=1, depth_mode="image", point_radius=0.01,
+    person_verts=None,
 ) -> None:
     """Single pass over a camera's frames: ship the JPEG video column and,
     when depth is enabled, the depth cloud.
 
+    ``depth_mode='mesh'`` (best for inspection) builds ONE static, RGB-textured
+    triangle mesh per camera from the temporal-median depth+image — no splats, no
+    per-frame shimmer, and the moving people drop out of the median.
     ``depth_mode='image'`` streams a masked metric ``DepthImage`` per frame and
     lets Rerun back-project it on the GPU — fast to build, small payload, but the
     3D cloud is colour-mapped by distance.  ``depth_mode='points'`` unprojects on
@@ -965,10 +1063,25 @@ def _send_camera_media(
     di_mat: list[np.ndarray] = []
     di_frames: list[int] = []
     mask_cache: dict = {}
-    want_depth = depth_ctx is not None
+    # "mesh": one static, RGB-textured median background mesh per camera, built
+    # up-front — no per-frame depth payload at all (no shimmer, tiny recording).
+    _MESH_MODES = ("mesh", "mesh_static")
+    if depth_ctx is not None and depth_mode in _MESH_MODES:
+        if depth_mode == "mesh_static":
+            _log_static_background_mesh(
+                depth_ctx, k, cam_name, scene_name, rich_data_root, frames_dir,
+                frame_start, T, depth_stride, depth_conf_thr,
+            )
+        else:
+            _send_depth_mesh_frames(
+                depth_ctx, k, cam_name, scene_name, rich_data_root, frames_dir,
+                frame_start, T, W, H, fps, depth_stride, depth_conf_thr,
+                scene_dir, depth_time_stride, person_verts=person_verts,
+            )
+    want_depth = depth_ctx is not None and depth_mode not in _MESH_MODES
 
     for t in tqdm(range(T), desc=f"{entity}", unit="frame", leave=False):
-        bgr = _load_rich_frame(rich_data_root, scene_name, k, frame_start + t, frames_dir)
+        bgr = _load_rich_frame(rich_data_root, scene_name, cam_name, k, frame_start + t, frames_dir)
         if bgr is not None:
             blob = _jpeg(bgr)
             if blob is not None:
@@ -1016,7 +1129,7 @@ def _send_camera_media(
         )
 
     if d_frames:                                   # points mode
-        dent = f"world/depth/cam_{k:02d}"
+        dent = f"world/depth/{cam_name}"
         # Single static radius broadcasts to every point — no per-point array,
         # so no size bloat.  Positive value == metres (world scale).
         rr.log(dent, rr.Points3D.from_fields(radii=[float(point_radius)]),
@@ -1031,7 +1144,7 @@ def _send_camera_media(
         )
 
     if di_frames:                                  # image mode
-        dent = f"world/depth/cam_{k:02d}"
+        dent = f"world/depth/{cam_name}"
         # Intrinsics/axes are ~fixed per camera → log the Pinhole once, static.
         rr.log(
             dent,
@@ -1126,6 +1239,331 @@ def _depth_cloud(
     return pts_world, colors
 
 
+def _median_texture(imgs: list[np.ndarray]) -> Optional[np.ndarray]:
+    """Per-pixel temporal median of BGR frames → RGB uint8, computed in row bands
+    so the float64 upcast inside np.median never blows up memory."""
+    if not imgs:
+        return None
+    n = len(imgs)
+    H_i, W_i = imgs[0].shape[:2]
+    out = np.empty((H_i, W_i, 3), np.uint8)
+    band = max(1, int(400e6 // (n * W_i * 3 * 8)))       # ≈400 MB per band
+    for y0 in range(0, H_i, band):
+        y1b = min(H_i, y0 + band)
+        chunk = np.stack([im[y0:y1b] for im in imgs], 0)
+        out[y0:y1b] = np.median(chunk, axis=0).astype(np.uint8)
+    return out[:, :, ::-1]                                # BGR → RGB
+
+
+def _depth_grid_mesh(d, uu, vv, intr, R_d, t_vec, disc_rel: float = 0.06):
+    """Triangulate a metric depth grid into a world-space mesh.
+
+    A quad becomes two triangles only when all four corners are finite and free of
+    a depth discontinuity, so foreground and background are never rubber-sheeted
+    together.  Returns ``(verts (M,3), tris (F,3), used (M,))`` where ``used``
+    indexes the flattened grid (for sampling per-vertex colours), or None.
+    """
+    h_d, w_d = d.shape
+    fx, fy = float(intr[0, 0]), float(intr[1, 1])
+    cx, cy = float(intr[0, 2]), float(intr[1, 2])
+    pts_cam = np.stack([(uu - cx) / fx * d, (vv - cy) / fy * d, d], axis=-1)
+    verts_all = (pts_cam.reshape(-1, 3) - t_vec) @ R_d      # world == Rerun RDF
+
+    quad = np.stack([d[:-1, :-1], d[1:, :-1], d[:-1, 1:], d[1:, 1:]], 0)
+    ok = np.all(np.isfinite(quad), 0)
+    with np.errstate(all="ignore"):
+        ok &= (np.nanmax(quad, 0) - np.nanmin(quad, 0)) < disc_rel * np.nanmean(quad, 0)
+    if not ok.any():
+        return None
+    I, J = np.mgrid[0:h_d - 1, 0:w_d - 1]
+    v00 = (I * w_d + J)[ok]; v10 = ((I + 1) * w_d + J)[ok]
+    v01 = (I * w_d + J + 1)[ok]; v11 = ((I + 1) * w_d + J + 1)[ok]
+    tris = np.concatenate([np.stack([v00, v10, v11], -1),
+                           np.stack([v00, v11, v01], -1)], 0).astype(np.uint32)
+    used, tris = np.unique(tris, return_inverse=True)
+    tris = tris.reshape(-1, 3).astype(np.uint32)
+    verts = np.nan_to_num(verts_all[used]).astype(np.float32)
+    return verts, tris, used
+
+
+def _grid_vertex_colors(bgr, uu, vv, used, oc, W, H) -> np.ndarray:
+    """Sample per-vertex RGB from the frame, mapping depth pixels through the
+    VGGT crop box (same convention as the point-cloud path)."""
+    x1, y1, x2, y2 = oc
+    u = uu.reshape(-1)[used]; v = vv.reshape(-1)[used]
+    fh, fw = bgr.shape[:2]
+    iu = np.clip(((u - x1) * W / max(1e-6, float(x2 - x1))).astype(np.int32), 0, fw - 1)
+    iv = np.clip(((v - y1) * H / max(1e-6, float(y2 - y1))).astype(np.int32), 0, fh - 1)
+    return bgr[iv, iu][:, ::-1]                              # BGR → RGB
+
+
+def _load_person_boxes(scene_dir: Path, cam_name: str) -> dict[int, list]:
+    """{abs_frame: [(x1,y1,x2,y2), …]} person boxes from this camera's body data.
+
+    Most EgoHumans scenes no longer ship ``mask_data.npz`` (only 27/133 kept it —
+    fencing has none), but every per-person npz still carries a ``bbox`` per
+    frame, derived from the same segmentation.  Precise enough to carve the
+    people out of the depth surface so they cannot occlude the body meshes.
+    """
+    # Union of both track sets: body_data_clean holds only the ReID-kept people,
+    # but ANY detected person occludes the mesh, so carve every detection.
+    boxes: dict[int, list] = {}
+    for sub in ("body_data_clean", "body_data"):
+        bd = Path(scene_dir) / cam_name / sub
+        if not bd.is_dir():
+            continue
+        for f in sorted(bd.glob("person_*.npz")):
+            try:
+                d = np.load(str(f), allow_pickle=False)
+            except Exception:
+                continue
+            if "bbox" not in d.files or "frame_indices" not in d.files:
+                continue
+            for fr, bb in zip(d["frame_indices"].astype(int), d["bbox"]):
+                boxes.setdefault(int(fr), []).append(np.asarray(bb, dtype=np.float32))
+    return boxes
+
+
+def _mesh_silhouette(verts_t, R_w2c, t_w2c, intr, stride, h_d, w_d,
+                     dilate: int = 2) -> np.ndarray:
+    """Project the posed body meshes into this camera → (h_d, w_d) bool silhouette.
+
+    Carving the depth surface with this removes exactly the pixels the bodies
+    occupy — far tighter than a bounding box, which also eats the background
+    around each person.  Vertices are splatted and then dilated to close the gaps
+    between them (SMPL-X is dense enough that a 2-cell dilation fills the body).
+    """
+    mask = np.zeros((h_d, w_d), dtype=np.uint8)
+    fx, fy = float(intr[0, 0]), float(intr[1, 1])
+    cx, cy = float(intr[0, 2]), float(intr[1, 2])
+    for v in verts_t:                                   # (V, 3) per person
+        finite = np.isfinite(v).all(axis=1)
+        if not finite.any():
+            continue
+        pc = v[finite] @ np.asarray(R_w2c).T + np.asarray(t_w2c)
+        z = pc[:, 2]
+        ok = z > 1e-6
+        if not ok.any():
+            continue
+        col = np.round((fx * pc[ok, 0] / z[ok] + cx) / stride).astype(np.int64)
+        row = np.round((fy * pc[ok, 1] / z[ok] + cy) / stride).astype(np.int64)
+        good = (col >= 0) & (col < w_d) & (row >= 0) & (row < h_d)
+        mask[row[good], col[good]] = 1
+    if dilate > 0 and mask.any():
+        kern = np.ones((2 * dilate + 1, 2 * dilate + 1), np.uint8)
+        mask = cv2.dilate(mask, kern)
+    return mask.astype(bool)
+
+
+def _median_depth(ctx, k, T, stride, conf_thr, n_samples: int = 41):
+    """Per-pixel temporal median of the metric depth = the static background.
+
+    Moving people fall out of the median, so this doubles as a person detector:
+    anything markedly *closer* than the median at a given frame is foreground.
+    """
+    depth_mm, conf_a = ctx["depth_mm"], ctx["depth_conf"]
+    ts_all = [t for t in range(min(T, depth_mm.shape[0]))
+              if ctx["depth_valid"][t, k] and ctx["cam_valid"][t, k]]
+    if not ts_all:
+        return None
+    sel = (ts_all if len(ts_all) <= n_samples else
+           [ts_all[i] for i in np.linspace(0, len(ts_all) - 1, n_samples).astype(int)])
+    stack = []
+    for t in sel:
+        d = depth_mm[t, k][::stride, ::stride].astype(np.float32) / 1000.0 * float(ctx["scale"][t])
+        c = conf_a[t, k][::stride, ::stride].astype(np.float32)
+        stack.append(np.where((d > 1e-4) & (c >= conf_thr), d, np.nan))
+    with np.errstate(all="ignore"):
+        return np.nanmedian(np.stack(stack, 0), axis=0)
+
+
+def _send_depth_mesh_frames(
+    ctx, k, cam_name, scene_name, rich_data_root, frames_dir, frame_start,
+    T, W, H, fps, stride, conf_thr, scene_dir, time_stride: int = 1,
+    disc_rel: float = 0.06, fg_abs: float = 0.15, fg_rel: float = 0.03,
+    person_verts=None,
+) -> None:
+    """Per-frame RGB-coloured depth mesh for camera k.
+
+    Same triangulation as the static mesh, but rebuilt every frame from that
+    frame's depth, pose and image, so the surface moves with the video.  Topology
+    changes frame to frame, so this is logged row-wise rather than as a column.
+    Colour comes from per-vertex sampling (a full-res texture per frame would be
+    several GB).  Cost scales with the grid, so raise ``--depth-stride`` to thin it.
+    """
+    depth_mm, conf_a = ctx["depth_mm"], ctx["depth_conf"]
+    ent = f"world/scene/{cam_name}"
+    mask_cache: dict = {}
+    # Background reference for mask-free person removal (EgoHumans has no
+    # mask_data.npz, so _person_bg_mask alone would leave the people in the
+    # depth surface, occluding the body meshes).
+    med_bg = _median_depth(ctx, k, T, stride, conf_thr)
+    boxes = _load_person_boxes(scene_dir, cam_name)
+    n_logged = tot_v = tot_f = 0
+    for t in tqdm(range(0, min(T, depth_mm.shape[0]), time_stride),
+                  desc=f"{ent}", unit="frame", leave=False):
+        if not (ctx["depth_valid"][t, k] and ctx["cam_valid"][t, k]):
+            continue
+        s = float(ctx["scale"][t])
+        d = depth_mm[t, k][::stride, ::stride].astype(np.float32) / 1000.0 * s
+        c = conf_a[t, k][::stride, ::stride].astype(np.float32)
+        d = np.where((d > 1e-4) & (c >= conf_thr), d, np.nan)
+
+        # Drop person pixels so the depth surface never occludes the body mesh.
+        # Three tiers: pixel-exact masks > per-frame bboxes > median differencing.
+        h_full, w_full = depth_mm[t, k].shape
+        bg = _person_bg_mask(ctx, k, frame_start + t, h_full, w_full,
+                             scene_dir, mask_cache)
+        if bg is not None:                       # datasets that ship masks (RICH)
+            d = np.where(bg[::stride, ::stride], d, np.nan)
+
+        h_d, w_d = d.shape
+        vv, uu = np.mgrid[0:h_d, 0:w_d].astype(np.float32)
+        uu *= stride; vv *= stride
+        x1, y1, x2, y2 = ctx["oc"][t, k]
+        d = np.where((uu >= x1) & (uu < x2) & (vv >= y1) & (vv < y2), d, np.nan)
+
+        if person_verts is not None and t < len(person_verts):
+            # Best tier: carve the reprojected body meshes themselves, so only
+            # the pixels the bodies actually cover are removed.
+            d = np.where(
+                _mesh_silhouette(person_verts[t], ctx["extr"][t, k, :3, :3],
+                                 ctx["extr"][t, k, :3, 3] * s,
+                                 ctx["intr"][t, k], stride, h_d, w_d),
+                np.nan, d)
+        elif bg is None and boxes:
+            # bbox tier: carve each person's box, mapping frame pixels into the
+            # depth grid with the inverse of the colour-sampling transform.
+            sx = float(x2 - x1) / max(1e-6, W)
+            sy = float(y2 - y1) / max(1e-6, H)
+            for bx1, by1, bx2, by2 in boxes.get(frame_start + t, ()):
+                pw, ph = 0.04 * (bx2 - bx1), 0.04 * (by2 - by1)   # pad for limbs
+                u1 = x1 + (bx1 - pw) * sx; u2 = x1 + (bx2 + pw) * sx
+                v1 = y1 + (by1 - ph) * sy; v2 = y1 + (by2 + ph) * sy
+                d = np.where((uu >= u1) & (uu <= u2) & (vv >= v1) & (vv <= v2),
+                             np.nan, d)
+        elif bg is None and med_bg is not None:
+            # last resort: anything markedly closer than the static background
+            with np.errstate(all="ignore"):
+                fg = d < med_bg - np.maximum(fg_abs, fg_rel * med_bg)
+            d = np.where(np.isfinite(med_bg) & fg, np.nan, d)
+
+        res = _depth_grid_mesh(d, uu, vv, ctx["intr"][t, k],
+                               ctx["extr"][t, k, :3, :3],
+                               ctx["extr"][t, k, :3, 3] * s, disc_rel)
+        if res is None:
+            continue
+        verts, tris, used = res
+        bgr = _load_rich_frame(rich_data_root, scene_name, cam_name, k,
+                               frame_start + t, frames_dir)
+        colors = (_grid_vertex_colors(bgr, uu, vv, used, ctx["oc"][t, k], W, H)
+                  if bgr is not None else None)
+
+        rr.set_time(_FRAME_TL, sequence=t)
+        rr.set_time(_TIME_TL, duration=t / fps)
+        rr.log(ent, rr.Mesh3D(vertex_positions=verts, triangle_indices=tris,
+                              vertex_colors=colors))
+        n_logged += 1; tot_v += len(verts); tot_f += len(tris)
+    if n_logged:
+        print(f"  {cam_name}: per-frame depth mesh — {n_logged} frames, "
+              f"~{tot_v // n_logged} verts / {tot_f // n_logged} tris per frame")
+
+
+def _log_static_background_mesh(
+    ctx, k, cam_name, scene_name, rich_data_root, frames_dir, frame_start,
+    T, stride, conf_thr, n_samples: int = 41, disc_rel: float = 0.06,
+) -> bool:
+    """Log ONE static, RGB-textured background mesh for camera k.
+
+    The exo cameras are physically static, but VGGT re-estimates them every frame,
+    so a per-frame cloud shimmers and round splats obscure the geometry.  Here we
+    take a per-pixel temporal MEDIAN of the metric depth and of the RGB frame over
+    evenly-spaced samples: moving people fall out of the median, leaving a clean
+    empty-scene background.  The depth grid is then triangulated — a quad becomes
+    two triangles only if all four corners are valid and free of a depth
+    discontinuity, so foreground/background are not rubber-sheeted together — and
+    textured with the median image.  Result: a continuous, stable surface instead
+    of a flickering point cloud, logged once as static data.
+    """
+    depth_mm, conf_a = ctx["depth_mm"], ctx["depth_conf"]
+    Tmax = min(T, depth_mm.shape[0])
+    ts_all = [t for t in range(Tmax)
+              if ctx["depth_valid"][t, k] and ctx["cam_valid"][t, k]]
+    if not ts_all:
+        return False
+    sel = (ts_all if len(ts_all) <= n_samples else
+           [ts_all[i] for i in np.linspace(0, len(ts_all) - 1, n_samples).astype(int)])
+
+    # ── temporal median of metric depth ──────────────────────────────────────
+    dstack = []
+    for t in sel:
+        d = depth_mm[t, k][::stride, ::stride].astype(np.float32) / 1000.0 * float(ctx["scale"][t])
+        c = conf_a[t, k][::stride, ::stride].astype(np.float32)
+        dstack.append(np.where((d > 1e-4) & (c >= conf_thr), d, np.nan))
+    with np.errstate(all="ignore"):
+        med_d = np.nanmedian(np.stack(dstack, 0), axis=0)      # (h_d, w_d)
+
+    # ── stabilised camera pose: mean R (re-orthogonalised) + mean t ─────────
+    Rs   = np.stack([ctx["extr"][t, k, :3, :3] for t in sel]).astype(np.float64)
+    tvs  = np.stack([ctx["extr"][t, k, :3, 3] * float(ctx["scale"][t]) for t in sel])
+    U, _, Vt = np.linalg.svd(Rs.mean(0))
+    R_d   = U @ Vt
+    t_vec = tvs.mean(0)
+    intr  = np.median(np.stack([ctx["intr"][t, k] for t in sel]), axis=0)
+
+    # ── unproject the median depth grid ──────────────────────────────────────
+    h_d, w_d = med_d.shape
+    vv, uu = np.mgrid[0:h_d, 0:w_d].astype(np.float32)
+    uu *= stride; vv *= stride
+    x1, y1, x2, y2 = ctx["oc"][sel[0], k]
+    med_d = np.where((uu >= x1) & (uu < x2) & (vv >= y1) & (vv < y2), med_d, np.nan)
+
+    fx, fy = float(intr[0, 0]), float(intr[1, 1])
+    cx, cy = float(intr[0, 2]), float(intr[1, 2])
+    z = med_d
+    pts_cam = np.stack([(uu - cx) / fx * z, (vv - cy) / fy * z, z], axis=-1)
+    verts = (pts_cam.reshape(-1, 3) - t_vec) @ R_d          # world == Rerun RDF
+
+    # ── triangulate, skipping invalid quads and depth discontinuities ───────
+    d00, d10 = med_d[:-1, :-1], med_d[1:, :-1]
+    d01, d11 = med_d[:-1, 1:],  med_d[1:, 1:]
+    quad = np.stack([d00, d10, d01, d11], 0)
+    ok = np.all(np.isfinite(quad), 0)
+    with np.errstate(all="ignore"):
+        spread = np.nanmax(quad, 0) - np.nanmin(quad, 0)
+        ok &= spread < disc_rel * np.nanmean(quad, 0)
+    if not ok.any():
+        return False
+    I, J = np.mgrid[0:h_d - 1, 0:w_d - 1]
+    v00 = (I * w_d + J)[ok]; v10 = ((I + 1) * w_d + J)[ok]
+    v01 = (I * w_d + J + 1)[ok]; v11 = ((I + 1) * w_d + J + 1)[ok]
+    tris = np.concatenate([np.stack([v00, v10, v11], -1),
+                           np.stack([v00, v11, v01], -1)], 0).astype(np.uint32)
+
+    # ── texture from the median frame; texcoords via the VGGT crop box ──────
+    imgs = [img for t in sel
+            if (img := _load_rich_frame(rich_data_root, scene_name, cam_name, k,
+                                        frame_start + t, frames_dir)) is not None]
+    texture = _median_texture(imgs)
+    tc = np.stack([(uu - x1) / max(1e-6, float(x2 - x1)),
+                   (vv - y1) / max(1e-6, float(y2 - y1))], -1).reshape(-1, 2)
+
+    # ── compact to referenced vertices only ─────────────────────────────────
+    used, tris = np.unique(tris, return_inverse=True)
+    tris = tris.reshape(-1, 3).astype(np.uint32)
+    verts = np.nan_to_num(verts[used]).astype(np.float32)
+    tc = tc[used].astype(np.float32)
+
+    kwargs = {"vertex_texcoords": tc, "albedo_texture": texture} if texture is not None else {}
+    rr.log(f"world/scene/{cam_name}",
+           rr.Mesh3D(vertex_positions=verts, triangle_indices=tris, **kwargs),
+           static=True)
+    print(f"  {cam_name}: static background mesh — {len(verts)} verts, "
+          f"{len(tris)} tris, {len(imgs)} frames medianed"
+          f"{'' if texture is not None else ' (no texture — frames not found)'}")
+    return True
+
+
 def _depth_image_frame(
     ctx, t, k, frame_start, scene_dir, stride, conf_thr, mask_cache,
 ) -> Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
@@ -1183,7 +1621,8 @@ def _person_bg_mask(
     npz = mask_cache[k]
     if npz is None:
         return None
-    cam_idx = int(cam_name.split("_")[-1])
+    digits = "".join(ch for ch in cam_name if ch.isdigit())
+    cam_idx = int(digits) if digits else k
     key = f"mask_{abs_frame:05d}_{cam_idx:02d}"
     if key not in npz:
         return None
