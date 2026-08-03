@@ -1165,15 +1165,24 @@ class RICHFusionDatapoint(FusionDatapoint):
             self._raw.append(persons)
             logger.debug(f"  {cam_dir.name}: loaded {len(persons)} person(s)")
 
-        # Keep only ghost persons that appear in at least (num_cameras - 1) views.
-        # Foreground people are tracked consistently across nearly all cameras;
-        # background/spurious tracks appear in fewer views and are dropped here
-        # so they never pollute the GT matching step.
+        # Optional visibility filter, OFF by default.
+        #
+        # This used to default to (num_cameras - 1), i.e. a person had to be tracked
+        # in nearly every view to survive. That is far too strict for real data: an
+        # audit of the RICH train split found it emptied 9 scenes outright and threw
+        # away 14 genuine people just because one camera missed them (occlusion,
+        # frame drops, a failed track). It also silently couples data survival to how
+        # many cameras a scene happens to have.
+        #
+        # Ghost persons that never match a GT subject already end up with no _gt
+        # entry -> build_gt_targets returns zeros -> gt_valid is False -> masked out
+        # by the loss, so unmatched background tracks cannot corrupt the objective.
+        # Pass min_foreground_cams=<n> explicitly to re-enable the filter.
         if self._raw:
             num_cams = len(self._raw)
             min_cams = kwargs.get("min_foreground_cams")
             if min_cams is None:
-                min_cams = max(1, num_cams - 1)
+                min_cams = 1
             cam_count: dict[int, int] = {}
             for cam in self._raw:
                 for pid in cam:

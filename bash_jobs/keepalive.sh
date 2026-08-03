@@ -3,8 +3,8 @@
 # Run manually every ~15 days: bash bash_jobs/keepalive.sh
 
 DIRS=(
-    /iopsstor/scratch/cscs/tnanni/ghost_outputs
-    /capstor/scratch/cscs/tnanni/datasets/rich
+    /iopsstor/scratch/cscs/tnanni
+    /capstor/scratch/cscs/tnanni
 )
 
 for dir in "${DIRS[@]}"; do
@@ -13,7 +13,8 @@ for dir in "${DIRS[@]}"; do
         continue
     fi
     echo "Touching $dir ..."
-    find "$dir" -exec touch {} +
+    # Read-only mounts (squashfuse .sqsh) fail per-file; drop that noise, keep real errors.
+    find "$dir" -exec touch {} + 2> >(grep -v 'Read-only file system' >&2)
     echo "  done."
 done
 
