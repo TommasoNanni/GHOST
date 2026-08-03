@@ -1,14 +1,30 @@
-"""Train PoseFusionModule on multiple RICH scenes with a train/val split.
+"""Train PoseFusionModuleV3 (residual fusion) on RICH with a train/val split.
+
+Copy of scripts/train_rich_v2.py. Differences, and ONLY these:
+
+  * imports PoseFusionModuleV3 (fusion/fusion_module_v3.py) — predicts a
+    CORRECTION to the chordal mean of the per-camera estimates, from tokens that
+    carry each camera's DEVIATION from that mean. Parameter shapes are identical
+    to v2, so nothing else in the pipeline changes.
+  * the zero-initialised output layer gets its own optimizer param group with
+    `head_lr_mult` x the base LR (removes the warm-up ramp; 1.0 disables).
+  * model_config comes from `module.arch_config()` rather than a hand-written
+    dict, so a flag can never be added to the module and forgotten here.
+  * `--max_epochs` override, so the cosine schedule can be set to the length the
+    run will actually reach (previous runs stopped near 270-296 of a 400-epoch
+    schedule and never entered the low-LR refinement phase).
+
+Losses, split, batching, metrics and curriculum are untouched.
 
 Uses:
-  - PoseFusionModule from fusion_module_v2.py
+  - PoseFusionModuleV3 from fusion_module_v3.py
   - TrainerV2        from trainer_v2.py
   - loss_v2.py
 
 Scenes with broken ReID can be added to SKIP_SCENES below.
 
 Run:
-    pixi run python scripts/train_rich_v2.py
+    pixi run python scripts/train_rich_v3.py
 
 Via SLURM:
     sbatch bash_jobs/train_rich.sh   # (update the script path inside)
@@ -37,7 +53,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.fusion_module_v2 import PoseFusionModule
+from fusion.fusion_module_v3 import PoseFusionModuleV3
 from fusion.loss_v2 import (
     JointPositionLoss,
     PoseMSELoss,
@@ -169,6 +185,11 @@ def _parse_args():
              "1.0 for the R0 baseline. Omit to use the config value.",
     )
     parser.add_argument(
+        "--max_epochs", type=int, default=None,
+        help="Override CONFIG.fusion.training.max_epochs. The cosine schedule is "
+             "built from this, so set it to the length the run will actually reach.",
+    )
+    parser.add_argument(
         "--run_tag", default=None,
         help="Label printed at the top of the log (e.g. R0/R1/R2).",
     )
@@ -244,7 +265,7 @@ def main():
 
     # ── Training params ───────────────────────────────────────────────────────
     lr             = CONFIG.fusion.training.lr
-    max_epochs     = CONFIG.fusion.training.max_epochs
+    max_epochs     = args.max_epochs or CONFIG.fusion.training.max_epochs
     batch_size     = CONFIG.fusion.training.batch_size
     grad_clip      = CONFIG.fusion.training.grad_clip
     scheduler_name = getattr(CONFIG.fusion.training, "scheduler", None)
@@ -291,7 +312,11 @@ def main():
         logger.info(f"  checkpoint_dir             : {CONFIG.fusion.checkpoint_dir}")
         logger.info("=" * 72)
 
-    pose_module = PoseFusionModule(
+    residual_head  = getattr(CONFIG.fusion.architecture, "residual_head", True)
+    centered_input = getattr(CONFIG.fusion.architecture, "centered_input", True)
+    head_lr_mult   = float(getattr(CONFIG.fusion.architecture, "head_lr_mult", 1.0))
+
+    pose_module = PoseFusionModuleV3(
         embedding_dim=embedding_dim,
         num_heads=num_heads,
         num_layers=num_layers,
@@ -299,18 +324,41 @@ def main():
         dropout=dropout,
         temporal_window=temporal_window,
         kintree_mask_k=kintree_mask_k,
+        residual_head=residual_head,
+        centered_input=centered_input,
     )
+
+    if is_main:
+        logger.info(f"  V3 residual_head={residual_head}  centered_input={centered_input}  "
+                    f"head_lr_mult={head_lr_mult}  max_epochs={max_epochs}")
     model = pose_module.to(device)
 
     if is_main:
         n_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"PoseFusionModule : {n_params:,} params")
+        logger.info(f"PoseFusionModuleV3 : {n_params:,} params")
 
     if use_ddp:
         model = DDP(model, device_ids=[local_rank], find_unused_parameters=False)
 
     # ── Optimizer & scheduler ─────────────────────────────────────────────────
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # The residual head starts at zero, so gradients reaching the transformer are
+    # scaled by ||W_head||: it must escape zero quickly or the body spends the
+    # first epochs learning at ~lr/step * ||W||. A larger LR on that ONE layer
+    # removes the ramp without touching the rest of the schedule.
+    head_params = list(pose_module.decoder[-1].parameters())
+    head_ids    = {id(p) for p in head_params}
+    base_params = [p for p in model.parameters() if id(p) not in head_ids]
+    if residual_head and head_lr_mult != 1.0:
+        optimizer = torch.optim.Adam(
+            [{"params": base_params, "lr": lr},
+             {"params": head_params, "lr": lr * head_lr_mult}],
+            lr=lr,
+        )
+        if is_main:
+            logger.info(f"  optimizer: head LR {lr * head_lr_mult:.2e} "
+                        f"({head_lr_mult}x), body LR {lr:.2e}")
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if scheduler_name == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -413,7 +461,7 @@ def main():
             del _ckpt
         wandb.init(
             project="ghost-fusion",
-            name="train_rich_v2",
+            name="train_rich_v3",
             id=_wandb_run_id,
             resume="allow",
             config={
@@ -447,18 +495,10 @@ def main():
         train_sampler=train_sampler,
         device=device,
         resume_checkpoint=resume_checkpoint,
-        model_config={
-            "embedding_dim":    embedding_dim,
-            "num_heads":        num_heads,
-            "num_layers":       num_layers,
-            "max_temporal_len": max_T,
-            "temporal_window":  temporal_window,
-            "num_joints":       pose_module.num_joints,
-            # The kintree mask is a non-persistent buffer, so it never lands in
-            # state_dict. Without this entry a checkpoint cannot be reconstructed
-            # faithfully — every loader would silently rebuild an UNMASKED model.
-            "kintree_mask_k":   kintree_mask_k,
-        },
+        # Straight from the module: v3's flags change what the SAME weights mean
+        # and cannot be inferred from the state dict, so the module reports them
+        # itself rather than relying on this script to stay in sync.
+        model_config=pose_module.arch_config(),
     )
 
     try:

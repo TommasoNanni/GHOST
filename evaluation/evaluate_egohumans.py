@@ -74,6 +74,23 @@ _NUM_JOINTS = 55                       # SMPL-X joints fed to fusion (root + 54)
 # joint tokens as attention keys. Set by --joint_conf; default False keeps every
 # previously published number reproducible.
 _USE_JOINT_CONF = False
+
+
+def _remap_conf_to_packed(conf: np.ndarray, num_joints: int = 55) -> np.ndarray:
+    """Canonical-SMPL-X confidence -> `_pack_pose` packed layout.
+
+    Confidence is canonical SMPL-X (jaw 22, eyes 23/24, hands from 25); `_pack_pose`
+    concatenates [root, body, l.hand, r.hand] and zero-pads, skipping jaw and eyes, so
+    hands sit 3 slots earlier. Padding slots hold no joint and stay at 1.0. Applied
+    unconditionally — feeding misaligned confidence is never correct.
+    """
+    if conf.shape[-1] < num_joints:
+        return conf
+    out = np.ones(conf.shape[:-1] + (num_joints,), dtype=np.float32)
+    out[..., 0:22]  = conf[..., 0:22]
+    out[..., 22:37] = conf[..., 25:40]
+    out[..., 37:52] = conf[..., 40:55]
+    return out
 # COCO-17: 0 nose,1/2 eyes,3/4 ears,5/6 shoulders,7/8 elbows,9/10 wrists,
 #          11/12 hips,13/14 knees,15/16 ankles. Score the 12 limb joints only
 #          (face joints have no clean SMPL-X correspondence).
@@ -163,11 +180,23 @@ def load_fusion_model(ckpt: Path, device) -> PoseFusionModule:
     n_joints = state["joint_id_embedding.weight"].shape[0]
     n_layers = sum(1 for k in state if k.startswith("layers.") and k.endswith(".ff.norm.weight"))
     max_tlen = state["temporal_pe.pe"].shape[0]
+    # num_heads / temporal_window change no parameter shape, so strict=True cannot
+    # catch a mismatch; trainer persists them under "model_config". Older
+    # checkpoints fall back to the defaults they were trained with.
+    cfg = c.get("model_config") or {}
+    num_heads       = cfg.get("num_heads", 8)
+    temporal_window = cfg.get("temporal_window", 128)
     model = PoseFusionModule(embedding_dim=emb, num_layers=n_layers,
-                             num_joints=n_joints, max_temporal_len=max_tlen).to(device)
+                             num_joints=n_joints, max_temporal_len=max_tlen,
+                             num_heads=num_heads,
+                             temporal_window=temporal_window).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
-    logger.info(f"fusion ckpt: emb={emb} layers={n_layers} joints={n_joints} maxT={max_tlen}")
+    logger.info(
+        f"fusion ckpt: emb={emb} layers={n_layers} joints={n_joints} maxT={max_tlen} "
+        f"heads={num_heads} twin={temporal_window}"
+        f"{'' if cfg else '  (no model_config -> defaults)'}"
+    )
     return model
 
 
@@ -279,7 +308,9 @@ def _load_clean_tracks(ghost_scene: Path, cam_names, valid_mask, pids):
                     e["betas"] = d["smplx_betas"][t][:10]
                 # Per-joint confidence (SAM3D occlusion estimate), root included.
                 if "pred_joint_confidence" in d.files:
-                    e["jc"] = d["pred_joint_confidence"][t].reshape(-1)   # (55,)
+                    e["jc"] = _remap_conf_to_packed(
+                        d["pred_joint_confidence"][t].reshape(-1)
+                    )                                                     # (55,)
                 frames_map[int(gfr)] = e
             if frames_map:
                 cam_map[pid] = frames_map

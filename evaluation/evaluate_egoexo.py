@@ -70,6 +70,23 @@ _TEMPORAL_PAD = 32
 # --joint_conf; default False keeps every previously published number intact.
 _USE_JOINT_CONF = False
 
+
+def _remap_conf_to_packed(conf: np.ndarray, num_joints: int = 55) -> np.ndarray:
+    """Canonical-SMPL-X confidence -> `_build_single_frame_tensors` packed layout.
+
+    Confidence is canonical SMPL-X (jaw 22, eyes 23/24, hands from 25); the pose tensor
+    concatenates [root, body, l.hand, r.hand] and zero-pads, skipping jaw and eyes, so
+    hands sit 3 slots earlier. Padding slots hold no joint and stay at 1.0. Applied
+    unconditionally — feeding misaligned confidence is never correct.
+    """
+    if conf.shape[-1] < num_joints:
+        return conf
+    out = np.ones(conf.shape[:-1] + (num_joints,), dtype=np.float32)
+    out[..., 0:22]  = conf[..., 0:22]
+    out[..., 22:37] = conf[..., 25:40]
+    out[..., 37:52] = conf[..., 40:55]
+    return out
+
 # ---------------------------------------------------------------------------
 # Joint mapping: GT keypoints_gt.json name → SMPL-X body joint index (0-21)
 # ---------------------------------------------------------------------------
@@ -218,13 +235,24 @@ def load_fusion_model(checkpoint: Path, device: torch.device) -> PoseFusionModul
     n_joints = state["joint_id_embedding.weight"].shape[0]
     n_layers = sum(1 for k in state if k.startswith("layers.") and k.endswith(".ff.norm.weight"))
     max_tlen = state["temporal_pe.pe"].shape[0]
+    # num_heads / temporal_window change no parameter shape, so strict=True cannot
+    # catch a mismatch; trainer persists them under "model_config". Older
+    # checkpoints fall back to the defaults they were trained with.
+    cfg = ckpt.get("model_config") or {}
+    num_heads       = cfg.get("num_heads", 8)
+    temporal_window = cfg.get("temporal_window", 128)
     model = PoseFusionModule(
         embedding_dim=emb_dim, num_layers=n_layers,
         num_joints=n_joints, max_temporal_len=max_tlen,
+        num_heads=num_heads, temporal_window=temporal_window,
     ).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
-    logger.info(f"Loaded fusion checkpoint: emb={emb_dim} layers={n_layers} joints={n_joints}")
+    logger.info(
+        f"Loaded fusion checkpoint: emb={emb_dim} layers={n_layers} joints={n_joints} "
+        f"heads={num_heads} twin={temporal_window}"
+        f"{'' if cfg else '  (no model_config -> defaults)'}"
+    )
     return model
 
 
@@ -475,7 +503,9 @@ def _load_remapped_raw(
                     entry["rh"] = d["smplx_right_hand_pose"][t].reshape(-1, 3)  # (15, 3)
                 # Per-joint confidence (SAM3D occlusion estimate), root included.
                 if "pred_joint_confidence" in d.files:
-                    entry["jc"] = d["pred_joint_confidence"][t].reshape(-1)      # (55,)
+                    entry["jc"] = _remap_conf_to_packed(
+                        d["pred_joint_confidence"][t].reshape(-1)
+                    )                                                            # (55,)
                 cam_map[gpid] = entry
                 if "smplx_betas" in d.files:
                     betas_acc[gpid].append(d["smplx_betas"][t][:10])

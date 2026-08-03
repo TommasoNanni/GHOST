@@ -1,12 +1,96 @@
 """
-PoseFusionModule — lightweight multi-view pose fusion.
+PoseFusionModuleV3 — residual multi-view pose fusion.
+
+Self-contained copy of fusion_module_v2.py. The attention stack is IDENTICAL;
+only the way the module relates to the multi-view mean changed.
+
+Why v3 exists
+-------------
+Measured on RICH test (52 scenes, one protocol, median scale smoothing):
+
+    chordal mean   WA-100 47.6  W-100 67.7  PA 26.5  RTE 0.98
+    v2 module      WA-100 50.4  W-100 70.4  PA 30.4  RTE 1.00
+
+The trained v2 module is beaten by a parameter-free chordal mean of the
+per-camera estimates, on every metric and in 48 of 52 scenes. The
+explainability study explains why: v2 behaves like a per-joint linear filter
+on that same mean (rank-1 model explains 88% of its 54x54 influence matrix,
+per-joint R^2 ~ 0.9) — but it has to REBUILD the mean from scratch through a
+decoder on every forward pass, and pays for every reconstruction error. It also
+learned per-joint gains > 1 on the hips, which restores SAM3D's attenuated hip
+rotations on average while multiplying their view-correlated bias.
+
+v3 removes reconstruction from the job entirely:
+
+    the mean is computed in closed form, SUBTRACTED from the inputs,
+    and ADDED BACK to the outputs — the network only ever sees, and only ever
+    emits, CORRECTIONS.
+
+Two changes, both flag-gated so the v2 behaviour remains reachable:
+
+  CHANGE A — residual head (`residual_head=True`)
+      The decoder's 6-D output is read as a CORRECTION rotation rather than as
+      the pose itself, applied in the joint's own body frame:
+
+          R_out = R_mean @ R_delta,      R_delta = gram_schmidt(decoder(...))
+
+      The final decoder layer is initialised to ZERO weights with the IDENTITY
+      6-D vector [1,0,0, 0,1,0] as bias, so at step 0 R_delta == I and the module
+      reproduces the chordal mean EXACTLY. Training therefore starts at the
+      baseline's accuracy and every gradient step is an attempt to improve on it
+      — the failure mode above becomes structurally hard.
+
+      Zero weights make the gradient w.r.t. everything UPSTREAM of this layer
+      vanish at step 0 (it is W^T dL/dout). This is not a dead network: the
+      layer's OWN gradient is dL/dout h^T with h != 0, so W leaves zero on the
+      first update and the body receives gradient from step 1 onward — the
+      standard ReZero / zero-conv construction. Body gradients are scaled by
+      ||W|| for the first epochs; a higher LR on this one layer removes the ramp.
+
+  CHANGE B — centred input (`centered_input=True`)
+      Each camera token carries ONLY its DEVIATION from the mean, as a 6-D
+      rotation exactly like the absolute input it replaces:
+
+          D_k = R_mean^T @ R_k                   (== I when view k agrees)
+
+      Residual out deserves residual in: with centred tokens, "weighted average
+      of the views" is a nearly LINEAR function of the input, whereas from
+      absolute rotations the network must first infer the mean internally before
+      it can correct it. The absolute rotation is NOT fed — it is redundant
+      (R_k = R_mean @ exp(delta_k), so the mean plus the deviations determine it)
+      and near-identical across the K camera tokens, since all views observe the
+      same pose.
+
+      KNOWN LIMITATION, recorded deliberately. A deviation-only model is blind
+      to VIEW-CORRELATED bias: SAM3D attenuates hip rotation in every view at
+      once, so the cameras agree and are all wrong together, the deviations are
+      ~0, and no correction can be inferred from them. v2's hip damage came from
+      exactly that bias being AMPLIFIED (learned gain > 1); v3 cannot amplify it
+      either, so the hips should land at mean level rather than below it. If the
+      hips turn out to need active correction, the fix is to also feed the
+      operating point R_mean as one shared context embedding per (t, p, j) —
+      deliberately NOT done here, to keep the design to a single idea.
+
+EVERYTHING IS 6-D, exactly as in v2: the encoder still reads 6 numbers per
+(camera, joint) token and the decoder still writes 6. Parameter shapes and
+parameter count are IDENTICAL to v2, so a v3-vs-v2 comparison isolates the
+residual formulation and nothing else. 6-D is also the better-behaved choice
+for both roles: Gram-Schmidt maps essentially all of R^6 onto SO(3), so any
+decoder output is a valid rotation, with no wrap at pi and no 2*pi ambiguity.
 
 Architecture
 ------------
-  1. Pose encoder      : 6-D rotation → D-dimensional token per joint
-  2. PoseStreamLayers  : joint self-attn → cross-view attn → windowed temporal attn → FFN
-  3. Camera mean pool  : visibility-weighted mean over K → (B, T, P, J, D)
-  4. Decoder           : D → 6-D rotation (residual on visibility-weighted input mean)
+  1. Pose encoder      : 6-D deviation from the mean -> D-dim token per joint
+  2. PoseStreamLayers  : joint self-attn -> cross-view attn -> windowed temporal attn -> FFN
+  3. Camera mean pool  : visibility-weighted mean over K -> (B, T, P, J, D)
+  4. Residual head     : D -> 6-D correction rotation, composed onto the mean
+
+Numerics
+--------
+`R_mean` and the input deviations depend only on the INPUTS, never on the
+parameters, so both are computed under `no_grad` — SVD backward (unstable for
+degenerate singular values) is never invoked. Those parts run in float32 even
+under bfloat16 autocast, since `linalg.svd` is not usable at bf16.
 
 Notation
 --------
@@ -14,7 +98,7 @@ B = batch size
 T = sequence length
 K = number of cameras
 P = maximum number of people
-J = number of joints (default 55)
+J = number of joints (54, root excluded)
 D = embedding dimension
 """
 
@@ -28,7 +112,74 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Building blocks (self-contained copies, independent of fusion_module.py)
+# Rotation helpers (torch-native — this module has no pytorch3d dependency)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sixd_to_matrix(sixd: torch.Tensor) -> torch.Tensor:
+    """(..., 6) -> (..., 3, 3). The 6 values are the FIRST TWO ROWS of R.
+
+    Same convention as fusion/placer.py:_6d_to_aa_batch and the training data in
+    data/fusion_dataset.py: Gram-Schmidt on rows, third row from the cross
+    product, so the result is a proper rotation.
+    """
+    r0, r1 = sixd[..., :3], sixd[..., 3:]
+    b1 = r0 / (r0.norm(dim=-1, keepdim=True) + 1e-8)
+    b2 = r1 - (b1 * r1).sum(dim=-1, keepdim=True) * b1
+    b2 = b2 / (b2.norm(dim=-1, keepdim=True) + 1e-8)
+    b3 = torch.cross(b1, b2, dim=-1)
+    return torch.stack([b1, b2, b3], dim=-2)
+
+
+def matrix_to_sixd(R: torch.Tensor) -> torch.Tensor:
+    """(..., 3, 3) -> (..., 6): rows 0 and 1, matching `sixd_to_matrix`."""
+    return torch.cat([R[..., 0, :], R[..., 1, :]], dim=-1)
+
+
+def chordal_mean(
+    pose_sixd: torch.Tensor,
+    person_visible: torch.Tensor,
+) -> torch.Tensor:
+    """Visibility-weighted chordal mean of the per-camera rotations.
+
+    R_bar = argmin_R sum_k w_k ||R - R_k||_F^2, solved in closed form as the SVD
+    projection of the arithmetic mean matrix onto SO(3). This is the SAME
+    estimator as the published baseline (evaluation/evaluate_rich_mean.py:
+    mean_fuse), reproduced here so the module carries no dependency on an
+    evaluation script.
+
+    Parameters
+    ----------
+    pose_sixd      : (B, T, K, P, J, 6)
+    person_visible : (B, T, K, P) float — 1 where camera k detected person p.
+
+    Returns
+    -------
+    (B, T, P, J, 3, 3) in float32.
+    """
+    R = sixd_to_matrix(pose_sixd.float())                       # (B,T,K,P,J,3,3)
+    w = person_visible.float()[..., None, None, None]           # (B,T,K,P,1,1,1)
+
+    num = (R * w).sum(dim=2)                                    # (B,T,P,J,3,3)
+    den = w.sum(dim=2).clamp(min=1e-8)
+    M = num / den
+
+    # No camera saw this (t, p): M is all-zero and its SVD is arbitrary. Seed the
+    # identity so the decomposition stays well-conditioned. These slots are
+    # dropped by the visibility mask before any loss or metric sees them.
+    empty = (person_visible.float().sum(dim=2) == 0)            # (B,T,P)
+    if bool(empty.any()):
+        eye = torch.eye(3, dtype=M.dtype, device=M.device)
+        M = torch.where(empty[..., None, None, None], eye.expand_as(M), M)
+
+    U, _, Vh = torch.linalg.svd(M)
+    d = torch.linalg.det(U @ Vh)                                # (B,T,P,J) +-1
+    D = torch.eye(3, dtype=M.dtype, device=M.device).expand(*d.shape, 3, 3).clone()
+    D[..., 2, 2] = d
+    return U @ D @ Vh
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Building blocks (self-contained copies, independent of fusion_module_v2.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PositionalEncoding(nn.Module):
@@ -305,10 +456,6 @@ class PoseStreamLayer(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main module
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Kinematic tree, for the joint-attention hop mask
 # ─────────────────────────────────────────────────────────────────────────────
 #
@@ -366,8 +513,17 @@ def _packed_hop_matrix(num_joints: int) -> torch.Tensor:
     return hop[:num_joints, :num_joints].contiguous()
 
 
-class PoseFusionModule(nn.Module):
+# ─────────────────────────────────────────────────────────────────────────────
+# Main module
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PoseFusionModuleV3(nn.Module):
     """Fuse per-camera SMPL-X pose estimates into a single world-frame prediction.
+
+    Residual formulation: the visibility-weighted chordal mean of the inputs is
+    the operating point. The network sees per-camera DEVIATIONS from it and
+    emits a CORRECTION to it; with `residual_head=True` the head is
+    zero-initialised, so an untrained module reproduces the mean exactly.
 
     Parameters
     ----------
@@ -378,6 +534,9 @@ class PoseFusionModule(nn.Module):
     dropout          : dropout probability.
     temporal_window  : half-width W of the local temporal attention window.
     num_joints       : J, number of SMPL-X joints (default 54, root excluded).
+    kintree_mask_k   : hop radius of the kinematic-tree attention mask, or None.
+    residual_head    : CHANGE A — predict a correction to the chordal mean.
+    centered_input   : CHANGE B — feed per-camera deviations from the mean.
     """
 
     def __init__(
@@ -390,6 +549,8 @@ class PoseFusionModule(nn.Module):
         temporal_window: int = 128,
         num_joints: int = 54,
         kintree_mask_k: int | None = None,
+        residual_head: bool = True,
+        centered_input: bool = True,
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
@@ -397,13 +558,19 @@ class PoseFusionModule(nn.Module):
         self.num_layers = num_layers
         self.num_joints = num_joints
         self.kintree_mask_k = kintree_mask_k
+        self.residual_head = residual_head
+        self.centered_input = centered_input
 
-        # CHANGE 2 — kinematic-tree hard mask on the joint attention axis.
+        # Kinematic-tree hard mask on the joint attention axis (v2 CHANGE 2).
         # A joint may attend only to joints within `kintree_mask_k` edges of it in
         # the SMPL-X tree; the diagonal is always allowed. Stored as an ADDITIVE
         # bias (0 = allowed, -inf = blocked) because the joint attention already
         # receives an additive log-confidence mask, and -inf + finite = -inf.
-        # None disables the mask entirely (baseline behaviour, bit-identical).
+        #
+        # NOTE this buffer is non-persistent: it is NOT in state_dict and
+        # load_state_dict(strict=True) cannot detect its absence, so
+        # `kintree_mask_k` MUST be carried in the checkpoint's model_config.
+        # `arch_config()` below exists so no caller has to remember that.
         if kintree_mask_k is not None:
             hop = _packed_hop_matrix(num_joints)
             allowed = hop <= int(kintree_mask_k)
@@ -424,12 +591,16 @@ class PoseFusionModule(nn.Module):
         # No camera ID embedding: cameras have no consistent identity across scenes.
         self.joint_id_embedding = nn.Embedding(num_joints, embedding_dim)
 
-        # Input encoder: project each joint's 6-D rotation into the token space.
+        # Input encoder — SAME SHAPE AS v2. CHANGE B only changes what the 6
+        # numbers mean: the per-camera deviation R_mean^T @ R_k instead of the
+        # absolute rotation R_k.
+        self.input_dim = 6
         self.pose_encoder = nn.Sequential(
             nn.Linear(6, 2 * embedding_dim),
             nn.ReLU(),
             nn.Linear(2 * embedding_dim, embedding_dim),
         )
+
 
         self.layers = nn.ModuleList([
             PoseStreamLayer(
@@ -439,13 +610,46 @@ class PoseFusionModule(nn.Module):
             for i in range(num_layers)
         ])
 
-        # Output head: LayerNorm → MLP → direct 6-D rotation prediction.
+        # Output head — SAME SHAPE AS v2. CHANGE A only changes what the 6
+        # numbers mean: a correction rotation instead of the pose itself.
         self.output_norm = nn.LayerNorm(embedding_dim)
         self.decoder = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
             nn.Linear(embedding_dim, 6),
         )
+
+        if residual_head:
+            # Zero weights + IDENTITY 6-D bias => R_delta == I at step 0, so the
+            # module reproduces the chordal mean exactly. See CHANGE A in the
+            # module docstring for why this does not freeze the network.
+            nn.init.zeros_(self.decoder[-1].weight)
+            with torch.no_grad():
+                self.decoder[-1].bias.copy_(
+                    torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+                )
+
+    def arch_config(self) -> dict:
+        """Everything needed to rebuild this module from a checkpoint.
+
+        NONE of these change a parameter shape — v3 has exactly v2's parameter
+        set — so `load_state_dict(strict=True)` cannot catch a mismatch on any
+        of them. `residual_head` and `centered_input` in particular alter what
+        the SAME weights mean; loading a v3 checkpoint with them wrong produces
+        silent garbage, not an error. Persist this dict under "model_config" and
+        pass it back to the constructor.
+        """
+        return {
+            "embedding_dim":    self.embedding_dim,
+            "num_heads":        self.num_heads,
+            "num_layers":       self.num_layers,
+            "max_temporal_len": self.temporal_pe.pe.shape[0],
+            "temporal_window":  self.layers[0].temporal_attn.temporal_window,
+            "num_joints":       self.num_joints,
+            "kintree_mask_k":   self.kintree_mask_k,
+            "residual_head":    self.residual_head,
+            "centered_input":   self.centered_input,
+        }
 
     @staticmethod
     def _build_confidence_mask(flat: torch.Tensor, num_heads: int) -> torch.Tensor:
@@ -507,8 +711,37 @@ class PoseFusionModule(nn.Module):
         else:
             conf = joint_mask * person_visible.unsqueeze(-1)       # (B, T, K, P, J)
 
+        # ── Operating point: chordal mean of the inputs ──────────────────────
+        # A function of the INPUTS only, never of the parameters, so no_grad is
+        # exact (not an approximation) and SVD backward is never invoked. Forced
+        # to float32: linalg.svd is not usable at bfloat16 under autocast.
+        R_mean = None
+        if self.residual_head or self.centered_input:
+            with torch.no_grad(), torch.amp.autocast('cuda', enabled=False):
+                R_mean = chordal_mean(pose, person_visible)        # (B,T,P,J,3,3) fp32
+
         # ── Encode ───────────────────────────────────────────────────────────
-        x = self.pose_encoder(pose)                                # (B, T, K, P, J, D)
+        if self.centered_input:
+            # D_k = R_mean^T @ R_k — the group "subtraction": camera k's
+            # deviation from the operating point, == I when it agrees. Same 6-D
+            # form as the absolute rotation it replaces, so the encoder is
+            # unchanged.
+            with torch.no_grad(), torch.amp.autocast('cuda', enabled=False):
+                R_k = sixd_to_matrix(pose.float())                 # (B,T,K,P,J,3,3)
+                R_mean_k = R_mean.unsqueeze(2).expand_as(R_k)      # broadcast over K
+                D_k = R_mean_k.transpose(-1, -2) @ R_k             # (B,T,K,P,J,3,3)
+                # Absent cameras carry no information, and their stored pose may
+                # be arbitrary. Force them to the identity deviation so they
+                # cannot inject a spurious signal; their tokens are masked out of
+                # every attention and excluded from the pooling anyway.
+                eye = torch.eye(3, dtype=D_k.dtype, device=D_k.device)
+                seen = person_visible.bool()[..., None, None, None]
+                D_k = torch.where(seen, D_k, eye.expand_as(D_k))
+                tokens = matrix_to_sixd(D_k).to(pose.dtype)        # (B,T,K,P,J,6)
+        else:
+            tokens = pose                                           # (B,T,K,P,J,6)
+
+        x = self.pose_encoder(tokens)                               # (B,T,K,P,J,D)
 
         # ── Build attention masks (built once, shared across all layers) ──────
         # Joint self-attention: each slot (b,t,k,p) sees J×J interactions.
@@ -516,11 +749,11 @@ class PoseFusionModule(nn.Module):
             conf.reshape(B * T * K * P, J), H,
         )  # (B*T*K*P*H, J, J)
 
-        # CHANGE 2 — add the kinematic-tree hard mask on top of the confidence
-        # bias. Both are additive, so -inf on a blocked pair survives whatever
-        # finite confidence bias sits there. The diagonal is always 0, so every
-        # row keeps at least one finite entry and softmax cannot produce NaN —
-        # including rows that _build_confidence_mask reset to 0 for absent people.
+        # Kinematic-tree hard mask on top of the confidence bias. Both are
+        # additive, so -inf on a blocked pair survives whatever finite confidence
+        # bias sits there. The diagonal is always 0, so every row keeps at least
+        # one finite entry and softmax cannot produce NaN — including rows that
+        # _build_confidence_mask reset to 0 for absent people.
         if self.kintree_bias is not None:
             if self.kintree_bias.shape[0] != J:
                 raise RuntimeError(
@@ -561,12 +794,21 @@ class PoseFusionModule(nn.Module):
         vis_sum = vis.sum(dim=2).clamp(min=1e-8)                   # (B, T,    P, 1, 1)
         x_pooled = (x * vis).sum(dim=2) / vis_sum                  # (B, T, P, J, D)
 
-        # ── Decode (direct prediction) ────────────────────────────────────────
-        pose_aggr = self.decoder(
+        # ── Decode ────────────────────────────────────────────────────────────
+        head_out = self.decoder(
             self.output_norm(x_pooled).reshape(B * T * P * J, D)
-        ).reshape(B, T, P, J, 6)
+        )
 
-        return pose_aggr
+        if not self.residual_head:
+            # v2 behaviour: direct 6-D prediction.
+            return head_out.reshape(B, T, P, J, 6)
+
+        # CHANGE A — the group "addition": compose the predicted correction onto
+        # the operating point, in the joint's own body frame. float32 throughout,
+        # since a few-degree correction is below bfloat16's resolution near 1.0.
+        R_delta = sixd_to_matrix(head_out.reshape(B, T, P, J, 6).float())
+        R_out = R_mean @ R_delta                                   # (B,T,P,J,3,3)
+        return matrix_to_sixd(R_out).to(pose.dtype)
 
     def count_parameters(self) -> dict:
         total     = sum(p.numel() for p in self.parameters())
@@ -587,5 +829,3 @@ class PoseFusionModule(nn.Module):
             f"Trainable  : {counts['trainable']:>12,} params",
         ]
         return "\n".join(lines)
-
-
