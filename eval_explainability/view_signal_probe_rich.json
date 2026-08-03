@@ -1,0 +1,202 @@
+{
+  "split": "train",
+  "n_scenes": 12,
+  "rr_mpjpe_mm": {
+    "uniform": 48.547996520996094,
+    "geo_median": 47.773712158203125,
+    "oracle_joint": 42.83183670043945,
+    "oracle_reachable": 44.309059143066406,
+    "at_joint^1": 48.52064895629883,
+    "at_joint^2": 49.12727355957031,
+    "at_child^1": 48.550697326660156,
+    "at_child^2": 49.023067474365234,
+    "at_joint_raw^1": 48.2298469543457,
+    "at_joint_raw^2": 48.19644546508789,
+    "at_child_raw^1": 48.27403259277344,
+    "at_child_raw^2": 48.26368713378906,
+    "median x at_child": 48.14344787597656,
+    "median x at_child_raw": 47.64878845214844
+  },
+  "spearman": {
+    "at_joint": -0.032851215451955795,
+    "at_child": -0.051334843039512634
+  },
+  "top1_agreement": {
+    "at_joint": {
+      "rate": 0.16145619086795557,
+      "chance": 0.16223236171858932
+    },
+    "at_child": {
+      "rate": 0.1625445632798574,
+      "chance": 0.16223235648796094
+    }
+  },
+  "calibration": {
+    "BBQ_001_juggle": {
+      "scale": [
+        0.35692,
+        0.35517,
+        0.35365,
+        0.36295,
+        0.34723,
+        0.34581,
+        0.34344,
+        0.34385
+      ],
+      "median_reproj_px": 3.9510675934350146,
+      "coarse_px": 22.50731103777671,
+      "frac_triangulated": 1.0
+    },
+    "LectureHall_020_wipingtable1": {
+      "scale": [
+        0.35912,
+        0.35039,
+        0.36011,
+        0.35621,
+        0.35936
+      ],
+      "median_reproj_px": 4.784548373025203,
+      "coarse_px": 21.80540347914232,
+      "frac_triangulated": 1.0
+    },
+    "ParkingLot1_007_overfence2": {
+      "scale": [
+        0.35463,
+        0.35731,
+        0.35001,
+        0.35495,
+        0.35376,
+        0.35588,
+        0.35538,
+        0.35381
+      ],
+      "median_reproj_px": 3.3379999145475616,
+      "coarse_px": 12.832695059125376,
+      "frac_triangulated": 1.0
+    },
+    "ParkingLot2_016_stretching1": {
+      "scale": [
+        0.35694,
+        0.35267,
+        0.3613,
+        0.35279,
+        0.36108,
+        0.36273
+      ],
+      "median_reproj_px": 5.54028563461072,
+      "coarse_px": 12.47988895654395,
+      "frac_triangulated": 1.0
+    },
+    "Pavallion_013_yoga2": {
+      "scale": [
+        0.35139,
+        0.35053,
+        0.3533,
+        0.35206,
+        0.34964,
+        0.3483,
+        0.34592
+      ],
+      "median_reproj_px": 4.810859013685322,
+      "coarse_px": 13.982217039881204,
+      "frac_triangulated": 1.0
+    },
+    "LectureHall_018_wipingspray1": {
+      "scale": [
+        0.34063,
+        0.33601,
+        0.3367
+      ],
+      "median_reproj_px": 1.2548217390397072,
+      "coarse_px": 2.8917667637303173,
+      "frac_triangulated": 1.0
+    },
+    "ParkingLot1_007_eating2": {
+      "scale": [
+        0.35372,
+        0.35664,
+        0.34788,
+        0.35207,
+        0.35212,
+        0.35208,
+        0.35524,
+        0.35151
+      ],
+      "median_reproj_px": 2.9750929628275586,
+      "coarse_px": 8.587951164516413,
+      "frac_triangulated": 1.0
+    },
+    "ParkingLot2_016_pushup2": {
+      "scale": [
+        0.35189,
+        0.35355,
+        0.34926,
+        0.3479,
+        0.35281,
+        0.35118
+      ],
+      "median_reproj_px": 3.368748016694358,
+      "coarse_px": 13.701678640199034,
+      "frac_triangulated": 1.0
+    },
+    "Pavallion_006_sidebalancerun": {
+      "scale": [
+        0.34953,
+        0.34934,
+        0.34859,
+        0.34908,
+        0.34794,
+        0.34951,
+        0.34597
+      ],
+      "median_reproj_px": 4.851241714616896,
+      "coarse_px": 15.102229546965514,
+      "frac_triangulated": 1.0
+    },
+    "ParkingLot1_007_eating1": {
+      "scale": [
+        0.3539,
+        0.35753,
+        0.34797,
+        0.35274,
+        0.35268,
+        0.35221,
+        0.35652,
+        0.35184
+      ],
+      "median_reproj_px": 3.063597422961794,
+      "coarse_px": 8.834407256419881,
+      "frac_triangulated": 1.0
+    },
+    "BBQ_001_guitar": {
+      "scale": [
+        0.35132,
+        0.35434,
+        0.35283,
+        0.357,
+        0.35181,
+        0.3508,
+        0.34665,
+        0.34749
+      ],
+      "median_reproj_px": 4.772976329027266,
+      "coarse_px": 19.081367093487778,
+      "frac_triangulated": 1.0
+    },
+    "LectureHall_018_wipingchairs1": {
+      "scale": [
+        0.34421,
+        0.33503,
+        0.33971,
+        0.33515,
+        0.34161,
+        0.35575,
+        0.35356
+      ],
+      "median_reproj_px": 4.6643610463063645,
+      "coarse_px": 14.466851147662474,
+      "frac_triangulated": 1.0
+    }
+  },
+  "skipped": []
+}

@@ -1,0 +1,551 @@
+{
+  "n_slots": 1069686,
+  "all_joints": {
+    "uniform": {
+      "mean": 29.682212829589844,
+      "median": 24.308204650878906
+    },
+    "oracle_best": {
+      "mean": 26.796846389770508,
+      "median": 20.81201171875
+    },
+    "oracle_inv": {
+      "mean": 28.748023986816406,
+      "median": 23.055259704589844
+    },
+    "oracle_topk": {
+      "mean": 27.707347869873047,
+      "median": 21.849103927612305
+    },
+    "perframe_inv": {
+      "mean": 29.574670791625977,
+      "median": 24.110469818115234
+    },
+    "perframe_best": {
+      "mean": 29.029422760009766,
+      "median": 23.537620544433594
+    },
+    "geo_median": {
+      "mean": 29.55929946899414,
+      "median": 23.965295791625977
+    },
+    "biweight": {
+      "mean": 29.546457290649414,
+      "median": 23.89678955078125
+    },
+    "trim1": {
+      "mean": 29.52552604675293,
+      "median": 23.809703826904297
+    },
+    "karcher": {
+      "mean": 29.69196128845215,
+      "median": 24.3298397064209
+    },
+    "geo_median_i": {
+      "mean": 29.56467628479004,
+      "median": 23.977725982666016
+    },
+    "single_mean": {
+      "mean": 30.181941986083984,
+      "median": 24.922006607055664
+    },
+    "V2": {
+      "mean": 14.480729103088379,
+      "median": 11.305121421813965
+    },
+    "R2": {
+      "mean": 12.96041202545166,
+      "median": 9.815821647644043
+    },
+    "V3": {
+      "mean": 15.19865608215332,
+      "median": 11.913202285766602
+    }
+  },
+  "body_joints": {
+    "uniform": {
+      "mean": 15.159954071044922,
+      "median": 13.36681842803955
+    },
+    "oracle_best": {
+      "mean": 12.474721908569336,
+      "median": 10.663060188293457
+    },
+    "oracle_inv": {
+      "mean": 13.875328063964844,
+      "median": 12.03840160369873
+    },
+    "oracle_topk": {
+      "mean": 13.224305152893066,
+      "median": 11.437625885009766
+    },
+    "perframe_inv": {
+      "mean": 15.126389503479004,
+      "median": 13.327230453491211
+    },
+    "perframe_best": {
+      "mean": 15.356656074523926,
+      "median": 13.491106033325195
+    },
+    "geo_median": {
+      "mean": 15.086220741271973,
+      "median": 13.3016357421875
+    },
+    "biweight": {
+      "mean": 15.095514297485352,
+      "median": 13.301071166992188
+    },
+    "trim1": {
+      "mean": 15.167152404785156,
+      "median": 13.33884048461914
+    },
+    "karcher": {
+      "mean": 15.177009582519531,
+      "median": 13.371928215026855
+    },
+    "geo_median_i": {
+      "mean": 15.09793758392334,
+      "median": 13.303504943847656
+    },
+    "single_mean": {
+      "mean": 16.047033309936523,
+      "median": 14.222256660461426
+    },
+    "V2": {
+      "mean": 10.911725044250488,
+      "median": 8.7733736038208
+    },
+    "R2": {
+      "mean": 9.331196784973145,
+      "median": 7.444711685180664
+    },
+    "V3": {
+      "mean": 11.638721466064453,
+      "median": 9.307045936584473
+    }
+  },
+  "rr_mpjpe_mm": {
+    "uniform": {
+      "mean": 38.943965911865234,
+      "median": 33.74217224121094
+    },
+    "oracle_best": {
+      "mean": 34.01445007324219,
+      "median": 29.844568252563477
+    },
+    "oracle_inv": {
+      "mean": 34.373870849609375,
+      "median": 29.57611846923828
+    },
+    "oracle_topk": {
+      "mean": 33.58495330810547,
+      "median": 29.424007415771484
+    },
+    "perframe_inv": {
+      "mean": 38.71437454223633,
+      "median": 33.59661865234375
+    },
+    "perframe_best": {
+      "mean": 42.040367126464844,
+      "median": 38.09520721435547
+    },
+    "geo_median": {
+      "mean": 38.227027893066406,
+      "median": 33.253013610839844
+    },
+    "biweight": {
+      "mean": 38.3472785949707,
+      "median": 33.31403350830078
+    },
+    "trim1": {
+      "mean": 39.247894287109375,
+      "median": 34.43971252441406
+    },
+    "karcher": {
+      "mean": 39.01728439331055,
+      "median": 33.779937744140625
+    },
+    "geo_median_i": {
+      "mean": 38.417179107666016,
+      "median": 33.45262145996094
+    },
+    "V2": {
+      "mean": 45.25425720214844,
+      "median": 41.710182189941406
+    },
+    "R2": {
+      "mean": 37.074954986572266,
+      "median": 31.924161911010742
+    },
+    "V3": {
+      "mean": 40.3196907043457,
+      "median": 35.92442321777344
+    }
+  },
+  "per_scene": [
+    {
+      "scene": "Gym_010_cooking1",
+      "n_slots": 21384,
+      "uniform": 30.90138053894043,
+      "oracle_inv": 30.078405380249023,
+      "oracle_best": 28.22267723083496
+    },
+    {
+      "scene": "Gym_010_dips1",
+      "n_slots": 21384,
+      "uniform": 30.484935760498047,
+      "oracle_inv": 29.635602951049805,
+      "oracle_best": 27.4709415435791
+    },
+    {
+      "scene": "Gym_010_dips2",
+      "n_slots": 21384,
+      "uniform": 29.786598205566406,
+      "oracle_inv": 29.03533363342285,
+      "oracle_best": 27.060436248779297
+    },
+    {
+      "scene": "Gym_010_lunge1",
+      "n_slots": 16200,
+      "uniform": 31.980194091796875,
+      "oracle_inv": 31.242496490478516,
+      "oracle_best": 29.337358474731445
+    },
+    {
+      "scene": "Gym_010_lunge2",
+      "n_slots": 16200,
+      "uniform": 31.291601181030273,
+      "oracle_inv": 30.59334373474121,
+      "oracle_best": 28.676881790161133
+    },
+    {
+      "scene": "Gym_010_mountainclimber1",
+      "n_slots": 21384,
+      "uniform": 26.287290573120117,
+      "oracle_inv": 24.488113403320312,
+      "oracle_best": 22.441776275634766
+    },
+    {
+      "scene": "Gym_010_mountainclimber2",
+      "n_slots": 21384,
+      "uniform": 25.648645401000977,
+      "oracle_inv": 23.849092483520508,
+      "oracle_best": 21.86415672302246
+    },
+    {
+      "scene": "Gym_010_pushup1",
+      "n_slots": 21384,
+      "uniform": 26.705429077148438,
+      "oracle_inv": 25.722827911376953,
+      "oracle_best": 23.85315704345703
+    },
+    {
+      "scene": "Gym_010_pushup2",
+      "n_slots": 21384,
+      "uniform": 25.16330337524414,
+      "oracle_inv": 24.255929946899414,
+      "oracle_best": 22.543729782104492
+    },
+    {
+      "scene": "Gym_011_burpee2",
+      "n_slots": 21384,
+      "uniform": 27.39008140563965,
+      "oracle_inv": 26.203125,
+      "oracle_best": 24.368680953979492
+    },
+    {
+      "scene": "Gym_011_cooking1",
+      "n_slots": 21384,
+      "uniform": 30.376619338989258,
+      "oracle_inv": 29.710590362548828,
+      "oracle_best": 28.0936279296875
+    },
+    {
+      "scene": "Gym_011_cooking2",
+      "n_slots": 21384,
+      "uniform": 29.058565139770508,
+      "oracle_inv": 28.5371036529541,
+      "oracle_best": 27.113449096679688
+    },
+    {
+      "scene": "Gym_011_dips1",
+      "n_slots": 21384,
+      "uniform": 30.024778366088867,
+      "oracle_inv": 28.967609405517578,
+      "oracle_best": 26.710554122924805
+    },
+    {
+      "scene": "Gym_011_dips2",
+      "n_slots": 18900,
+      "uniform": 30.371479034423828,
+      "oracle_inv": 29.289081573486328,
+      "oracle_best": 26.90282440185547
+    },
+    {
+      "scene": "Gym_011_dips3",
+      "n_slots": 16200,
+      "uniform": 30.7542667388916,
+      "oracle_inv": 29.864633560180664,
+      "oracle_best": 27.591663360595703
+    },
+    {
+      "scene": "Gym_011_dips4",
+      "n_slots": 21384,
+      "uniform": 30.048978805541992,
+      "oracle_inv": 29.393102645874023,
+      "oracle_best": 27.400146484375
+    },
+    {
+      "scene": "Gym_011_pushup1",
+      "n_slots": 16200,
+      "uniform": 28.55670738220215,
+      "oracle_inv": 27.7004451751709,
+      "oracle_best": 25.57135772705078
+    },
+    {
+      "scene": "Gym_011_pushup2",
+      "n_slots": 21384,
+      "uniform": 26.8916015625,
+      "oracle_inv": 25.938922882080078,
+      "oracle_best": 23.942228317260742
+    },
+    {
+      "scene": "Gym_012_cooking2",
+      "n_slots": 21384,
+      "uniform": 29.220863342285156,
+      "oracle_inv": 28.344989776611328,
+      "oracle_best": 26.864490509033203
+    },
+    {
+      "scene": "Gym_012_lunge1",
+      "n_slots": 10800,
+      "uniform": 32.42005157470703,
+      "oracle_inv": 31.642414093017578,
+      "oracle_best": 29.79332733154297
+    },
+    {
+      "scene": "Gym_012_lunge2",
+      "n_slots": 13500,
+      "uniform": 32.09699630737305,
+      "oracle_inv": 31.392457962036133,
+      "oracle_best": 29.527095794677734
+    },
+    {
+      "scene": "Gym_012_pushup2",
+      "n_slots": 14148,
+      "uniform": 27.22572135925293,
+      "oracle_inv": 26.116127014160156,
+      "oracle_best": 24.164287567138672
+    },
+    {
+      "scene": "Gym_013_burpee4",
+      "n_slots": 16200,
+      "uniform": 25.331905364990234,
+      "oracle_inv": 24.52349853515625,
+      "oracle_best": 22.748756408691406
+    },
+    {
+      "scene": "Gym_013_dips1",
+      "n_slots": 21276,
+      "uniform": 31.050264358520508,
+      "oracle_inv": 30.089447021484375,
+      "oracle_best": 27.908723831176758
+    },
+    {
+      "scene": "Gym_013_dips2",
+      "n_slots": 17280,
+      "uniform": 28.46027183532715,
+      "oracle_inv": 27.820369720458984,
+      "oracle_best": 26.131126403808594
+    },
+    {
+      "scene": "Gym_013_dips3",
+      "n_slots": 21384,
+      "uniform": 28.09202766418457,
+      "oracle_inv": 27.44660186767578,
+      "oracle_best": 25.765296936035156
+    },
+    {
+      "scene": "Gym_013_lunge1",
+      "n_slots": 21384,
+      "uniform": 35.73472595214844,
+      "oracle_inv": 34.96990203857422,
+      "oracle_best": 32.83773422241211
+    },
+    {
+      "scene": "Gym_013_lunge2",
+      "n_slots": 21384,
+      "uniform": 31.654773712158203,
+      "oracle_inv": 30.890384674072266,
+      "oracle_best": 28.92628288269043
+    },
+    {
+      "scene": "Gym_013_pushup1",
+      "n_slots": 21384,
+      "uniform": 26.025615692138672,
+      "oracle_inv": 25.140460968017578,
+      "oracle_best": 23.259557723999023
+    },
+    {
+      "scene": "Gym_013_pushup2",
+      "n_slots": 21384,
+      "uniform": 24.755056381225586,
+      "oracle_inv": 24.171783447265625,
+      "oracle_best": 22.63191795349121
+    },
+    {
+      "scene": "LectureHall_009_021_reparingprojector1",
+      "n_slots": 42282,
+      "uniform": 31.072847366333008,
+      "oracle_inv": 30.183502197265625,
+      "oracle_best": 28.335102081298828
+    },
+    {
+      "scene": "LectureHall_009_sidebalancerun1",
+      "n_slots": 21384,
+      "uniform": 24.867359161376953,
+      "oracle_inv": 23.6979923248291,
+      "oracle_best": 21.630552291870117
+    },
+    {
+      "scene": "LectureHall_010_plankjack1",
+      "n_slots": 21384,
+      "uniform": 37.4045295715332,
+      "oracle_inv": 36.476829528808594,
+      "oracle_best": 33.889408111572266
+    },
+    {
+      "scene": "LectureHall_010_sidebalancerun1",
+      "n_slots": 21384,
+      "uniform": 29.569978713989258,
+      "oracle_inv": 28.737712860107422,
+      "oracle_best": 26.705223083496094
+    },
+    {
+      "scene": "LectureHall_019_wipingchairs1",
+      "n_slots": 21384,
+      "uniform": 31.192258834838867,
+      "oracle_inv": 30.535966873168945,
+      "oracle_best": 28.724103927612305
+    },
+    {
+      "scene": "LectureHall_021_plankjack1",
+      "n_slots": 21384,
+      "uniform": 33.901180267333984,
+      "oracle_inv": 32.740821838378906,
+      "oracle_best": 30.036272048950195
+    },
+    {
+      "scene": "LectureHall_021_sidebalancerun1",
+      "n_slots": 21384,
+      "uniform": 24.690128326416016,
+      "oracle_inv": 23.58308219909668,
+      "oracle_best": 21.595895767211914
+    },
+    {
+      "scene": "ParkingLot2_009_burpeejump1",
+      "n_slots": 21600,
+      "uniform": 28.602407455444336,
+      "oracle_inv": 27.105484008789062,
+      "oracle_best": 24.899959564208984
+    },
+    {
+      "scene": "ParkingLot2_009_burpeejump2",
+      "n_slots": 13500,
+      "uniform": 29.734495162963867,
+      "oracle_inv": 27.985868453979492,
+      "oracle_best": 25.51108169555664
+    },
+    {
+      "scene": "ParkingLot2_009_impro1",
+      "n_slots": 21600,
+      "uniform": 33.083499908447266,
+      "oracle_inv": 32.10506820678711,
+      "oracle_best": 29.652772903442383
+    },
+    {
+      "scene": "ParkingLot2_009_impro2",
+      "n_slots": 21600,
+      "uniform": 31.070833206176758,
+      "oracle_inv": 29.822141647338867,
+      "oracle_best": 27.45513343811035
+    },
+    {
+      "scene": "ParkingLot2_009_impro5",
+      "n_slots": 21600,
+      "uniform": 35.739017486572266,
+      "oracle_inv": 35.0855827331543,
+      "oracle_best": 33.10109329223633
+    },
+    {
+      "scene": "ParkingLot2_009_overfence1",
+      "n_slots": 21600,
+      "uniform": 30.272491455078125,
+      "oracle_inv": 29.060428619384766,
+      "oracle_best": 26.82220458984375
+    },
+    {
+      "scene": "ParkingLot2_009_overfence2",
+      "n_slots": 21600,
+      "uniform": 31.625560760498047,
+      "oracle_inv": 30.762836456298828,
+      "oracle_best": 28.654796600341797
+    },
+    {
+      "scene": "ParkingLot2_009_spray1",
+      "n_slots": 21600,
+      "uniform": 28.359241485595703,
+      "oracle_inv": 27.343257904052734,
+      "oracle_best": 25.399166107177734
+    },
+    {
+      "scene": "ParkingLot2_017_burpeejump1",
+      "n_slots": 21600,
+      "uniform": 28.377731323242188,
+      "oracle_inv": 27.726238250732422,
+      "oracle_best": 26.221542358398438
+    },
+    {
+      "scene": "ParkingLot2_017_burpeejump2",
+      "n_slots": 21600,
+      "uniform": 29.026123046875,
+      "oracle_inv": 27.822040557861328,
+      "oracle_best": 26.131446838378906
+    },
+    {
+      "scene": "ParkingLot2_017_eating1",
+      "n_slots": 21600,
+      "uniform": 28.479764938354492,
+      "oracle_inv": 27.930274963378906,
+      "oracle_best": 26.603723526000977
+    },
+    {
+      "scene": "ParkingLot2_017_overfence1",
+      "n_slots": 21600,
+      "uniform": 33.27412033081055,
+      "oracle_inv": 32.31094741821289,
+      "oracle_best": 30.42212677001953
+    },
+    {
+      "scene": "ParkingLot2_017_overfence2",
+      "n_slots": 21600,
+      "uniform": 33.56835174560547,
+      "oracle_inv": 32.93041229248047,
+      "oracle_best": 31.239444732666016
+    },
+    {
+      "scene": "ParkingLot2_017_pushup1",
+      "n_slots": 21600,
+      "uniform": 27.44733428955078,
+      "oracle_inv": 26.131391525268555,
+      "oracle_best": 24.028833389282227
+    },
+    {
+      "scene": "ParkingLot2_017_pushup2",
+      "n_slots": 21600,
+      "uniform": 28.016521453857422,
+      "oracle_inv": 27.422534942626953,
+      "oracle_best": 26.033164978027344
+    }
+  ]
+}

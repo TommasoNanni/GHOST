@@ -1,0 +1,211 @@
+{
+  "n_slots": 242352,
+  "all_joints": {
+    "uniform": {
+      "mean": 29.89133071899414,
+      "median": 25.926158905029297
+    },
+    "oracle_best": {
+      "mean": 24.164508819580078,
+      "median": 19.38408088684082
+    },
+    "oracle_inv": {
+      "mean": 27.675983428955078,
+      "median": 23.089759826660156
+    },
+    "oracle_topk": {
+      "mean": 26.735084533691406,
+      "median": 22.314109802246094
+    },
+    "perframe_inv": {
+      "mean": 29.660402297973633,
+      "median": 25.67249298095703
+    },
+    "perframe_best": {
+      "mean": 28.351036071777344,
+      "median": 23.795372009277344
+    },
+    "geo_median": {
+      "mean": 30.101951599121094,
+      "median": 26.008193969726562
+    },
+    "biweight": {
+      "mean": 30.040889739990234,
+      "median": 25.93014144897461
+    },
+    "trim1": {
+      "mean": 30.097597122192383,
+      "median": 25.96417236328125
+    },
+    "single_mean": {
+      "mean": 30.690887451171875,
+      "median": 26.854904174804688
+    }
+  },
+  "body_joints": {
+    "uniform": {
+      "mean": 15.480688095092773,
+      "median": 14.20136547088623
+    },
+    "oracle_best": {
+      "mean": 11.782159805297852,
+      "median": 10.345888137817383
+    },
+    "oracle_inv": {
+      "mean": 13.761262893676758,
+      "median": 12.396815299987793
+    },
+    "oracle_topk": {
+      "mean": 13.221137046813965,
+      "median": 11.906234741210938
+    },
+    "perframe_inv": {
+      "mean": 15.476410865783691,
+      "median": 14.209005355834961
+    },
+    "perframe_best": {
+      "mean": 16.402021408081055,
+      "median": 14.761981964111328
+    },
+    "geo_median": {
+      "mean": 15.40605354309082,
+      "median": 14.107376098632812
+    },
+    "biweight": {
+      "mean": 15.423457145690918,
+      "median": 14.119211196899414
+    },
+    "trim1": {
+      "mean": 15.446410179138184,
+      "median": 14.110471725463867
+    },
+    "single_mean": {
+      "mean": 16.63918113708496,
+      "median": 15.33625602722168
+    }
+  },
+  "rr_mpjpe_mm": {
+    "uniform": {
+      "mean": 48.547996520996094,
+      "median": 44.04066467285156
+    },
+    "oracle_best": {
+      "mean": 39.44404220581055,
+      "median": 36.190895080566406
+    },
+    "oracle_inv": {
+      "mean": 42.83183288574219,
+      "median": 38.81245803833008
+    },
+    "oracle_topk": {
+      "mean": 41.373043060302734,
+      "median": 37.79591751098633
+    },
+    "perframe_inv": {
+      "mean": 48.53642654418945,
+      "median": 43.94589614868164
+    },
+    "perframe_best": {
+      "mean": 54.217411041259766,
+      "median": 49.42945861816406
+    },
+    "geo_median": {
+      "mean": 47.766395568847656,
+      "median": 43.780723571777344
+    },
+    "biweight": {
+      "mean": 47.9121208190918,
+      "median": 43.55411148071289
+    },
+    "trim1": {
+      "mean": 48.06608581542969,
+      "median": 44.11192321777344
+    }
+  },
+  "per_scene": [
+    {
+      "scene": "BBQ_001_juggle",
+      "n_slots": 15822,
+      "uniform": 31.229196548461914,
+      "oracle_inv": 29.335315704345703,
+      "oracle_best": 25.271846771240234
+    },
+    {
+      "scene": "LectureHall_020_wipingtable1",
+      "n_slots": 21384,
+      "uniform": 28.496135711669922,
+      "oracle_inv": 26.85256576538086,
+      "oracle_best": 24.071271896362305
+    },
+    {
+      "scene": "ParkingLot1_007_overfence2",
+      "n_slots": 13500,
+      "uniform": 31.55633544921875,
+      "oracle_inv": 28.642486572265625,
+      "oracle_best": 24.020814895629883
+    },
+    {
+      "scene": "ParkingLot2_016_stretching1",
+      "n_slots": 21600,
+      "uniform": 30.72011375427246,
+      "oracle_inv": 28.394145965576172,
+      "oracle_best": 25.018747329711914
+    },
+    {
+      "scene": "Pavallion_013_yoga2",
+      "n_slots": 21384,
+      "uniform": 29.560014724731445,
+      "oracle_inv": 26.197629928588867,
+      "oracle_best": 22.604785919189453
+    },
+    {
+      "scene": "LectureHall_018_wipingspray1",
+      "n_slots": 21384,
+      "uniform": 28.131071090698242,
+      "oracle_inv": 27.555753707885742,
+      "oracle_best": 26.092954635620117
+    },
+    {
+      "scene": "ParkingLot1_007_eating2",
+      "n_slots": 21384,
+      "uniform": 30.782747268676758,
+      "oracle_inv": 28.30805206298828,
+      "oracle_best": 23.990434646606445
+    },
+    {
+      "scene": "ParkingLot2_016_pushup2",
+      "n_slots": 21600,
+      "uniform": 27.62081527709961,
+      "oracle_inv": 25.051395416259766,
+      "oracle_best": 21.591365814208984
+    },
+    {
+      "scene": "Pavallion_006_sidebalancerun",
+      "n_slots": 21384,
+      "uniform": 27.023393630981445,
+      "oracle_inv": 23.384490966796875,
+      "oracle_best": 19.734785079956055
+    },
+    {
+      "scene": "ParkingLot1_007_eating1",
+      "n_slots": 21384,
+      "uniform": 28.864957809448242,
+      "oracle_inv": 27.11225700378418,
+      "oracle_best": 23.56529998779297
+    },
+    {
+      "scene": "BBQ_001_guitar",
+      "n_slots": 20142,
+      "uniform": 32.563995361328125,
+      "oracle_inv": 30.55799674987793,
+      "oracle_best": 26.470115661621094
+    },
+    {
+      "scene": "LectureHall_018_wipingchairs1",
+      "n_slots": 21384,
+      "uniform": 33.27882385253906,
+      "oracle_inv": 31.694290161132812,
+      "oracle_best": 27.927997589111328
+    }
+  ]
+}

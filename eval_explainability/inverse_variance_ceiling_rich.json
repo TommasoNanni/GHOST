@@ -1,0 +1,15 @@
+{
+  "split": "test",
+  "n_scenes": 52,
+  "rr_mpjpe_mm": {
+    "uniform": 38.84663009643555,
+    "geo_median": 38.32272720336914,
+    "invvar": 38.252403259277344,
+    "invvar_soft": 38.26204299926758,
+    "invvar_clip4": 38.2813835144043,
+    "invvar x median": 38.9629020690918,
+    "oracle_A_noise_luck": 34.315040588378906
+  },
+  "cv_observed": 0.20116783678531647,
+  "cv_permuted": 0.010016019456088543
+}
