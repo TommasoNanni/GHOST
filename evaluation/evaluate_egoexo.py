@@ -8,9 +8,10 @@ Metrics (millimetres):
 GT source: keypoints_gt.json (triangulated COCO-17 body joints in world frame,
 metres) + gopro_calibs.csv (GT GoPro camera positions in world frame).
 
-Only the 12 limb joints shared between COCO-17 and SMPL-X body joints are used:
-shoulders, elbows, wrists, hips, knees, ankles.  Face joints (nose, eyes, ears)
-are excluded because they do not correspond to standard SMPL-X body joints.
+All 17 COCO joints are scored, matching the EgoExo4D body-pose benchmark
+definition and the mesh-based competitors (HSfM, CHROMM).  GT annotates all 17
+with coverage comparable to the limbs (verified 2026-08-04); the former 12-limb
+restriction was a convention choice, not a data limitation.
 
 Scenes with hand-only GT (bike, covid tasks) are automatically skipped.
 108 of the 182 validation scenes have body GT and are evaluated.
@@ -97,6 +98,14 @@ def _remap_conf_to_packed(conf: np.ndarray, num_joints: int = 55) -> np.ndarray:
 # convention offset -> systematic PA-MPJPE inflation.  We therefore regress
 # COCO-17 from the posed SMPL-X mesh and index GT by COCO order.
 GT_TO_COCO: dict[str, int] = {
+    # All 17 COCO joints — the EgoExo4D body-pose benchmark definition. GT
+    # annotates all 17 (verified 2026-08-04). Matching is unaffected: it gates
+    # on GT_TO_MHR70 (12 limbs only), so this is a metric-only change.
+    "nose":            0,
+    "left-eye":        1,
+    "right-eye":       2,
+    "left-ear":        3,
+    "right-ear":       4,
     "left-shoulder":   5,
     "right-shoulder":  6,
     "left-elbow":      7,
