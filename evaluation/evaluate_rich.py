@@ -724,8 +724,6 @@ def evaluate_scene(
     smplx_model_path: Path,
     gt_split:         str = "test",
     exclude_cameras:  list[str] | None = None,
-    scale_mode:       str = "baseline",
-    scale_smooth:     str = "none",
     centered_root:    Path | None = None,
 ) -> dict[str, float] | None:
     """Run full inference + evaluation for one scene. Returns metric dict or None."""
@@ -833,9 +831,9 @@ def evaluate_scene(
                 if pid in sam3d_betas_by_pid:
                     sam3d_betas_map[bf] = sam3d_betas_by_pid[pid]
 
-        pred_scale_pf = placer.load_mapanything_scale(scale_mode=scale_mode, smooth=scale_smooth)
+        pred_scale_pf = placer.load_mapanything_scale()
         if pred_scale_pf is not None:
-            logger.info(f"  [scale] using MapAnything ({scale_mode}, smooth={scale_smooth})  median={float(np.median(pred_scale_pf)):.4f}")
+            logger.info(f"  [scale] using MapAnything (baseline, always median-smoothed)  median={float(np.median(pred_scale_pf)):.4f}")
         else:
             pred_scale_pf = placer.estimate_scale_triangulated(
                 fused_pose_by_pid=fused_pose_by_pid,
@@ -944,7 +942,7 @@ def evaluate_scene(
     }
 
     match_scale = placer.load_mapanything_scale(
-        filename="mapanything_scale_baseline.npy", smooth="median")
+        filename="mapanything_scale_baseline.npy")
     if match_scale is None:
         match_scale = pred_scale_pf
     try:
@@ -1145,14 +1143,6 @@ def main() -> None:
                         help="Comma-separated scene names to skip")
     parser.add_argument("--skip_cameras",      default="",
                         help="Per-scene camera exclusions: 'scene:cam1,cam2;scene2:cam3'")
-    parser.add_argument("--scale",              default="baseline",
-                        choices=["centered", "baseline"],
-                        help="MapAnything scale variant "
-                             "(centered=legacy depth-ratio, baseline=images-only camera baselines).")
-    parser.add_argument("--scale_smooth",       default="none",
-                        choices=["none", "median"],
-                        help="Temporal denoise of per-frame scale: median=one robust scalar "
-                             "per scene (kills VGGT per-frame jitter).")
     parser.add_argument("--centered_root",      type=Path, default=None,
                         help="Dir holding <scene>/crop_meta.json from the centered-image step. "
                              "Default: <rich_root>/centered_<gt_split>. The sqsh CANNOT be "
@@ -1208,8 +1198,6 @@ def main() -> None:
             gt_split=args.gt_split,
             centered_root=args.centered_root,
             exclude_cameras=skip_cameras.get(scene_dir.name),
-            scale_mode=args.scale,
-            scale_smooth=args.scale_smooth,
         )
         if result is not None:
             all_results.append(result)

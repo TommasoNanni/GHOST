@@ -329,7 +329,7 @@ def _pack_pose(entry) -> np.ndarray:
 
 
 def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
-                  smplx_arg, scale_mode="pred", temporal=False):
+                  smplx_arg, temporal=False):
     """Return pred_coco {pid: {frame: (17,3) coco in aria world}} + R_align,t_align.
 
     R_align,t_align map ghost-metric(vggt cam-0) -> aria world (None if no cams).
@@ -412,18 +412,9 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
         placer = BodyPlacer(view, smplx_arg, crop_meta_path=None)
         fused_pose_by_pid = {p: fused[:, pid_slot[p]] for p in pids}
 
-        if scale_mode == "triangulated":
-            try:
-                scale = placer.estimate_scale_triangulated(
-                    fused_pose_by_pid=fused_pose_by_pid, frame_start=fmin)
-            except Exception:
-                scale = placer.load_mapanything_scale()
-        elif scale_mode == "baseline":
-            scale = placer.load_mapanything_scale(filename="mapanything_scale_baseline.npy", smooth="median")
-            if scale is None:
-                raise RuntimeError("scale_mode=baseline but mapanything_scale_baseline.npy missing/mismatched")
-        else:
-            scale = placer.load_mapanything_scale()
+        scale = placer.load_mapanything_scale(filename="mapanything_scale_baseline.npy")
+        if scale is None:
+            raise RuntimeError("mapanything_scale_baseline.npy missing/mismatched")
         if scale is None:
             scale = np.ones(placer.T, dtype=np.float32)
         # W† camera alignment must use the SAME scale the placer placed with
@@ -487,7 +478,7 @@ def _clean_scene_view(ghost_scene: Path, cam_names) -> Path:
 
 # ── per-scene orchestration ────────────────────────────────────────────────
 def eval_scene(ghost_scene: Path, gt_scene: Path, fusion_model, device, smplx_arg,
-               scale_mode="pred", temporal=False):
+               temporal=False):
     """Return dump dict {pred (T,P,17,3) aria, gt, valid (T,P), have_world} or None."""
     if not (ghost_scene / "vggt_cameras_centered.npz").exists():
         logger.warning(f"{ghost_scene.name}: no vggt cameras, skip"); return None
@@ -500,7 +491,7 @@ def eval_scene(ghost_scene: Path, gt_scene: Path, fusion_model, device, smplx_ar
     pids = sorted(pid_of_aria.values())
 
     pred_coco, raw_coco, cam_names, extrinsics_full, valid_full, ma_scale = predict_scene(
-        ghost_scene, frames, pids, fusion_model, device, smplx_arg, scale_mode, temporal)
+        ghost_scene, frames, pids, fusion_model, device, smplx_arg, temporal)
 
     # Per-frame SE(3): ghost-metric cameras (this frame) -> aria-world GT cameras.
     # VGGT cameras are estimated per frame, so a single global SE(3) would dump
@@ -643,7 +634,6 @@ def main():
     ap.add_argument("--gt_root", help="camera_ready/<activity> dir with per-scene GT")
     ap.add_argument("--checkpoint")
     ap.add_argument("--smplx_model", default=str(_REPO_ROOT / "body_models" / "SMPLX_NEUTRAL.pkl"))
-    ap.add_argument("--scale", choices=["pred", "triangulated", "baseline"], default="pred")
     ap.add_argument("--temporal", action="store_true", help="use temporal fusion (default: per-frame)")
     ap.add_argument("--scene", default=None)
     ap.add_argument("--dump_dir", default="eval_egohumans/dumps")
@@ -686,7 +676,7 @@ def main():
             logger.info(f"{scene}: dump exists, skip"); continue
         try:
             d = eval_scene(ghost_root / scene, gt_root / scene, fusion_model, device,
-                           smplx_arg, args.scale, args.temporal)
+                           smplx_arg, args.temporal)
         except Exception as e:
             logger.warning(f"{scene}: FAILED — {e}"); continue
         if d is None:

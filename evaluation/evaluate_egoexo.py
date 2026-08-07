@@ -574,28 +574,6 @@ def _build_single_frame_tensors(
     )
 
 
-def _gt_scale(placer, cam_pos_gt: dict[str, np.ndarray]) -> float | None:
-    """Oracle metric scale (metres per VGGT unit): Sim(3) scale aligning the
-    *unscaled* VGGT camera centres to the GT camera centres."""
-    names = [n.decode() if isinstance(n, bytes) else n for n in placer.camera_names]
-    pred, gt = [], []
-    for k, cam in enumerate(names):
-        if cam not in cam_pos_gt or not placer.cam_valid[:, k].any():
-            continue
-        E = placer.extrinsics[0, k]
-        R, t = E[:3, :3], E[:3, 3]
-        pred.append(-R.T @ t)              # VGGT camera centre (unscaled units)
-        gt.append(cam_pos_gt[cam])
-    if len(pred) < 2:
-        return None
-    pred = np.stack(pred).astype(np.float64)
-    gt   = np.stack(gt).astype(np.float64)
-    p0, g0 = pred - pred.mean(0), gt - gt.mean(0)
-    U, S, Vt = np.linalg.svd(p0.T @ g0)
-    d = np.linalg.det(Vt.T @ U.T)
-    return float((S * [1, 1, d]).sum() / ((p0 ** 2).sum() + 1e-12))
-
-
 def run_fusion_placer(
     ghost_scene_dir: Path,
     gt_frame_idx: int,
@@ -604,7 +582,6 @@ def run_fusion_placer(
     device: torch.device,
     smplx_arg,
     cam_pos_gt: dict[str, np.ndarray],
-    scale_mode: str = "pred",
 ) -> list[tuple[int, np.ndarray]]:
     """Fuse multi-view pose, place via Procrustes DLT, FK to SMPL-X joints.
 
@@ -646,43 +623,20 @@ def run_fusion_placer(
     )
     fused_pose_by_pid = {pid: fused[:, pid_to_slot[pid]] for pid in all_pids}  # {pid: (1, 54, 6)}
 
-    # Metric scale (metres per VGGT unit): pred = MapAnything estimate,
-    # gt = oracle from GT cameras, triangulated = multi-view bone-length DLT.
+    # Metric scale (metres per VGGT unit): images-only MapAnything camera-baseline
+    # ratio, the only scale source this pipeline uses (2026-08-04).
     # NOTE: never silently fall back to scale 1.0.  The placer scales the subject
-    # while the SE(3) camera alignment scales the rig by mapanything_scale_centered
-    # (~12-25 here), so a unit scale puts the body at a fraction of its true
-    # distance -- metres of W-MPJPE error that looks like a model failure while
-    # PA (scale-invariant) stays perfect.  Bail out loudly instead.
-    scale = None
-    if scale_mode == "gt":
-        s_gt = _gt_scale(placer, cam_pos_gt)
-        if s_gt:
-            scale = np.full(placer.T, s_gt, dtype=np.float32)
-        else:
-            logger.error(f"{ghost_scene_dir.name}: oracle scale unavailable "
-                         "(<2 cameras matched to GT) — skipping")
-    elif scale_mode == "triangulated":
-        try:
-            scale = placer.estimate_scale_triangulated(
-                fused_pose_by_pid=fused_pose_by_pid, frame_start=gt_frame_idx,
-            )
-        except Exception as e:
-            logger.warning(f"{ghost_scene_dir.name}: triangulated scale failed ({e}) "
-                           "— falling back to baseline")
-            scale = placer.load_mapanything_scale(scale_mode="baseline")
-    else:  # "baseline" | "centered" -- explicit estimator choice, as in the RICH
-           # and EgoHumans evals.  No smoothing: EgoExo4D is one frame per take,
-           # so a median over a single value is a no-op.
-        scale = placer.load_mapanything_scale(scale_mode=scale_mode)
-        if scale is None:
-            logger.error(
-                f"{ghost_scene_dir.name}: --scale {scale_mode} selected but its .npy is "
-                "missing. Run scripts/run_ma_baseline_egoexo.py to generate the baseline "
-                "scale; refusing to substitute another estimator."
-            )
+    # while the SE(3) camera alignment scales the rig by the same value, so a unit
+    # scale puts the body at a fraction of its true distance -- metres of W-MPJPE
+    # error that looks like a model failure while PA (scale-invariant) stays
+    # perfect.  Bail out loudly instead.
+    scale = placer.load_mapanything_scale()
     if scale is None:
-        logger.error(f"{ghost_scene_dir.name}: no metric scale available "
-                     f"(scale_mode={scale_mode}) — skipping rather than placing at 1.0")
+        logger.error(
+            f"{ghost_scene_dir.name}: baseline scale .npy missing. Run "
+            "scripts/run_ma_baseline_egoexo.py to generate it; refusing to "
+            "substitute another estimator."
+        )
         return [], None
     # The SAME scalar must scale the camera rig in eval_scene; W-MPJPE aligns with
     # SE(3) (no scale), so any mismatch between the subject's scale and the rig's
@@ -734,7 +688,6 @@ def eval_scene(
     device: torch.device,
     smplx_arg,
     reid_groups: dict[str, list[str]] | None = None,
-    scale_mode: str = "pred",
 ) -> dict | None:
     """Evaluate one scene via fusion + Procrustes DLT placement.
 
@@ -792,7 +745,7 @@ def eval_scene(
     # --- Inference: fusion -> Procrustes DLT placement -> FK ----------------
     persons, scale_used = run_fusion_placer(
         ghost_scene_dir, frame_idx, global_groups, fusion_model, device, smplx_arg,
-        cam_pos_gt, scale_mode,
+        cam_pos_gt,
     )
     if not persons or scale_used is None:
         logger.warning(f"{ghost_scene_dir.name}: no placed predictions for frame {frame_idx}")
@@ -868,15 +821,6 @@ def main():
                         help="Path to SMPLX_NEUTRAL.pkl (or folder containing it)")
     parser.add_argument("--checkpoint",  required=True,
                         help="PoseFusionModule checkpoint (.pt)")
-    parser.add_argument("--scale",
-                        choices=["baseline", "centered", "triangulated", "gt"],
-                        default="baseline",
-                        help="Metric scale source. baseline=images-only MapAnything "
-                             "camera-baseline ratio (default, matches RICH/EgoHumans); "
-                             "centered=legacy conditioned depth-ratio; "
-                             "triangulated=multi-view bone DLT; "
-                             "gt=ORACLE from GT cameras (diagnostic only -- an oracle "
-                             "modality, NOT comparable to CHROMM/HSfM or to RICH M10)")
     parser.add_argument("--max_scenes",  type=int, default=None)
     parser.add_argument("--scene",       default=None, help="Evaluate a single scene by name")
     parser.add_argument("--joint_conf",  action="store_true", default=False,
@@ -955,7 +899,7 @@ def main():
         gt_scene_dir = gt_root / ghost_scene_dir.name
         reid_groups = reid_map_egoexo.get(ghost_scene_dir.name)
         res = eval_scene(ghost_scene_dir, gt_scene_dir, fusion_model, device, smplx_arg,
-                         reid_groups, args.scale)
+                         reid_groups)
         if res is None:
             if not gt_scene_dir.exists():
                 skipped_missing += 1
@@ -990,7 +934,7 @@ def main():
         print(f"    PA-MPJPE   MEAN: {np.mean(pa):7.1f} mm      (median {np.median(pa):6.1f})")
 
     print("\n" + "=" * 60)
-    print(f"EgoExo4D evaluation — {len(results)} body-GT scenes  [scale={args.scale}]")
+    print(f"EgoExo4D evaluation — {len(results)} body-GT scenes  [scale=baseline]")
     print(f"  Skipped (hand-only GT): {skipped_hand}")
     print(f"  Skipped (missing files): {skipped_missing}")
     print("-" * 60)
