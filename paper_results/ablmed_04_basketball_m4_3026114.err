@@ -1,0 +1,21 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO eval_egohumans: Fusion: geodesic median over cameras, L1/Weiszfeld (no checkpoint)
+/users/tnanni/ghost/evaluation/ablations_egohumans_median.py:280: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+INFO eval_egohumans: 001_basketball: dumped  M4: W†=182.6 GA=102.1 PA=20.1 mm
+INFO eval_egohumans: 002_basketball: dumped  M4: W†=155.2 GA=93.3 PA=20.4 mm
+INFO eval_egohumans: 003_basketball: dumped  M4: W†=160.7 GA=79.2 PA=19.9 mm
+INFO eval_egohumans: 004_basketball: dumped  M4: W†=104.8 GA=54.2 PA=18.8 mm
+INFO eval_egohumans: 005_basketball: dumped  M4: W†=141.5 GA=72.3 PA=20.6 mm
+INFO eval_egohumans: 006_basketball: dumped  M4: W†=134.0 GA=71.2 PA=19.9 mm
+INFO eval_egohumans: 007_basketball: dumped  M4: W†=177.1 GA=76.3 PA=20.6 mm
+INFO eval_egohumans: 008_basketball: dumped  M4: W†=183.3 GA=66.1 PA=20.4 mm
+INFO eval_egohumans: 009_basketball: dumped  M4: W†=122.4 GA=55.1 PA=19.2 mm
+WARNING eval_egohumans: 010_basketball: FAILED — no processed_data/smpl in /iopsstor/scratch/cscs/tnanni/egohumans_gt_full/04_basketball/010_basketball
+INFO eval_egohumans: 011_basketball: dumped  M4: W†=131.7 GA=96.7 PA=19.0 mm
+INFO eval_egohumans: 012_basketball: dumped  M4: W†=145.5 GA=111.2 PA=18.9 mm
+INFO eval_egohumans: 013_basketball: dumped  M4: W†=251.4 GA=79.4 PA=19.3 mm
+INFO eval_egohumans: 014_basketball: dumped  M4: W†=166.0 GA=79.7 PA=20.5 mm
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`

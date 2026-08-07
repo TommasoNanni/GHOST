@@ -1,0 +1,323 @@
+2026-08-06 10:53:36 activities: 01_tagging 02_lego 03_fencing 04_basketball 05_volleyball 06_badminton 07_tennis   rungs: 2   maxjobs=2   fusion=geodesic-median
+2026-08-06 10:53:38 01_tagging: 14 eligible scene(s)
+2026-08-06 10:53:39 02_lego: 6 eligible scene(s)
+2026-08-06 10:53:43 03_fencing: 14 eligible scene(s)
+2026-08-06 10:53:44 04_basketball: 13 eligible scene(s)
+2026-08-06 10:53:47 05_volleyball: 11 eligible scene(s)
+2026-08-06 10:53:57 06_badminton: 61 eligible scene(s)
+2026-08-06 10:54:03 07_tennis: 13 eligible scene(s)
+2026-08-06 10:54:05 01_tagging m2: submitted 3018631 (14 scene(s) pending)
+2026-08-06 10:54:07 02_lego m2: submitted 3018635 (6 scene(s) pending)
+2026-08-06 10:54:30 132 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 10:57:50 132 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:01:13 129 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:04:34 127 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:07:55 126 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:11:15 124 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:14:37 122 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:17:58 119 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:21:03 03_fencing m2: submitted 3018784 (14 scene(s) pending)
+2026-08-06 11:21:21 118 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:24:41 116 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:28:05 115 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:31:27 113 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:34:35 04_basketball m2: submitted 3018847 (13 scene(s) pending)
+2026-08-06 11:34:51 112 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:38:12 110 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:41:37 108 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:45:01 107 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:48:20 105 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:51:43 103 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:55:07 101 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 11:58:24 06_badminton m2: submitted 3018980 (61 scene(s) pending)
+2026-08-06 11:58:28 98 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:01:51 98 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:05:14 97 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:08:38 96 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:12:01 93 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:15:34 91 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:19:02 89 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:22:33 86 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:25:45 05_volleyball m2: submitted 3019109 (11 scene(s) pending)
+2026-08-06 12:26:01 85 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:29:30 84 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:32:59 83 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:36:21 81 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:39:27 80 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:42:32 79 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:45:37 78 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:48:41 77 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:52:02 76 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:55:26 74 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 12:58:50 74 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:02:17 72 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:05:37 71 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:08:56 70 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:12:16 69 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:15:43 68 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:19:08 65 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:22:28 64 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:25:45 63 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:28:48 62 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:31:50 61 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:35:12 60 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:38:31 58 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:41:52 57 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:45:11 56 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:48:30 55 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:51:47 54 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:55:02 06_badminton m2: submitted 3019729 (29 scene(s) pending)
+2026-08-06 13:55:05 53 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 13:58:23 52 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:01:42 51 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:05:03 50 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:08:21 48 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:11:37 47 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:14:56 46 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:18:11 44 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:21:28 43 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:24:47 07_tennis m2: submitted 3019884 (13 scene(s) pending)
+2026-08-06 14:24:47 42 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:28:01 41 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:31:18 39 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:34:34 37 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:37:49 36 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:41:05 33 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:44:22 29 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:47:38 28 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:50:50 26 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:54:05 25 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 14:57:21 23 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 15:00:39 22 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 15:03:53 20 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 15:07:11 19 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 15:10:26 16 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 15:13:40 14 scene-rung(s) remaining, 2 job(s) active
+2026-08-06 15:16:53 13 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:20:06 12 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:23:26 11 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:26:42 10 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:29:56 9 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:33:13 8 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:36:27 7 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:39:41 7 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:42:55 6 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:46:08 5 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:49:28 4 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:52:49 4 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:56:10 3 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 15:59:38 2 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 16:03:04 1 scene-rung(s) remaining, 1 job(s) active
+2026-08-06 16:06:28 all activities x rungs complete
+=== final aggregate per activity ===
+--- 01_tagging ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_tagging               M2: W†=  128.5 GA=  73.3 PA= 43.7 mm   | single-view PA: best=40.8 median=48.4
+  002_tagging               M2: W†=  101.6 GA=  54.4 PA= 38.8 mm   | single-view PA: best=37.7 median=44.0
+  003_tagging               M2: W†=  152.9 GA=  65.3 PA= 44.1 mm   | single-view PA: best=41.7 median=49.4
+  004_tagging               M2: W†=  130.7 GA=  64.2 PA= 46.8 mm   | single-view PA: best=43.9 median=52.4
+  005_tagging               M2: W†=  137.3 GA=  64.6 PA= 43.3 mm   | single-view PA: best=42.0 median=47.7
+  006_tagging               M2: W†=  121.4 GA=  56.6 PA= 43.9 mm   | single-view PA: best=42.5 median=47.5
+  007_tagging               M2: W†=  173.5 GA=  92.6 PA= 44.2 mm   | single-view PA: best=42.3 median=48.4
+  008_tagging               M2: W†=  150.2 GA=  69.2 PA= 47.7 mm   | single-view PA: best=46.0 median=52.4
+  009_tagging               M2: W†=  112.8 GA=  54.8 PA= 44.6 mm   | single-view PA: best=43.0 median=47.6
+  010_tagging               M2: W†=  122.9 GA=  58.9 PA= 46.4 mm   | single-view PA: best=44.8 median=50.3
+  011_tagging               M2: W†=  108.6 GA=  53.9 PA= 42.8 mm   | single-view PA: best=41.5 median=46.2
+  012_tagging               M2: W†=  155.5 GA=  86.5 PA= 48.5 mm   | single-view PA: best=47.7 median=56.8
+  013_tagging               M2: W†=  113.2 GA=  71.4 PA= 49.6 mm   | single-view PA: best=48.1 median=57.2
+  014_tagging               M2: W†=  172.8 GA=  91.3 PA= 48.3 mm   | single-view PA: best=45.2 median=53.5
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        14      134.4       68.3       45.2
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+--- 02_lego ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_legoassemble          M2: W†=   74.7 GA=  56.8 PA= 44.9 mm   | single-view PA: best=43.4 median=50.3
+  002_legoassemble          M2: W†=   73.4 GA=  60.8 PA= 46.4 mm   | single-view PA: best=43.8 median=51.4
+  003_legoassemble          M2: W†=   79.8 GA=  57.1 PA= 42.2 mm   | single-view PA: best=41.6 median=47.1
+  004_legoassemble          M2: W†=   71.5 GA=  55.1 PA= 43.6 mm   | single-view PA: best=42.4 median=49.0
+  005_legoassemble          M2: W†=   71.5 GA=  53.1 PA= 42.6 mm   | single-view PA: best=40.4 median=48.5
+  006_legoassemble          M2: W†=   77.5 GA=  60.6 PA= 46.5 mm   | single-view PA: best=44.4 median=51.4
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose         6       74.7       57.3       44.4
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+--- 03_fencing ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_fencing               M2: W†=  269.7 GA= 108.3 PA= 32.6 mm   | single-view PA: best=31.6 median=35.6
+  002_fencing               M2: W†=  239.2 GA=  92.8 PA= 31.1 mm   | single-view PA: best=29.9 median=34.4
+  003_fencing               M2: W†=  235.5 GA=  83.0 PA= 33.0 mm   | single-view PA: best=30.4 median=36.2
+  004_fencing               M2: W†=  215.6 GA=  80.0 PA= 31.8 mm   | single-view PA: best=30.6 median=34.8
+  005_fencing               M2: W†=  221.6 GA=  78.6 PA= 39.7 mm   | single-view PA: best=37.7 median=42.0
+  006_fencing               M2: W†=  211.5 GA=  73.1 PA= 31.3 mm   | single-view PA: best=29.6 median=34.0
+  007_fencing               M2: W†=  176.2 GA=  69.4 PA= 31.1 mm   | single-view PA: best=30.3 median=34.7
+  008_fencing               M2: W†=  225.6 GA=  76.4 PA= 33.4 mm   | single-view PA: best=31.7 median=37.6
+  009_fencing               M2: W†=  193.6 GA=  83.5 PA= 40.5 mm   | single-view PA: best=38.7 median=43.6
+  010_fencing               M2: W†=  177.8 GA=  62.0 PA= 33.4 mm   | single-view PA: best=31.5 median=36.4
+  011_fencing               M2: W†=  220.9 GA=  53.6 PA= 33.5 mm   | single-view PA: best=31.8 median=36.7
+  012_fencing               M2: W†=  229.0 GA=  56.0 PA= 41.8 mm   | single-view PA: best=40.8 median=45.2
+  013_fencing               M2: W†=  200.8 GA=  49.2 PA= 38.3 mm   | single-view PA: best=37.6 median=40.3
+  014_fencing               M2: W†=  130.3 GA=  43.3 PA= 32.9 mm   | single-view PA: best=28.6 median=37.0
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        14      210.5       72.1       34.6
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+--- 04_basketball ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_basketball            M2: W†=  159.4 GA=  61.5 PA= 28.3 mm   | single-view PA: best=27.3 median=34.3
+  002_basketball            M2: W†=  132.6 GA=  66.4 PA= 31.5 mm   | single-view PA: best=29.8 median=38.0
+  003_basketball            M2: W†=  137.9 GA=  61.2 PA= 30.9 mm   | single-view PA: best=31.6 median=38.9
+  004_basketball            M2: W†=  123.3 GA=  54.8 PA= 33.3 mm   | single-view PA: best=32.0 median=39.3
+  005_basketball            M2: W†=  135.9 GA=  57.7 PA= 32.3 mm   | single-view PA: best=31.0 median=38.6
+  006_basketball            M2: W†=  133.8 GA=  53.8 PA= 30.5 mm   | single-view PA: best=30.3 median=36.8
+  007_basketball            M2: W†=  207.9 GA=  79.2 PA= 37.7 mm   | single-view PA: best=35.7 median=44.5
+  008_basketball            M2: W†=  165.4 GA=  58.9 PA= 31.7 mm   | single-view PA: best=30.5 median=39.3
+  009_basketball            M2: W†=  175.4 GA=  53.7 PA= 30.5 mm   | single-view PA: best=29.8 median=36.5
+  011_basketball            M2: W†=  108.6 GA=  54.5 PA= 25.2 mm   | single-view PA: best=24.5 median=29.4
+  012_basketball            M2: W†=  128.3 GA=  66.7 PA= 27.0 mm   | single-view PA: best=25.8 median=31.4
+  013_basketball            M2: W†=  151.4 GA=  61.6 PA= 34.4 mm   | single-view PA: best=32.5 median=40.2
+  014_basketball            M2: W†=  170.5 GA=  69.3 PA= 35.1 mm   | single-view PA: best=33.6 median=42.5
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        13      148.5       61.5       31.4
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+--- 05_volleyball ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_volleyball            M2: W†=  517.8 GA= 292.5 PA= 29.2 mm   | single-view PA: best=28.5 median=36.6
+  002_volleyball            M2: W†=  894.3 GA= 732.7 PA= 29.8 mm   | single-view PA: best=28.5 median=37.2
+  003_volleyball            M2: W†=  464.7 GA= 169.9 PA= 29.7 mm   | single-view PA: best=29.1 median=37.1
+  004_volleyball            M2: W†=  508.6 GA= 192.3 PA= 29.4 mm   | single-view PA: best=28.5 median=36.9
+  005_volleyball            M2: W†=  437.8 GA= 195.7 PA= 31.6 mm   | single-view PA: best=31.5 median=38.6
+  006_volleyball            M2: W†=  461.0 GA= 234.1 PA= 30.3 mm   | single-view PA: best=29.4 median=38.2
+  007_volleyball            M2: W†=  453.9 GA= 248.9 PA= 28.8 mm   | single-view PA: best=28.5 median=35.5
+  008_volleyball            M2: W†=  475.9 GA= 220.8 PA= 28.7 mm   | single-view PA: best=28.6 median=35.2
+  009_volleyball            M2: W†=  625.4 GA= 396.5 PA= 29.7 mm   | single-view PA: best=28.9 median=36.7
+  010_volleyball            M2: W†=  513.4 GA= 224.8 PA= 29.0 mm   | single-view PA: best=28.6 median=36.4
+  011_volleyball            M2: W†=  459.9 GA= 180.0 PA= 30.8 mm   | single-view PA: best=29.1 median=38.8
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        11      528.4      280.7       29.7
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+--- 06_badminton ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_badminton             M2: W†=  899.1 GA= 453.3 PA= 24.3 mm   | single-view PA: best=23.7 median=29.3
+  002_badminton             M2: W†=  604.1 GA=  84.5 PA= 24.2 mm   | single-view PA: best=23.5 median=28.9
+  003_badminton             M2: W†=  940.2 GA= 376.8 PA= 25.8 mm   | single-view PA: best=24.3 median=30.7
+  004_badminton             M2: W†=  517.0 GA=  68.6 PA= 24.6 mm   | single-view PA: best=23.6 median=28.5
+  005_badminton             M2: W†=  609.3 GA=  80.2 PA= 24.1 mm   | single-view PA: best=23.0 median=28.3
+  006_badminton             M2: W†=  588.6 GA=  64.6 PA= 23.0 mm   | single-view PA: best=21.9 median=27.0
+  007_badminton             M2: W†=  567.9 GA=  87.4 PA= 25.7 mm   | single-view PA: best=23.9 median=29.8
+  008_badminton             M2: W†=  584.9 GA=  73.8 PA= 23.5 mm   | single-view PA: best=22.7 median=26.6
+  009_badminton             M2: W†=  522.9 GA=  95.6 PA= 26.2 mm   | single-view PA: best=24.9 median=30.4
+  010_badminton             M2: W†=  562.5 GA=  65.8 PA= 25.1 mm   | single-view PA: best=24.2 median=29.6
+  011_badminton             M2: W†=  582.7 GA=  84.6 PA= 25.7 mm   | single-view PA: best=24.8 median=29.6
+  012_badminton             M2: W†=  565.1 GA= 109.0 PA= 25.1 mm   | single-view PA: best=24.1 median=29.2
+  013_badminton             M2: W†=  573.5 GA= 111.4 PA= 25.8 mm   | single-view PA: best=24.6 median=29.8
+  014_badminton             M2: W†=  547.0 GA=  78.3 PA= 24.8 mm   | single-view PA: best=23.7 median=29.3
+  015_badminton             M2: W†=  567.9 GA=  63.2 PA= 23.6 mm   | single-view PA: best=22.9 median=28.0
+  016_badminton             M2: W†=  575.6 GA=  96.1 PA= 24.4 mm   | single-view PA: best=23.2 median=28.5
+  017_badminton             M2: W†=  504.4 GA=  77.2 PA= 24.5 mm   | single-view PA: best=24.1 median=29.5
+  018_badminton             M2: W†=  553.3 GA=  68.6 PA= 23.7 mm   | single-view PA: best=22.5 median=27.8
+  019_badminton             M2: W†=  636.2 GA=  79.4 PA= 25.5 mm   | single-view PA: best=24.7 median=30.2
+  020_badminton             M2: W†=  565.4 GA=  53.2 PA= 24.9 mm   | single-view PA: best=23.7 median=28.9
+  021_badminton             M2: W†=  636.7 GA= 269.2 PA= 25.3 mm   | single-view PA: best=24.2 median=29.2
+  022_badminton             M2: W†=  623.7 GA=  87.2 PA= 24.2 mm   | single-view PA: best=23.5 median=28.3
+  023_badminton             M2: W†=  543.7 GA=  55.0 PA= 23.7 mm   | single-view PA: best=23.1 median=27.7
+  024_badminton             M2: W†=  528.8 GA=  68.0 PA= 23.1 mm   | single-view PA: best=22.6 median=26.8
+  025_badminton             M2: W†=  541.2 GA=  56.8 PA= 23.5 mm   | single-view PA: best=22.9 median=27.9
+  026_badminton             M2: W†=  517.6 GA=  68.7 PA= 24.0 mm   | single-view PA: best=23.0 median=28.3
+  027_badminton             M2: W†=  538.3 GA=  67.9 PA= 23.9 mm   | single-view PA: best=23.1 median=28.0
+  028_badminton             M2: W†=  567.3 GA=  74.2 PA= 25.2 mm   | single-view PA: best=24.2 median=30.5
+  029_badminton             M2: W†=  495.6 GA=  79.6 PA= 24.4 mm   | single-view PA: best=24.0 median=28.7
+  030_badminton             M2: W†=  569.0 GA=  85.5 PA= 25.5 mm   | single-view PA: best=24.8 median=30.9
+  031_badminton             M2: W†=  498.4 GA=  85.1 PA= 24.1 mm   | single-view PA: best=23.6 median=28.8
+  032_badminton             M2: W†=  506.3 GA=  67.1 PA= 24.4 mm   | single-view PA: best=23.1 median=29.1
+  033_badminton             M2: W†=  534.9 GA=  70.0 PA= 25.1 mm   | single-view PA: best=24.5 median=30.3
+  034_badminton             M2: W†=  578.8 GA=  75.6 PA= 28.5 mm   | single-view PA: best=27.4 median=35.3
+  035_badminton             M2: W†=  551.9 GA=  63.3 PA= 27.2 mm   | single-view PA: best=26.2 median=32.7
+  036_badminton             M2: W†=  570.3 GA=  88.8 PA= 25.2 mm   | single-view PA: best=24.6 median=30.1
+  037_badminton             M2: W†=  586.5 GA=  62.0 PA= 26.4 mm   | single-view PA: best=25.5 median=30.9
+  038_badminton             M2: W†=  472.6 GA=  46.7 PA= 23.4 mm   | single-view PA: best=22.6 median=27.4
+  039_badminton             M2: W†=  592.9 GA=  85.2 PA= 24.7 mm   | single-view PA: best=23.8 median=28.8
+  040_badminton             M2: W†=  493.6 GA=  54.7 PA= 24.7 mm   | single-view PA: best=24.0 median=29.6
+  041_badminton             M2: W†=  531.2 GA=  72.9 PA= 24.1 mm   | single-view PA: best=23.7 median=28.5
+  042_badminton             M2: W†=  544.3 GA=  60.6 PA= 26.4 mm   | single-view PA: best=24.9 median=30.8
+  043_badminton             M2: W†=  533.9 GA=  73.6 PA= 27.3 mm   | single-view PA: best=26.4 median=31.9
+  044_badminton             M2: W†=  602.8 GA=  67.2 PA= 26.4 mm   | single-view PA: best=26.0 median=30.4
+  045_badminton             M2: W†=  473.6 GA=  64.5 PA= 26.1 mm   | single-view PA: best=25.5 median=30.3
+  046_badminton             M2: W†=  622.7 GA=  90.6 PA= 26.4 mm   | single-view PA: best=25.6 median=31.3
+  047_badminton             M2: W†=  588.6 GA=  77.0 PA= 25.4 mm   | single-view PA: best=24.3 median=30.0
+  048_badminton             M2: W†=  575.2 GA=  67.7 PA= 25.4 mm   | single-view PA: best=24.1 median=29.6
+  049_badminton             M2: W†=  612.2 GA=  66.5 PA= 25.6 mm   | single-view PA: best=24.7 median=29.5
+  050_badminton             M2: W†=  867.3 GA= 274.2 PA= 27.2 mm   | single-view PA: best=25.2 median=30.7
+  051_badminton             M2: W†=  798.2 GA= 112.5 PA= 27.5 mm   | single-view PA: best=25.9 median=30.8
+  052_badminton             M2: W†=  798.9 GA= 416.7 PA= 27.3 mm   | single-view PA: best=26.1 median=30.8
+  053_badminton             M2: W†=  776.1 GA= 163.0 PA= 27.4 mm   | single-view PA: best=26.0 median=31.3
+  054_badminton             M2: W†=  685.3 GA=  95.4 PA= 27.1 mm   | single-view PA: best=26.2 median=30.3
+  055_badminton             M2: W†=  715.3 GA= 175.5 PA= 26.4 mm   | single-view PA: best=24.7 median=29.8
+  056_badminton             M2: W†=  796.9 GA= 195.9 PA= 28.7 mm   | single-view PA: best=27.0 median=32.4
+  057_badminton             M2: W†=  914.1 GA= 176.3 PA= 27.9 mm   | single-view PA: best=26.9 median=31.4
+  058_badminton             M2: W†=  603.8 GA= 131.6 PA= 27.2 mm   | single-view PA: best=26.1 median=30.6
+  059_badminton             M2: W†=  712.6 GA= 191.2 PA= 28.9 mm   | single-view PA: best=27.7 median=32.6
+  060_badminton             M2: W†=  801.7 GA= 166.0 PA= 26.4 mm   | single-view PA: best=25.6 median=30.3
+  061_badminton             M2: W†=  703.3 GA= 159.0 PA= 26.4 mm   | single-view PA: best=25.4 median=29.5
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        61      611.0      111.2       25.4
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+--- 07_tennis ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_tennis                M2: W†=  273.6 GA=  29.1 PA= 25.0 mm   | single-view PA: best=24.8 median=31.4
+  002_tennis                M2: W†=  287.9 GA=  34.9 PA= 27.0 mm   | single-view PA: best=26.4 median=33.8
+  003_tennis                M2: W†=  314.9 GA=  35.0 PA= 26.4 mm   | single-view PA: best=25.7 median=33.6
+  004_tennis                M2: W†=  279.7 GA=  34.1 PA= 27.5 mm   | single-view PA: best=26.9 median=34.9
+  005_tennis                M2: W†=  307.8 GA=  33.7 PA= 26.7 mm   | single-view PA: best=25.9 median=33.1
+  006_tennis                M2: W†=  367.6 GA=  44.3 PA= 26.6 mm   | single-view PA: best=25.9 median=32.1
+  007_tennis                M2: W†=  316.0 GA=  34.5 PA= 26.9 mm   | single-view PA: best=25.8 median=33.3
+  008_tennis                M2: W†=  327.2 GA=  32.5 PA= 26.1 mm   | single-view PA: best=25.5 median=32.3
+  009_tennis                M2: W†=  243.3 GA=  29.5 PA= 25.0 mm   | single-view PA: best=24.7 median=31.3
+  010_tennis                M2: W†=  201.9 GA=  33.8 PA= 26.7 mm   | single-view PA: best=25.8 median=33.3
+  011_tennis                M2: W†=  322.7 GA=  40.0 PA= 28.6 mm   | single-view PA: best=27.5 median=35.3
+  012_tennis                M2: W†=  179.7 GA=  32.3 PA= 26.7 mm   | single-view PA: best=25.7 median=32.9
+  013_tennis                M2: W†=  195.1 GA=  35.3 PA= 28.6 mm   | single-view PA: best=27.1 median=35.8
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        13      278.3       34.5       26.7
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+2026-08-06 16:19:58 Driver exiting.
+2026-08-06 16:19:58 Driver exiting.

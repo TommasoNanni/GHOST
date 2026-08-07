@@ -1,0 +1,587 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO __main__: Device: cuda
+INFO __main__: Fusion: geodesic median over cameras, L1/Weiszfeld (no checkpoint)
+INFO __main__: Found 52 scene(s) (skipping: none).
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_cooking1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_cooking1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_cooking1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.3991
+INFO __main__:   Cam rot err = 0.63°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 7.6cm  cam_t_err(gt_sc) = 6.4cm  pred_scale = 8.3991  gt_scale = 8.3602  scale_err = +0.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_cooking1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  29.0mm  W=  60.2mm  WA100=  23.9mm  W100=  31.6mm  GA=  19.3mm  PA=  19.3mm  RTE= 0.43%  raw_root=5.4cm  orient=4.1°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_dips1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_dips1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_dips1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.6546
+INFO __main__:   Cam rot err = 1.02°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 44.4cm  cam_t_err(gt_sc) = 11.2cm  pred_scale = 8.6546  gt_scale = 8.2573  scale_err = +4.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_dips1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  37.4mm  W=  53.3mm  WA100=  33.2mm  W100=  40.7mm  GA=  29.2mm  PA=  29.2mm  RTE= 0.39%  raw_root=3.0cm  orient=5.2°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_dips2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_dips2  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_dips2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.7343
+INFO __main__:   Cam rot err = 0.82°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 12.5cm  cam_t_err(gt_sc) = 11.6cm  pred_scale = 8.7343  gt_scale = 8.6023  scale_err = +1.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_dips2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  48.9mm  W=  80.3mm  WA100=  37.6mm  W100=  47.4mm  GA=  28.3mm  PA=  28.3mm  RTE= 0.47%  raw_root=9.9cm  orient=5.4°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_lunge1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_lunge1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_lunge1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.4684
+INFO __main__:   Cam rot err = 0.94°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 8.8cm  cam_t_err(gt_sc) = 8.8cm  pred_scale = 8.4684  gt_scale = 8.4567  scale_err = +0.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_lunge1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  32.4mm  W=  40.5mm  WA100=  27.5mm  W100=  34.7mm  GA=  20.9mm  PA=  20.9mm  RTE= 0.26%  raw_root=4.9cm  orient=5.1°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_lunge2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_lunge2  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_lunge2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=9.6196
+INFO __main__:   Cam rot err = 1.17°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 62.4cm  cam_t_err(gt_sc) = 13.3cm  pred_scale = 9.6196  gt_scale = 8.8983  scale_err = +8.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_lunge2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  32.0mm  W=  46.5mm  WA100=  28.6mm  W100=  36.2mm  GA=  20.7mm  PA=  20.7mm  RTE= 0.35%  raw_root=3.1cm  orient=3.6°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_mountainclimber1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_mountainclimber1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_mountainclimber1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.7744
+INFO __main__:   Cam rot err = 1.27°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 23.2cm  cam_t_err(gt_sc) = 13.5cm  pred_scale = 6.7744  gt_scale = 6.9397  scale_err = -2.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_mountainclimber1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  41.5mm  W=  56.4mm  WA100=  34.3mm  W100=  38.1mm  GA=  30.6mm  PA=  30.6mm  RTE= 0.41%  raw_root=4.7cm  orient=4.9°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_mountainclimber2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_mountainclimber2  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_mountainclimber2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.6539
+INFO __main__:   Cam rot err = 1.21°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 35.4cm  cam_t_err(gt_sc) = 12.2cm  pred_scale = 6.6539  gt_scale = 6.9340  scale_err = -4.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_mountainclimber2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  42.3mm  W=  63.0mm  WA100=  35.0mm  W100=  41.1mm  GA=  31.7mm  PA=  31.7mm  RTE= 0.51%  raw_root=5.0cm  orient=5.7°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_pushup1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_pushup1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_pushup1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=7.0245
+INFO __main__:   Cam rot err = 1.21°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 13.0cm  cam_t_err(gt_sc) = 13.1cm  pred_scale = 7.0245  gt_scale = 7.0278  scale_err = -0.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_pushup1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  31.3mm  W=  58.1mm  WA100=  23.0mm  W100=  35.8mm  GA=  20.6mm  PA=  20.6mm  RTE= 0.42%  raw_root=3.9cm  orient=3.7°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_010_pushup2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_pushup2  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=9.0572
+INFO __main__:   Cam rot err = 0.39°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 19.3cm  cam_t_err(gt_sc) = 15.1cm  pred_scale = 9.0572  gt_scale = 8.8162  scale_err = +2.7%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_010_pushup2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  26.2mm  W=  53.5mm  WA100=  22.5mm  W100=  31.4mm  GA=  20.0mm  PA=  20.0mm  RTE= 0.92%  raw_root=7.8cm  orient=3.4°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_burpee2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_burpee2  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_burpee2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.4552
+INFO __main__:   Cam rot err = 0.35°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 36.3cm  cam_t_err(gt_sc) = 12.4cm  pred_scale = 8.4552  gt_scale = 8.8017  scale_err = -3.9%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_burpee2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  46.7mm  W=  91.6mm  WA100=  39.9mm  W100=  66.5mm  GA=  26.3mm  PA=  26.3mm  RTE= 0.40%  raw_root=4.4cm  orient=4.6°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_cooking1
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_cooking1  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/Gym_011_cooking1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=7.4464
+INFO __main__:   Cam rot err = 1.23°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 58.0cm  cam_t_err(gt_sc) = 11.7cm  pred_scale = 7.4464  gt_scale = 7.9221  scale_err = -6.0%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/Gym_011_cooking1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  45.6mm  W= 181.0mm  WA100=  30.8mm  W100=  38.6mm  GA=  27.1mm  PA=  27.1mm  RTE= 0.53%  raw_root=5.2cm  orient=6.1°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_cooking2
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_cooking2  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/Gym_011_cooking2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=9.0061
+INFO __main__:   Cam rot err = 0.45°  cam_t_cos = 0.9998  cam_t_err(pred_sc) = 25.0cm  cam_t_err(gt_sc) = 14.7cm  pred_scale = 9.0061  gt_scale = 9.1955  scale_err = -2.1%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/Gym_011_cooking2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  46.0mm  W= 173.0mm  WA100=  31.5mm  W100=  39.6mm  GA=  26.7mm  PA=  26.7mm  RTE= 0.37%  raw_root=7.8cm  orient=6.0°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_dips1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_dips1  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_dips1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.2374
+INFO __main__:   Cam rot err = 0.69°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 27.3cm  cam_t_err(gt_sc) = 6.8cm  pred_scale = 8.2374  gt_scale = 8.5076  scale_err = -3.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_dips1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  54.0mm  W= 131.9mm  WA100=  36.3mm  W100=  79.4mm  GA=  24.2mm  PA=  24.2mm  RTE= 0.62%  raw_root=5.3cm  orient=3.4°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_dips2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_dips2  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_dips2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.2073
+INFO __main__:   Cam rot err = 0.69°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 23.1cm  cam_t_err(gt_sc) = 8.3cm  pred_scale = 8.2073  gt_scale = 8.4172  scale_err = -2.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_dips2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  54.4mm  W= 191.1mm  WA100=  37.1mm  W100=  84.1mm  GA=  26.8mm  PA=  26.8mm  RTE= 0.67%  raw_root=7.7cm  orient=4.3°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_dips3
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_dips3  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_dips3/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.0007
+INFO __main__:   Cam rot err = 0.87°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 11.2cm  cam_t_err(gt_sc) = 8.2cm  pred_scale = 8.0007  gt_scale = 8.0944  scale_err = -1.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_dips3/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  45.5mm  W= 159.1mm  WA100=  40.1mm  W100=  51.1mm  GA=  28.9mm  PA=  28.9mm  RTE= 0.55%  raw_root=5.4cm  orient=5.2°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_dips4
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_dips4  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_dips4/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.6879
+INFO __main__:   Cam rot err = 1.09°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 16.3cm  cam_t_err(gt_sc) = 11.2cm  pred_scale = 8.6879  gt_scale = 8.7841  scale_err = -1.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_dips4/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  48.8mm  W= 124.3mm  WA100=  34.8mm  W100=  42.0mm  GA=  26.9mm  PA=  26.9mm  RTE= 0.46%  raw_root=5.5cm  orient=5.0°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_pushup1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_pushup1  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_pushup1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.5449
+INFO __main__:   Cam rot err = 0.30°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 33.8cm  cam_t_err(gt_sc) = 13.3cm  pred_scale = 8.5449  gt_scale = 8.8638  scale_err = -3.6%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_pushup1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  49.4mm  W=  94.1mm  WA100=  36.1mm  W100=  56.5mm  GA=  25.8mm  PA=  25.8mm  RTE= 1.29%  raw_root=6.6cm  orient=5.6°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_011_pushup2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_pushup2  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.5524
+INFO __main__:   Cam rot err = 0.30°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 36.5cm  cam_t_err(gt_sc) = 14.4cm  pred_scale = 8.5524  gt_scale = 8.8946  scale_err = -3.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_011_pushup2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  49.3mm  W=  83.1mm  WA100=  34.0mm  W100=  41.7mm  GA=  25.8mm  PA=  25.8mm  RTE= 0.81%  raw_root=5.0cm  orient=4.9°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_012_cooking2
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_012_cooking2  pid=12  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/Gym_012_cooking2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.8020
+INFO __main__:   Cam rot err = 1.03°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 29.3cm  cam_t_err(gt_sc) = 20.9cm  pred_scale = 6.8020  gt_scale = 7.0145  scale_err = -3.0%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/Gym_012_cooking2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  35.0mm  W= 110.5mm  WA100=  26.6mm  W100=  36.1mm  GA=  23.7mm  PA=  23.7mm  RTE= 0.39%  raw_root=3.5cm  orient=4.5°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_012_lunge1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_012_lunge1  pid=12  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_012_lunge1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.7554
+INFO __main__:   Cam rot err = 0.86°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 42.0cm  cam_t_err(gt_sc) = 8.6cm  pred_scale = 8.7554  gt_scale = 8.3203  scale_err = +5.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_012_lunge1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  34.9mm  W=  78.8mm  WA100=  33.1mm  W100=  52.2mm  GA=  21.9mm  PA=  21.9mm  RTE= 0.42%  raw_root=3.9cm  orient=8.2°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_012_lunge2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_012_lunge2  pid=12  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_012_lunge2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.5637
+INFO __main__:   Cam rot err = 1.06°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 27.5cm  cam_t_err(gt_sc) = 12.3cm  pred_scale = 8.5637  gt_scale = 8.3173  scale_err = +3.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_012_lunge2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  34.7mm  W=  54.4mm  WA100=  27.3mm  W100=  35.6mm  GA=  21.6mm  PA=  21.6mm  RTE= 0.44%  raw_root=3.6cm  orient=5.5°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_012_pushup2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_012_pushup2  pid=12  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_012_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.9293
+INFO __main__:   Cam rot err = 1.21°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 14.0cm  cam_t_err(gt_sc) = 13.2cm  pred_scale = 6.9293  gt_scale = 6.9967  scale_err = -1.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_012_pushup2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  35.5mm  W=  68.0mm  WA100=  25.2mm  W100=  47.1mm  GA=  19.8mm  PA=  19.8mm  RTE= 0.51%  raw_root=2.9cm  orient=5.1°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_013_burpee4
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_burpee4  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_burpee4/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.2784
+INFO __main__:   Cam rot err = 0.79°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 14.5cm  cam_t_err(gt_sc) = 14.9cm  pred_scale = 8.2784  gt_scale = 8.2969  scale_err = -0.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_burpee4/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  25.7mm  W=  26.8mm  WA100=  24.6mm  W100=  29.3mm  GA=  21.1mm  PA=  21.1mm  RTE= 0.75%  raw_root=5.6cm  orient=4.9°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_013_dips1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_dips1  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_dips1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.4878
+INFO __main__:   Cam rot err = 0.74°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 37.7cm  cam_t_err(gt_sc) = 7.1cm  pred_scale = 8.4878  gt_scale = 8.1267  scale_err = +4.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_dips1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  30.1mm  W=  55.8mm  WA100=  28.6mm  W100=  34.9mm  GA=  25.8mm  PA=  25.8mm  RTE= 0.41%  raw_root=2.9cm  orient=6.5°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_013_dips2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_dips2  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_dips2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.8009
+INFO __main__:   Cam rot err = 0.82°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 10.4cm  cam_t_err(gt_sc) = 10.8cm  pred_scale = 8.8009  gt_scale = 8.7793  scale_err = +0.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_dips2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  43.7mm  W=  52.1mm  WA100=  38.9mm  W100=  44.1mm  GA=  24.7mm  PA=  24.7mm  RTE= 1.53%  raw_root=8.6cm  orient=4.5°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_013_dips3
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_dips3  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_dips3/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.6981
+INFO __main__:   Cam rot err = 0.82°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 12.5cm  cam_t_err(gt_sc) = 9.5cm  pred_scale = 8.6981  gt_scale = 8.7699  scale_err = -0.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_dips3/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  41.1mm  W=  54.6mm  WA100=  37.5mm  W100=  41.1mm  GA=  26.2mm  PA=  26.2mm  RTE= 0.97%  raw_root=8.1cm  orient=5.0°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_013_lunge1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_lunge1  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_lunge1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.2849
+INFO __main__:   Cam rot err = 0.78°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 18.3cm  cam_t_err(gt_sc) = 8.4cm  pred_scale = 8.2849  gt_scale = 8.4589  scale_err = -2.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_lunge1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  26.8mm  W=  31.8mm  WA100=  24.9mm  W100=  32.3mm  GA=  20.3mm  PA=  20.3mm  RTE= 0.19%  raw_root=2.1cm  orient=7.1°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_013_lunge2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_lunge2  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_lunge2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.2588
+INFO __main__:   Cam rot err = 0.73°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 16.5cm  cam_t_err(gt_sc) = 13.0cm  pred_scale = 8.2588  gt_scale = 8.1963  scale_err = +0.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_lunge2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  26.5mm  W=  52.5mm  WA100=  24.1mm  W100=  27.6mm  GA=  20.6mm  PA=  20.6mm  RTE= 0.20%  raw_root=3.2cm  orient=6.0°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_013_pushup1
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_pushup1  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_pushup1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.2190
+INFO __main__:   Cam rot err = 0.74°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 7.9cm  cam_t_err(gt_sc) = 7.3cm  pred_scale = 8.2190  gt_scale = 8.2029  scale_err = +0.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_pushup1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  30.2mm  W=  63.3mm  WA100=  29.1mm  W100=  33.4mm  GA=  26.7mm  PA=  26.7mm  RTE= 0.37%  raw_root=5.0cm  orient=5.5°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: Gym_013_pushup2
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_pushup2  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=8.7823
+INFO __main__:   Cam rot err = 0.84°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 10.1cm  cam_t_err(gt_sc) = 10.0cm  pred_scale = 8.7823  gt_scale = 8.7847  scale_err = -0.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/Gym_013_pushup2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  25.7mm  W=  29.6mm  WA100=  24.2mm  W100=  45.6mm  GA=  21.3mm  PA=  21.3mm  RTE= 0.96%  raw_root=7.4cm  orient=5.6°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: LectureHall_009_021_reparingprojector1
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_009_021_reparingprojector1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_009_021_reparingprojector1  pid=21  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_009_021_reparingprojector1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.5065
+INFO __main__:   Cam rot err = 0.52°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 94.1cm  cam_t_err(gt_sc) = 4.5cm  pred_scale = 6.5065  gt_scale = 7.2485  scale_err = -10.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_009_021_reparingprojector1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  57.0mm  W=  54.8mm  WA100=  51.2mm  W100=  55.2mm  GA=  40.2mm  PA=  25.3mm  RTE= 1.58%  raw_root=6.5cm  orient=6.3°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: LectureHall_009_sidebalancerun1
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_009_sidebalancerun1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_009_sidebalancerun1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.3028
+INFO __main__:   Cam rot err = 0.35°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 85.4cm  cam_t_err(gt_sc) = 7.1cm  pred_scale = 6.3028  gt_scale = 7.0768  scale_err = -10.9%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_009_sidebalancerun1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  38.2mm  W=  42.4mm  WA100=  36.8mm  W100=  39.0mm  GA=  34.1mm  PA=  34.1mm  RTE= 0.41%  raw_root=4.1cm  orient=8.3°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: LectureHall_010_plankjack1
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_010_plankjack1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_010_plankjack1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.0924
+INFO __main__:   Cam rot err = 0.47°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 117.6cm  cam_t_err(gt_sc) = 6.4cm  pred_scale = 6.0924  gt_scale = 7.0221  scale_err = -13.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_010_plankjack1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  32.2mm  W=  33.2mm  WA100=  30.0mm  W100=  36.4mm  GA=  27.1mm  PA=  27.1mm  RTE= 0.42%  raw_root=6.9cm  orient=5.5°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: LectureHall_010_sidebalancerun1
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_010_sidebalancerun1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_010_sidebalancerun1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.2323
+INFO __main__:   Cam rot err = 0.43°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 77.3cm  cam_t_err(gt_sc) = 3.7cm  pred_scale = 6.2323  gt_scale = 7.0143  scale_err = -11.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_010_sidebalancerun1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  37.3mm  W=  42.1mm  WA100=  34.7mm  W100=  40.6mm  GA=  31.5mm  PA=  31.5mm  RTE= 0.25%  raw_root=4.1cm  orient=6.6°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: LectureHall_019_wipingchairs1
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_019_wipingchairs1  pid=19  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_019_wipingchairs1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.7813
+INFO __main__:   Cam rot err = 0.30°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 59.0cm  cam_t_err(gt_sc) = 3.5cm  pred_scale = 6.7813  gt_scale = 7.5198  scale_err = -9.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_019_wipingchairs1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  31.1mm  W=  37.6mm  WA100=  29.1mm  W100=  35.0mm  GA=  26.6mm  PA=  26.6mm  RTE= 0.20%  raw_root=2.5cm  orient=7.2°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: LectureHall_021_plankjack1
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_021_plankjack1  pid=21  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_021_plankjack1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=5.6620
+INFO __main__:   Cam rot err = 0.63°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 169.6cm  cam_t_err(gt_sc) = 6.2cm  pred_scale = 5.6620  gt_scale = 7.0248  scale_err = -19.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_021_plankjack1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  35.6mm  W=  59.6mm  WA100=  31.3mm  W100=  41.1mm  GA=  25.9mm  PA=  25.9mm  RTE= 0.43%  raw_root=11.2cm  orient=6.3°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: LectureHall_021_sidebalancerun1
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_021_sidebalancerun1  pid=21  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_021_sidebalancerun1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=5.9366
+INFO __main__:   Cam rot err = 0.53°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 148.3cm  cam_t_err(gt_sc) = 6.9cm  pred_scale = 5.9366  gt_scale = 7.0538  scale_err = -15.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/LectureHall_021_sidebalancerun1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  38.8mm  W=  57.5mm  WA100=  37.0mm  W100=  41.9mm  GA=  32.9mm  PA=  32.9mm  RTE= 0.35%  raw_root=9.3cm  orient=6.7°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_009_burpeejump1
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_burpeejump1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_burpeejump1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.5337
+INFO __main__:   Cam rot err = 0.72°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 55.8cm  cam_t_err(gt_sc) = 6.1cm  pred_scale = 6.5337  gt_scale = 6.0277  scale_err = +8.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_burpeejump1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  29.4mm  W=  37.0mm  WA100=  27.8mm  W100=  38.5mm  GA=  24.1mm  PA=  24.1mm  RTE= 0.14%  raw_root=3.7cm  orient=5.4°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_009_burpeejump2
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_burpeejump2  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_burpeejump2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.4229
+INFO __main__:   Cam rot err = 0.65°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 60.6cm  cam_t_err(gt_sc) = 4.0cm  pred_scale = 6.4230  gt_scale = 5.8700  scale_err = +9.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_burpeejump2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  32.7mm  W=  34.1mm  WA100=  31.5mm  W100=  39.3mm  GA=  27.2mm  PA=  27.2mm  RTE= 0.49%  raw_root=3.4cm  orient=8.8°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_009_impro1
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_impro1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_impro1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.3924
+INFO __main__:   Cam rot err = 0.65°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 48.5cm  cam_t_err(gt_sc) = 4.0cm  pred_scale = 6.3924  gt_scale = 5.9447  scale_err = +7.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_impro1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  31.2mm  W=  47.7mm  WA100=  29.4mm  W100=  38.6mm  GA=  25.0mm  PA=  25.0mm  RTE= 0.13%  raw_root=3.0cm  orient=4.4°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_009_impro2
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_impro2  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_impro2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.4087
+INFO __main__:   Cam rot err = 0.32°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 41.1cm  cam_t_err(gt_sc) = 5.4cm  pred_scale = 6.4087  gt_scale = 6.0224  scale_err = +6.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_impro2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  26.5mm  W=  32.0mm  WA100=  26.2mm  W100=  39.3mm  GA=  22.5mm  PA=  22.5mm  RTE= 0.30%  raw_root=4.0cm  orient=4.0°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_009_impro5
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_impro5  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_impro5/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.2145
+INFO __main__:   Cam rot err = 0.51°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 24.0cm  cam_t_err(gt_sc) = 5.7cm  pred_scale = 6.2145  gt_scale = 5.9794  scale_err = +3.9%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_impro5/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  28.9mm  W=  33.4mm  WA100=  26.8mm  W100=  34.3mm  GA=  24.3mm  PA=  24.3mm  RTE= 0.24%  raw_root=3.1cm  orient=4.3°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_009_overfence1
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_overfence1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_overfence1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.3400
+INFO __main__:   Cam rot err = 0.32°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 38.5cm  cam_t_err(gt_sc) = 5.0cm  pred_scale = 6.3400  gt_scale = 5.9804  scale_err = +6.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_overfence1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  28.6mm  W=  35.0mm  WA100=  27.1mm  W100=  39.3mm  GA=  23.3mm  PA=  23.3mm  RTE= 0.26%  raw_root=3.3cm  orient=5.0°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_009_overfence2
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_overfence2  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_overfence2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.1056
+INFO __main__:   Cam rot err = 0.60°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 10.1cm  cam_t_err(gt_sc) = 10.2cm  pred_scale = 6.1056  gt_scale = 6.0886  scale_err = +0.3%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_overfence2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  27.9mm  W=  31.3mm  WA100=  26.2mm  W100=  29.7mm  GA=  23.3mm  PA=  23.3mm  RTE= 0.32%  raw_root=3.3cm  orient=5.9°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_009_spray1
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_spray1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_spray1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.3798
+INFO __main__:   Cam rot err = 0.63°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 45.8cm  cam_t_err(gt_sc) = 6.1cm  pred_scale = 6.3798  gt_scale = 5.9627  scale_err = +7.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_009_spray1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  35.9mm  W=  57.8mm  WA100=  31.0mm  W100=  39.2mm  GA=  27.5mm  PA=  27.5mm  RTE= 0.21%  raw_root=3.5cm  orient=6.7°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_017_burpeejump1
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_burpeejump1  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_burpeejump1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=5.9565
+INFO __main__:   Cam rot err = 0.40°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 42.1cm  cam_t_err(gt_sc) = 6.4cm  pred_scale = 5.9565  gt_scale = 6.3463  scale_err = -6.1%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_burpeejump1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  36.7mm  W=  55.7mm  WA100=  32.7mm  W100=  45.6mm  GA=  28.8mm  PA=  28.8mm  RTE= 0.22%  raw_root=5.3cm  orient=5.4°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_017_burpeejump2
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_burpeejump2  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_burpeejump2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.4473
+INFO __main__:   Cam rot err = 0.48°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 68.6cm  cam_t_err(gt_sc) = 2.8cm  pred_scale = 6.4473  gt_scale = 5.7954  scale_err = +11.2%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_burpeejump2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  36.6mm  W=  47.8mm  WA100=  32.4mm  W100=  39.0mm  GA=  26.8mm  PA=  26.8mm  RTE= 0.34%  raw_root=5.1cm  orient=4.6°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_017_eating1
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_eating1  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_eating1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.1891
+INFO __main__:   Cam rot err = 0.91°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 41.2cm  cam_t_err(gt_sc) = 4.7cm  pred_scale = 6.1891  gt_scale = 5.8083  scale_err = +6.6%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_eating1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  30.4mm  W=  69.5mm  WA100=  27.0mm  W100=  32.7mm  GA=  24.2mm  PA=  24.2mm  RTE= 0.45%  raw_root=3.2cm  orient=6.7°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_017_overfence1
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_overfence1  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_overfence1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.1757
+INFO __main__:   Cam rot err = 0.55°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 43.8cm  cam_t_err(gt_sc) = 4.8cm  pred_scale = 6.1757  gt_scale = 5.8106  scale_err = +6.3%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_overfence1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  37.2mm  W=  63.2mm  WA100=  32.9mm  W100=  42.2mm  GA=  26.4mm  PA=  26.4mm  RTE= 0.36%  raw_root=3.2cm  orient=4.8°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_017_overfence2
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_overfence2  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_overfence2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=5.8404
+INFO __main__:   Cam rot err = 0.93°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 27.6cm  cam_t_err(gt_sc) = 14.8cm  pred_scale = 5.8404  gt_scale = 6.0425  scale_err = -3.3%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_overfence2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  37.0mm  W=  55.4mm  WA100=  32.1mm  W100=  46.5mm  GA=  26.0mm  PA=  26.0mm  RTE= 0.20%  raw_root=2.9cm  orient=5.6°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_017_pushup1
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_pushup1  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_017_pushup1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=5.7451
+INFO __main__:   Cam rot err = 0.64°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 52.2cm  cam_t_err(gt_sc) = 10.5cm  pred_scale = 5.7451  gt_scale = 6.1760  scale_err = -7.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3008586/ParkingLot2_017_pushup1/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  39.3mm  W=  75.0mm  WA100=  33.6mm  W100=  46.1mm  GA=  30.5mm  PA=  30.5mm  RTE= 0.52%  raw_root=9.0cm  orient=5.9°
+INFO __main__: 
+────────────────────────────────────────────────────────────
+INFO __main__: Scene: ParkingLot2_017_pushup2
+WARNING __main__:   dropping 1 camera(s) with no VGGT extrinsics: cam_10
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_pushup2  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, always median-smoothed)  median=6.2105
+INFO __main__:   Cam rot err = 0.43°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 19.7cm  cam_t_err(gt_sc) = 8.4cm  pred_scale = 6.2105  gt_scale = 6.0457  scale_err = +2.7%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3008586/ParkingLot2_017_pushup2/crop_meta.json
+INFO __main__: 
+  [M3: GT-cam   + GT-scale   + pred-pose]
+INFO __main__:   WA=  31.1mm  W=  95.6mm  WA100=  28.6mm  W100=  42.2mm  GA=  24.2mm  PA=  24.2mm  RTE= 0.24%  raw_root=3.4cm  orient=4.1°

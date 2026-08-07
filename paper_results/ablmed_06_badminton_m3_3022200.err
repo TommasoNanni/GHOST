@@ -1,0 +1,68 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO eval_egohumans: Fusion: geodesic median over cameras, L1/Weiszfeld (no checkpoint)
+INFO eval_egohumans: 001_badminton: dump exists, skip
+INFO eval_egohumans: 002_badminton: dump exists, skip
+INFO eval_egohumans: 003_badminton: dump exists, skip
+INFO eval_egohumans: 004_badminton: dump exists, skip
+INFO eval_egohumans: 005_badminton: dump exists, skip
+INFO eval_egohumans: 006_badminton: dump exists, skip
+INFO eval_egohumans: 007_badminton: dump exists, skip
+INFO eval_egohumans: 008_badminton: dump exists, skip
+INFO eval_egohumans: 009_badminton: dump exists, skip
+INFO eval_egohumans: 010_badminton: dump exists, skip
+INFO eval_egohumans: 011_badminton: dump exists, skip
+INFO eval_egohumans: 012_badminton: dump exists, skip
+INFO eval_egohumans: 013_badminton: dump exists, skip
+INFO eval_egohumans: 014_badminton: dump exists, skip
+INFO eval_egohumans: 015_badminton: dump exists, skip
+INFO eval_egohumans: 016_badminton: dump exists, skip
+INFO eval_egohumans: 017_badminton: dump exists, skip
+INFO eval_egohumans: 018_badminton: dump exists, skip
+INFO eval_egohumans: 019_badminton: dump exists, skip
+INFO eval_egohumans: 020_badminton: dump exists, skip
+INFO eval_egohumans: 021_badminton: dump exists, skip
+INFO eval_egohumans: 022_badminton: dump exists, skip
+INFO eval_egohumans: 023_badminton: dump exists, skip
+INFO eval_egohumans: 024_badminton: dump exists, skip
+INFO eval_egohumans: 025_badminton: dump exists, skip
+/users/tnanni/ghost/evaluation/ablations_egohumans_median.py:280: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+INFO eval_egohumans: 026_badminton: dumped  M3: W†=133.7 GA=63.3 PA=24.0 mm
+INFO eval_egohumans: 027_badminton: dumped  M3: W†=131.2 GA=66.6 PA=23.9 mm
+INFO eval_egohumans: 028_badminton: dumped  M3: W†=126.4 GA=58.1 PA=25.2 mm
+INFO eval_egohumans: 029_badminton: dumped  M3: W†=137.8 GA=79.1 PA=24.4 mm
+INFO eval_egohumans: 030_badminton: dumped  M3: W†=132.3 GA=67.4 PA=25.5 mm
+INFO eval_egohumans: 031_badminton: dumped  M3: W†=129.9 GA=67.3 PA=24.1 mm
+INFO eval_egohumans: 032_badminton: dumped  M3: W†=127.2 GA=62.1 PA=24.4 mm
+INFO eval_egohumans: 033_badminton: dumped  M3: W†=122.2 GA=57.7 PA=25.1 mm
+INFO eval_egohumans: 034_badminton: dumped  M3: W†=130.0 GA=69.9 PA=28.5 mm
+INFO eval_egohumans: 035_badminton: dumped  M3: W†=130.1 GA=69.1 PA=27.2 mm
+INFO eval_egohumans: 036_badminton: dumped  M3: W†=143.0 GA=79.8 PA=25.2 mm
+INFO eval_egohumans: 037_badminton: dumped  M3: W†=128.7 GA=60.0 PA=26.4 mm
+INFO eval_egohumans: 038_badminton: dumped  M3: W†=118.2 GA=56.2 PA=23.4 mm
+INFO eval_egohumans: 039_badminton: dumped  M3: W†=131.1 GA=74.6 PA=24.7 mm
+INFO eval_egohumans: 040_badminton: dumped  M3: W†=112.0 GA=61.2 PA=24.7 mm
+INFO eval_egohumans: 041_badminton: dumped  M3: W†=135.8 GA=80.0 PA=24.1 mm
+INFO eval_egohumans: 042_badminton: dumped  M3: W†=115.0 GA=61.8 PA=26.4 mm
+INFO eval_egohumans: 043_badminton: dumped  M3: W†=120.2 GA=64.4 PA=27.3 mm
+INFO eval_egohumans: 044_badminton: dumped  M3: W†=126.9 GA=64.8 PA=26.4 mm
+INFO eval_egohumans: 045_badminton: dumped  M3: W†=112.0 GA=60.2 PA=26.1 mm
+INFO eval_egohumans: 046_badminton: dumped  M3: W†=142.4 GA=79.5 PA=26.4 mm
+INFO eval_egohumans: 047_badminton: dumped  M3: W†=126.2 GA=64.5 PA=25.4 mm
+INFO eval_egohumans: 048_badminton: dumped  M3: W†=126.9 GA=63.0 PA=25.4 mm
+INFO eval_egohumans: 049_badminton: dumped  M3: W†=126.6 GA=61.5 PA=25.6 mm
+INFO eval_egohumans: 050_badminton: dumped  M3: W†=251.1 GA=213.2 PA=27.2 mm
+INFO eval_egohumans: 051_badminton: dumped  M3: W†=157.7 GA=69.4 PA=27.5 mm
+INFO eval_egohumans: 052_badminton: dumped  M3: W†=322.0 GA=329.4 PA=27.3 mm
+INFO eval_egohumans: 053_badminton: dumped  M3: W†=166.4 GA=81.6 PA=27.4 mm
+INFO eval_egohumans: 054_badminton: dumped  M3: W†=147.7 GA=72.8 PA=27.1 mm
+INFO eval_egohumans: 055_badminton: dumped  M3: W†=195.8 GA=105.5 PA=26.4 mm
+INFO eval_egohumans: 056_badminton: dumped  M3: W†=170.3 GA=73.1 PA=28.7 mm
+INFO eval_egohumans: 057_badminton: dumped  M3: W†=169.3 GA=73.5 PA=27.9 mm
+INFO eval_egohumans: 058_badminton: dumped  M3: W†=149.6 GA=55.2 PA=27.2 mm
+INFO eval_egohumans: 059_badminton: dumped  M3: W†=149.1 GA=62.6 PA=28.9 mm
+INFO eval_egohumans: 060_badminton: dumped  M3: W†=163.3 GA=65.7 PA=26.4 mm
+INFO eval_egohumans: 061_badminton: dumped  M3: W†=146.6 GA=66.6 PA=26.4 mm
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
