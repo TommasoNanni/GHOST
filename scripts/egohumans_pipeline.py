@@ -46,76 +46,10 @@ from preprocessing.run_mapanything import MapAnythingScaleEstimator
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction_v2 import ParametersExtractor
 from preprocessing.cross_view_v4 import CrossViewReidentifierV4
-from synchronize_videos.synchronizer import Synchronizer
-from utilities.body_data import load_person_smplx_pose
 from utilities.visualize_segmented_reids import visualize_reid
 
 VGGT_WEIGHTS     = CONFIG.data.vggt_omega_checkpoint
-SYNC_MAX_SHIFT   = 148
-SYNC_N_TRIALS    = 1
-SYNC_SEED        = 42
-SYNC_DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
-SYNC_MIN_OVERLAP = 100
 
-
-def _load_body_data(
-    video_dirs: dict[str, str],
-) -> dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]]:
-    cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]] = {}
-    for cam_id, video_dir in video_dirs.items():
-        body_dir = Path(video_dir) / "body_data"
-        if not body_dir.exists():
-            continue
-        persons: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
-        for npz_path in sorted(body_dir.glob("person_*.npz")):
-            pid = int(npz_path.stem.split("_")[1])
-            result = load_person_smplx_pose(npz_path)
-            if result is None:
-                print(f"  WARNING: {npz_path.name} missing pose keys, skipping")
-                continue
-            persons[pid] = result
-        if persons:
-            cam_data[cam_id] = persons
-    return cam_data
-
-
-def _common_persons(cam_data: dict[str, dict[int, tuple]]) -> list[int]:
-    sets = [set(persons.keys()) for persons in cam_data.values()]
-    return sorted(set.intersection(*sets))
-
-
-def _apply_shifts(
-    cam_data: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]],
-    shifts: dict[str, int],
-    end_cuts: dict[str, int],
-    pids: list[int],
-    min_overlap: int = SYNC_MIN_OVERLAP,
-) -> tuple[list[list[torch.Tensor]], list[list[torch.Tensor]]] | None:
-    cam_ids = list(shifts.keys())
-    max_s   = max(shifts.values())
-    print(f"  shift_spread={max_s - min(shifts.values())}")
-    joints_list: list[list[torch.Tensor]] = []
-    confs_list:  list[list[torch.Tensor]] = []
-    for cam_id in cam_ids:
-        s  = max_s - shifts[cam_id]
-        ec = end_cuts[cam_id]
-        per_person_joints, per_person_confs = [], []
-        for pid in pids:
-            rotations, conf = cam_data[cam_id][pid]
-            T   = rotations.shape[0]
-            end = T - ec if ec > 0 else T
-            remaining = end - s
-            if remaining < min_overlap:
-                print(
-                    f"  WARNING: {cam_id} has only {remaining} frames after shift "
-                    f"(need ≥{min_overlap}) — skipping sync"
-                )
-                return None
-            per_person_joints.append(rotations[s:end].to(SYNC_DEVICE))
-            per_person_confs .append(conf     [s:end].to(SYNC_DEVICE))
-        joints_list.append(per_person_joints)
-        confs_list .append(per_person_confs)
-    return joints_list, confs_list
 
 # Deep inner path baked into every EgoHumans activity folder.
 _INNER = Path("media/rawalk/disk1/rawalk/datasets/ego_exo/camera_ready")
@@ -311,61 +245,7 @@ def process_scene(
             "Check that smplx_model_path and mhr_model_path are set in CONFIG."
         )
 
-    # Step 5: Temporal synchronisation (optional).
-    sync_cfg = getattr(CONFIG, "synchronization", None)
-    if sync_cfg is not None and getattr(sync_cfg, "enabled", False):
-        print(f"\n--- Step 5: Temporal synchronisation ---")
-        cam_data = _load_body_data(video_dirs)
-        if len(cam_data) < 2:
-            print("  WARNING: fewer than 2 cameras with pose data — skipping sync eval")
-        else:
-            pids = _common_persons(cam_data)
-            if not pids:
-                print("  WARNING: no person ID common across all cameras — skipping sync eval")
-            else:
-                cam_ids = list(cam_data.keys())
-                print(f"  Cameras: {cam_ids}")
-                print(f"  Common persons: {pids}")
-                sync = Synchronizer(device=SYNC_DEVICE, min_overlap=SYNC_MIN_OVERLAP)
-                rng  = np.random.default_rng(SYNC_SEED)
-                results = []
-                for trial in range(SYNC_N_TRIALS):
-                    raw_shifts  = [0] + rng.integers(-SYNC_MAX_SHIFT, SYNC_MAX_SHIFT + 1,
-                                                      size=len(cam_ids) - 1).tolist()
-                    true_shifts = {c: int(s) for c, s in zip(cam_ids, raw_shifts)}
-                    end_cuts    = {c: int(e) for c, e in zip(cam_ids, rng.integers(
-                        0, SYNC_MAX_SHIFT + 1, size=len(cam_ids)
-                    ).tolist())}
-                    print(f"  Trial {trial + 1}/{SYNC_N_TRIALS}  true shifts: {true_shifts}  end_cuts: {end_cuts}")
-                    result = _apply_shifts(cam_data, true_shifts, end_cuts, pids)
-                    if result is None:
-                        continue
-                    joints_list, confs_list = result
-                    offset_mat = sync.estimate_offset_matrix(joints_list, confs_list)
-                    weights    = sync.cycle_consistency_weights(offset_mat)
-                    estimated  = sync.estimate_initial_times(offset_mat, weights)
-                    true_t = torch.tensor([true_shifts[c] for c in cam_ids], dtype=torch.float32)
-                    true_t = true_t - true_t.min()
-                    errors = (estimated.cpu() - true_t).abs()
-                    mae    = errors.mean().item()
-                    for cam_id, tt, est, err in zip(cam_ids, true_t.tolist(),
-                                                    estimated.cpu().tolist(), errors.tolist()):
-                        print(f"    {cam_id}: true={tt:+.0f}  estimated={est:+.1f}  error={err:.1f}")
-                    print(f"  MAE={mae:.2f}  "
-                          f"within-1={((errors <= 1).float().mean().item()) * 100:.0f}%  "
-                          f"within-2={((errors <= 2).float().mean().item()) * 100:.0f}%")
-                    results.append({"mae": mae,
-                                    "within_1": (errors <= 1).float().mean().item(),
-                                    "within_2": (errors <= 2).float().mean().item()})
-                if len(results) > 1:
-                    all_mae = [r["mae"] for r in results]
-                    print(f"\n  SUMMARY over {SYNC_N_TRIALS} trials:")
-                    print(f"  MAE  mean={np.mean(all_mae):.2f}  "
-                          f"median={np.median(all_mae):.2f}  max={np.max(all_mae):.2f}")
-                    print(f"  Within 1fr  {np.mean([r['within_1'] for r in results]) * 100:.1f}%")
-                    print(f"  Within 2fr  {np.mean([r['within_2'] for r in results]) * 100:.1f}%")
-
-    # Step 6: VGGT camera + depth estimation.
+    # Step 5: VGGT camera + depth estimation.
     vggt_cameras_path = scene_output_dir / "vggt_cameras_centered.npz"
     vggt_depth_path   = scene_output_dir / "vggt_depth_centered.npz"
 
@@ -382,14 +262,14 @@ def process_scene(
     )
 
     if _vggt_done:
-        print(f"\n--- Step 6: VGGT (already done, skipping) ---")
+        print(f"\n--- Step 5: VGGT (already done, skipping) ---")
     else:
         if vggt_cameras_path.exists() and vggt_depth_path.exists():
-            print(f"\n--- Step 6: VGGT depth stale/invalid — recomputing ---")
+            print(f"\n--- Step 5: VGGT depth stale/invalid — recomputing ---")
             vggt_cameras_path.unlink()
             vggt_depth_path.unlink()
         else:
-            print(f"\n--- Step 6: VGGT camera + depth estimation ---")
+            print(f"\n--- Step 5: VGGT camera + depth estimation ---")
         frame_paths, camera_names = _build_vggt_frame_paths(scene, video_dirs)
         if frame_paths:
             print(f"  {len(frame_paths)} frames × {len(camera_names)} cameras")
@@ -406,8 +286,8 @@ def process_scene(
         else:
             print("  WARNING: no frames — skipping VGGT.")
 
-    # Step 7: MapAnything metric scale estimation.
-    print(f"\n--- Step 7: MapAnything scale estimation ---")
+    # Step 6: MapAnything metric scale estimation.
+    print(f"\n--- Step 6: MapAnything scale estimation ---")
     if ma_estimator is None:
         print("  Skipped (--skip-mapanything).")
     elif not (vggt_cameras_path.exists() and vggt_depth_path.exists()):
@@ -420,9 +300,9 @@ def process_scene(
             img_root=scene.seq_dir / "exo",
         )
 
-    # Step 8: Visualise re-ID (only if ReID ran this session).
+    # Step 7: Visualise re-ID (only if ReID ran this session).
     if not _reid_already_done:
-        print(f"\n--- Step 8: Visualising re-ID corrected segmentation ---")
+        print(f"\n--- Step 7: Visualising re-ID corrected segmentation ---")
         for video in scene.videos:
             if video.video_id not in video_dirs:
                 continue
@@ -435,7 +315,7 @@ def process_scene(
             except FileNotFoundError as e:
                 print(f"  WARNING: skipping visualisation — {e}")
     else:
-        print(f"\n--- Step 8: Skipping re-ID visualisation (already done) ---")
+        print(f"\n--- Step 7: Skipping re-ID visualisation (already done) ---")
 
 
 def main():

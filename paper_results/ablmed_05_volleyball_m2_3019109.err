@@ -1,0 +1,18 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO eval_egohumans: Fusion: geodesic median over cameras, L1/Weiszfeld (no checkpoint)
+/users/tnanni/ghost/evaluation/ablations_egohumans_median.py:280: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  return pickle.load(f)
+INFO eval_egohumans: 001_volleyball: dumped  M2: W†=517.8 GA=292.5 PA=29.2 mm
+INFO eval_egohumans: 002_volleyball: dumped  M2: W†=894.3 GA=732.7 PA=29.8 mm
+INFO eval_egohumans: 003_volleyball: dumped  M2: W†=464.7 GA=169.9 PA=29.7 mm
+INFO eval_egohumans: 004_volleyball: dumped  M2: W†=508.6 GA=192.3 PA=29.4 mm
+INFO eval_egohumans: 005_volleyball: dumped  M2: W†=437.8 GA=195.7 PA=31.6 mm
+INFO eval_egohumans: 006_volleyball: dumped  M2: W†=461.0 GA=234.1 PA=30.3 mm
+INFO eval_egohumans: 007_volleyball: dumped  M2: W†=453.9 GA=248.9 PA=28.8 mm
+INFO eval_egohumans: 008_volleyball: dumped  M2: W†=475.9 GA=220.8 PA=28.7 mm
+INFO eval_egohumans: 009_volleyball: dumped  M2: W†=625.4 GA=396.5 PA=29.7 mm
+INFO eval_egohumans: 010_volleyball: dumped  M2: W†=513.4 GA=224.8 PA=29.0 mm
+INFO eval_egohumans: 011_volleyball: dumped  M2: W†=459.9 GA=180.0 PA=30.8 mm
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`

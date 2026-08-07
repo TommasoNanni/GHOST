@@ -74,6 +74,23 @@ _NUM_JOINTS = 55                       # SMPL-X joints fed to fusion (root + 54)
 # joint tokens as attention keys. Set by --joint_conf; default False keeps every
 # previously published number reproducible.
 _USE_JOINT_CONF = False
+
+
+def _remap_conf_to_packed(conf: np.ndarray, num_joints: int = 55) -> np.ndarray:
+    """Canonical-SMPL-X confidence -> `_pack_pose` packed layout.
+
+    Confidence is canonical SMPL-X (jaw 22, eyes 23/24, hands from 25); `_pack_pose`
+    concatenates [root, body, l.hand, r.hand] and zero-pads, skipping jaw and eyes, so
+    hands sit 3 slots earlier. Padding slots hold no joint and stay at 1.0. Applied
+    unconditionally — feeding misaligned confidence is never correct.
+    """
+    if conf.shape[-1] < num_joints:
+        return conf
+    out = np.ones(conf.shape[:-1] + (num_joints,), dtype=np.float32)
+    out[..., 0:22]  = conf[..., 0:22]
+    out[..., 22:37] = conf[..., 25:40]
+    out[..., 37:52] = conf[..., 40:55]
+    return out
 # COCO-17: 0 nose,1/2 eyes,3/4 ears,5/6 shoulders,7/8 elbows,9/10 wrists,
 #          11/12 hips,13/14 knees,15/16 ankles. Score the 12 limb joints only
 #          (face joints have no clean SMPL-X correspondence).
@@ -163,11 +180,23 @@ def load_fusion_model(ckpt: Path, device) -> PoseFusionModule:
     n_joints = state["joint_id_embedding.weight"].shape[0]
     n_layers = sum(1 for k in state if k.startswith("layers.") and k.endswith(".ff.norm.weight"))
     max_tlen = state["temporal_pe.pe"].shape[0]
+    # num_heads / temporal_window change no parameter shape, so strict=True cannot
+    # catch a mismatch; trainer persists them under "model_config". Older
+    # checkpoints fall back to the defaults they were trained with.
+    cfg = c.get("model_config") or {}
+    num_heads       = cfg.get("num_heads", 8)
+    temporal_window = cfg.get("temporal_window", 128)
     model = PoseFusionModule(embedding_dim=emb, num_layers=n_layers,
-                             num_joints=n_joints, max_temporal_len=max_tlen).to(device)
+                             num_joints=n_joints, max_temporal_len=max_tlen,
+                             num_heads=num_heads,
+                             temporal_window=temporal_window).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
-    logger.info(f"fusion ckpt: emb={emb} layers={n_layers} joints={n_joints} maxT={max_tlen}")
+    logger.info(
+        f"fusion ckpt: emb={emb} layers={n_layers} joints={n_joints} maxT={max_tlen} "
+        f"heads={num_heads} twin={temporal_window}"
+        f"{'' if cfg else '  (no model_config -> defaults)'}"
+    )
     return model
 
 
@@ -279,7 +308,9 @@ def _load_clean_tracks(ghost_scene: Path, cam_names, valid_mask, pids):
                     e["betas"] = d["smplx_betas"][t][:10]
                 # Per-joint confidence (SAM3D occlusion estimate), root included.
                 if "pred_joint_confidence" in d.files:
-                    e["jc"] = d["pred_joint_confidence"][t].reshape(-1)   # (55,)
+                    e["jc"] = _remap_conf_to_packed(
+                        d["pred_joint_confidence"][t].reshape(-1)
+                    )                                                     # (55,)
                 frames_map[int(gfr)] = e
             if frames_map:
                 cam_map[pid] = frames_map
@@ -298,7 +329,7 @@ def _pack_pose(entry) -> np.ndarray:
 
 
 def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
-                  smplx_arg, scale_mode="pred", temporal=False):
+                  smplx_arg, temporal=False):
     """Return pred_coco {pid: {frame: (17,3) coco in aria world}} + R_align,t_align.
 
     R_align,t_align map ghost-metric(vggt cam-0) -> aria world (None if no cams).
@@ -381,18 +412,9 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
         placer = BodyPlacer(view, smplx_arg, crop_meta_path=None)
         fused_pose_by_pid = {p: fused[:, pid_slot[p]] for p in pids}
 
-        if scale_mode == "triangulated":
-            try:
-                scale = placer.estimate_scale_triangulated(
-                    fused_pose_by_pid=fused_pose_by_pid, frame_start=fmin)
-            except Exception:
-                scale = placer.load_mapanything_scale()
-        elif scale_mode == "baseline":
-            scale = placer.load_mapanything_scale(filename="mapanything_scale_baseline.npy", smooth="median")
-            if scale is None:
-                raise RuntimeError("scale_mode=baseline but mapanything_scale_baseline.npy missing/mismatched")
-        else:
-            scale = placer.load_mapanything_scale()
+        scale = placer.load_mapanything_scale(filename="mapanything_scale_baseline.npy")
+        if scale is None:
+            raise RuntimeError("mapanything_scale_baseline.npy missing/mismatched")
         if scale is None:
             scale = np.ones(placer.T, dtype=np.float32)
         # W† camera alignment must use the SAME scale the placer placed with
@@ -456,7 +478,7 @@ def _clean_scene_view(ghost_scene: Path, cam_names) -> Path:
 
 # ── per-scene orchestration ────────────────────────────────────────────────
 def eval_scene(ghost_scene: Path, gt_scene: Path, fusion_model, device, smplx_arg,
-               scale_mode="pred", temporal=False):
+               temporal=False):
     """Return dump dict {pred (T,P,17,3) aria, gt, valid (T,P), have_world} or None."""
     if not (ghost_scene / "vggt_cameras_centered.npz").exists():
         logger.warning(f"{ghost_scene.name}: no vggt cameras, skip"); return None
@@ -469,7 +491,7 @@ def eval_scene(ghost_scene: Path, gt_scene: Path, fusion_model, device, smplx_ar
     pids = sorted(pid_of_aria.values())
 
     pred_coco, raw_coco, cam_names, extrinsics_full, valid_full, ma_scale = predict_scene(
-        ghost_scene, frames, pids, fusion_model, device, smplx_arg, scale_mode, temporal)
+        ghost_scene, frames, pids, fusion_model, device, smplx_arg, temporal)
 
     # Per-frame SE(3): ghost-metric cameras (this frame) -> aria-world GT cameras.
     # VGGT cameras are estimated per frame, so a single global SE(3) would dump
@@ -612,7 +634,6 @@ def main():
     ap.add_argument("--gt_root", help="camera_ready/<activity> dir with per-scene GT")
     ap.add_argument("--checkpoint")
     ap.add_argument("--smplx_model", default=str(_REPO_ROOT / "body_models" / "SMPLX_NEUTRAL.pkl"))
-    ap.add_argument("--scale", choices=["pred", "triangulated", "baseline"], default="pred")
     ap.add_argument("--temporal", action="store_true", help="use temporal fusion (default: per-frame)")
     ap.add_argument("--scene", default=None)
     ap.add_argument("--dump_dir", default="eval_egohumans/dumps")
@@ -655,7 +676,7 @@ def main():
             logger.info(f"{scene}: dump exists, skip"); continue
         try:
             d = eval_scene(ghost_root / scene, gt_root / scene, fusion_model, device,
-                           smplx_arg, args.scale, args.temporal)
+                           smplx_arg, args.temporal)
         except Exception as e:
             logger.warning(f"{scene}: FAILED — {e}"); continue
         if d is None:

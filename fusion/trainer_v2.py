@@ -115,6 +115,7 @@ class TrainerV2:
         is_main_process: bool = True,
         train_sampler: DistributedSampler | None = None,
         resume_checkpoint: str | Path | None = None,
+        model_config: dict | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.dtype = dtype
@@ -137,6 +138,11 @@ class TrainerV2:
         self.prediction_save_path = Path(prediction_save_path) if prediction_save_path else None
         self.is_main_process = is_main_process
         self.train_sampler = train_sampler
+        # Hyperparameters that do NOT change any parameter shape (num_heads,
+        # temporal_window, ...) and so cannot be inferred from the state dict, nor
+        # caught by load_state_dict(strict=True). Persisted so evaluation rebuilds
+        # the same model instead of silently falling back to constructor defaults.
+        self.model_config = dict(model_config or {})
 
         if self.metrics is not None and self.metric_fn is None:
             raise ValueError("metrics provided but metric_fn is None. "
@@ -584,6 +590,8 @@ class TrainerV2:
             "optimizer":      self.optimizer.state_dict(),
             "best_val_loss":  self._best_val_loss,
         }
+        if self.model_config:
+            state["model_config"] = self.model_config
         if self.use_wandb:
             try:
                 import wandb

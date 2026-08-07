@@ -1,0 +1,562 @@
+2026-08-02 16:01:06 01_tagging: 14 eligible scene(s)
+2026-08-02 16:01:08 02_lego: 6 eligible scene(s)
+2026-08-02 16:01:10 03_fencing: 14 eligible scene(s)
+2026-08-02 16:01:14 04_basketball: 13 eligible scene(s)
+2026-08-02 16:01:17 05_volleyball: 11 eligible scene(s)
+2026-08-02 16:01:28 06_badminton: 61 eligible scene(s)
+2026-08-02 16:01:35 07_tennis: 13 eligible scene(s)
+2026-08-02 16:01:38 01_tagging: submitted 2984078 (14 scene(s) pending)
+2026-08-02 16:01:40 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:01:44 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:01:47 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:01:52 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:02:05 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:02:13 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:02:13 round 1: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:05:17 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:05:21 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:05:24 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:05:27 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:05:41 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:05:48 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:05:48 round 2: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:08:51 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:08:54 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:08:57 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:08:59 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:09:09 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:09:15 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:09:15 round 3: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:12:18 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:12:22 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:12:24 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:12:26 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:12:39 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:12:44 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:12:44 round 4: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:15:48 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:15:51 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:15:54 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:15:57 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:16:07 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:16:12 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:16:12 round 5: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:19:17 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:19:21 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:19:23 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:19:26 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:19:39 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:19:46 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:19:46 round 6: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:22:50 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:22:54 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:22:57 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:22:59 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:23:11 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:23:18 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:23:18 round 7: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:26:22 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:26:25 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:26:27 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:26:30 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:26:40 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:26:46 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:26:46 round 8: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:29:49 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:29:52 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:29:54 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:29:56 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:30:05 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:30:11 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:30:11 round 9: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:33:15 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:33:18 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:33:20 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:33:22 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:33:31 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:33:37 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:33:37 round 10: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:36:39 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:36:42 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:36:43 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:36:50 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:36:57 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:37:01 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:37:01 round 11: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:40:02 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:40:03 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:40:05 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:40:06 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:40:14 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:40:18 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:40:18 round 12: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:43:21 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:43:22 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:43:23 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:43:24 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:43:26 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:43:28 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:43:28 round 13: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:46:30 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:46:33 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:46:35 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:46:37 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:46:44 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:46:48 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:46:48 round 14: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:49:50 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:49:51 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:49:52 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:49:53 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:49:56 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:49:57 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:49:57 round 15: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:53:00 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:53:03 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:53:05 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:53:07 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:53:14 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:53:18 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:53:18 round 16: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:56:21 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:56:23 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:56:25 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:56:27 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:56:35 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:56:39 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:56:39 round 17: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 16:59:42 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:59:44 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:59:46 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:59:48 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 16:59:56 06_badminton: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 17:00:00 07_tennis: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 17:00:00 round 18: 132 scene(s) remaining, 1 job(s) active
+2026-08-02 17:03:01 02_lego: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 17:03:02 03_fencing: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 17:03:03 04_basketball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 17:03:04 05_volleyball: sbatch failed: sbatch: error: QOSMaxSubmitJobPerUserLimit
+sbatch: error: Batch job submission failed: Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)
+2026-08-02 17:03:07 06_badminton: submitted 2984884 (61 scene(s) pending)
+2026-08-02 17:03:08 round 19: 132 scene(s) remaining, 2 job(s) active
+2026-08-02 17:06:23 round 20: 132 scene(s) remaining, 2 job(s) active
+2026-08-02 17:09:39 round 21: 130 scene(s) remaining, 2 job(s) active
+2026-08-02 17:12:54 round 22: 127 scene(s) remaining, 2 job(s) active
+2026-08-02 17:16:39 01_tagging: 14 eligible scene(s)
+2026-08-02 17:16:40 02_lego: 6 eligible scene(s)
+2026-08-02 17:16:42 03_fencing: 14 eligible scene(s)
+2026-08-02 17:16:43 04_basketball: 13 eligible scene(s)
+2026-08-02 17:16:44 05_volleyball: 11 eligible scene(s)
+2026-08-02 17:16:50 06_badminton: 61 eligible scene(s)
+2026-08-02 17:16:54 07_tennis: 13 eligible scene(s)
+2026-08-02 17:16:58 round 1: 126 scene(s) remaining, 2 job(s) active
+2026-08-02 17:20:12 round 2: 123 scene(s) remaining, 2 job(s) active
+2026-08-02 17:23:27 round 3: 122 scene(s) remaining, 2 job(s) active
+2026-08-02 17:26:42 round 4: 118 scene(s) remaining, 2 job(s) active
+2026-08-02 17:29:44 02_lego: submitted 2985024 (6 scene(s) pending)
+2026-08-02 17:29:56 round 5: 118 scene(s) remaining, 2 job(s) active
+2026-08-02 17:33:08 round 6: 117 scene(s) remaining, 2 job(s) active
+2026-08-02 17:36:21 round 7: 115 scene(s) remaining, 2 job(s) active
+2026-08-02 17:39:35 round 8: 114 scene(s) remaining, 2 job(s) active
+2026-08-02 17:42:47 round 9: 113 scene(s) remaining, 2 job(s) active
+2026-08-02 17:46:00 round 10: 112 scene(s) remaining, 2 job(s) active
+2026-08-02 17:49:22 round 11: 110 scene(s) remaining, 2 job(s) active
+2026-08-02 17:52:46 round 12: 109 scene(s) remaining, 2 job(s) active
+2026-08-02 17:56:00 round 13: 107 scene(s) remaining, 2 job(s) active
+2026-08-02 17:59:20 round 14: 106 scene(s) remaining, 2 job(s) active
+2026-08-02 18:02:39 round 15: 105 scene(s) remaining, 2 job(s) active
+2026-08-02 18:06:03 round 16: 103 scene(s) remaining, 2 job(s) active
+2026-08-02 18:09:18 round 17: 102 scene(s) remaining, 2 job(s) active
+2026-08-02 18:12:33 round 18: 101 scene(s) remaining, 2 job(s) active
+2026-08-02 18:15:47 round 19: 98 scene(s) remaining, 2 job(s) active
+2026-08-02 18:18:59 round 20: 97 scene(s) remaining, 2 job(s) active
+2026-08-02 18:22:14 round 21: 96 scene(s) remaining, 2 job(s) active
+2026-08-02 18:25:28 round 22: 95 scene(s) remaining, 2 job(s) active
+2026-08-02 18:28:42 round 23: 94 scene(s) remaining, 2 job(s) active
+2026-08-02 18:31:56 round 24: 92 scene(s) remaining, 2 job(s) active
+2026-08-02 18:35:09 round 25: 91 scene(s) remaining, 2 job(s) active
+2026-08-02 18:38:23 round 26: 90 scene(s) remaining, 2 job(s) active
+2026-08-02 18:41:37 round 27: 89 scene(s) remaining, 2 job(s) active
+2026-08-02 18:44:51 round 28: 88 scene(s) remaining, 2 job(s) active
+2026-08-02 18:48:05 round 29: 87 scene(s) remaining, 2 job(s) active
+2026-08-02 18:51:20 round 30: 85 scene(s) remaining, 2 job(s) active
+2026-08-02 18:54:33 round 31: 83 scene(s) remaining, 2 job(s) active
+2026-08-02 18:57:36 03_fencing: submitted 2985540 (14 scene(s) pending)
+2026-08-02 18:57:47 round 32: 81 scene(s) remaining, 2 job(s) active
+2026-08-02 19:01:02 round 33: 80 scene(s) remaining, 2 job(s) active
+2026-08-02 19:04:15 round 34: 79 scene(s) remaining, 2 job(s) active
+2026-08-02 19:07:29 round 35: 78 scene(s) remaining, 2 job(s) active
+2026-08-02 19:10:46 round 36: 76 scene(s) remaining, 2 job(s) active
+2026-08-02 19:13:50 04_basketball: submitted 2985630 (13 scene(s) pending)
+2026-08-02 19:13:58 round 37: 75 scene(s) remaining, 2 job(s) active
+2026-08-02 19:17:10 round 38: 74 scene(s) remaining, 2 job(s) active
+2026-08-02 19:20:20 round 39: 72 scene(s) remaining, 2 job(s) active
+2026-08-02 19:23:23 round 40: 70 scene(s) remaining, 2 job(s) active
+2026-08-02 19:26:33 round 41: 69 scene(s) remaining, 2 job(s) active
+2026-08-02 19:29:36 round 42: 68 scene(s) remaining, 2 job(s) active
+2026-08-02 19:32:47 round 43: 66 scene(s) remaining, 2 job(s) active
+2026-08-02 19:35:58 round 44: 65 scene(s) remaining, 2 job(s) active
+2026-08-02 19:39:00 round 45: 62 scene(s) remaining, 2 job(s) active
+2026-08-02 19:42:05 05_volleyball: submitted 2985688 (11 scene(s) pending)
+2026-08-02 19:42:12 round 46: 61 scene(s) remaining, 2 job(s) active
+2026-08-02 19:45:25 round 47: 60 scene(s) remaining, 2 job(s) active
+2026-08-02 19:48:38 round 48: 59 scene(s) remaining, 2 job(s) active
+2026-08-02 19:51:49 round 49: 58 scene(s) remaining, 2 job(s) active
+2026-08-02 19:55:04 round 50: 56 scene(s) remaining, 2 job(s) active
+2026-08-02 19:58:18 round 51: 54 scene(s) remaining, 2 job(s) active
+2026-08-02 20:01:31 round 52: 52 scene(s) remaining, 2 job(s) active
+2026-08-02 20:04:43 round 53: 51 scene(s) remaining, 2 job(s) active
+2026-08-02 20:07:55 round 54: 48 scene(s) remaining, 2 job(s) active
+2026-08-02 20:11:09 06_badminton: submitted 2985777 (24 scene(s) pending)
+2026-08-02 20:11:12 round 55: 48 scene(s) remaining, 2 job(s) active
+2026-08-02 20:14:24 round 56: 47 scene(s) remaining, 2 job(s) active
+2026-08-02 20:17:36 round 57: 46 scene(s) remaining, 2 job(s) active
+2026-08-02 20:20:48 round 58: 45 scene(s) remaining, 2 job(s) active
+2026-08-02 20:24:01 round 59: 43 scene(s) remaining, 2 job(s) active
+2026-08-02 20:27:15 round 60: 42 scene(s) remaining, 2 job(s) active
+2026-08-02 20:30:28 round 61: 41 scene(s) remaining, 2 job(s) active
+2026-08-02 20:33:40 round 62: 40 scene(s) remaining, 2 job(s) active
+2026-08-02 20:36:52 round 63: 39 scene(s) remaining, 2 job(s) active
+2026-08-02 20:40:03 round 64: 38 scene(s) remaining, 2 job(s) active
+2026-08-02 20:43:20 07_tennis: submitted 2985913 (13 scene(s) pending)
+2026-08-02 20:43:20 round 65: 37 scene(s) remaining, 2 job(s) active
+2026-08-02 20:46:27 round 66: 36 scene(s) remaining, 2 job(s) active
+2026-08-02 20:49:35 round 67: 34 scene(s) remaining, 2 job(s) active
+2026-08-02 20:52:48 round 68: 31 scene(s) remaining, 2 job(s) active
+2026-08-02 20:56:00 round 69: 28 scene(s) remaining, 2 job(s) active
+2026-08-02 20:59:11 round 70: 27 scene(s) remaining, 2 job(s) active
+2026-08-02 21:02:26 round 71: 26 scene(s) remaining, 2 job(s) active
+2026-08-02 21:05:39 round 72: 25 scene(s) remaining, 2 job(s) active
+2026-08-02 21:08:54 round 73: 24 scene(s) remaining, 2 job(s) active
+2026-08-02 21:12:08 round 74: 22 scene(s) remaining, 2 job(s) active
+2026-08-02 21:15:22 round 75: 21 scene(s) remaining, 2 job(s) active
+2026-08-02 21:18:41 round 76: 20 scene(s) remaining, 2 job(s) active
+2026-08-02 21:22:07 round 77: 18 scene(s) remaining, 2 job(s) active
+2026-08-02 21:25:22 round 78: 16 scene(s) remaining, 2 job(s) active
+2026-08-02 21:28:39 round 79: 14 scene(s) remaining, 2 job(s) active
+2026-08-02 21:31:53 round 80: 13 scene(s) remaining, 1 job(s) active
+2026-08-02 21:35:04 round 81: 12 scene(s) remaining, 1 job(s) active
+2026-08-02 21:38:15 round 82: 11 scene(s) remaining, 1 job(s) active
+2026-08-02 21:41:23 round 83: 11 scene(s) remaining, 1 job(s) active
+2026-08-02 21:44:30 round 84: 10 scene(s) remaining, 1 job(s) active
+2026-08-02 21:47:34 round 85: 9 scene(s) remaining, 1 job(s) active
+2026-08-02 21:50:51 round 86: 8 scene(s) remaining, 1 job(s) active
+2026-08-02 21:54:08 round 87: 7 scene(s) remaining, 1 job(s) active
+2026-08-02 21:57:26 round 88: 7 scene(s) remaining, 1 job(s) active
+2026-08-02 22:00:44 round 89: 6 scene(s) remaining, 1 job(s) active
+2026-08-02 22:03:59 round 90: 5 scene(s) remaining, 1 job(s) active
+2026-08-02 22:07:15 round 91: 5 scene(s) remaining, 1 job(s) active
+2026-08-02 22:10:33 round 92: 4 scene(s) remaining, 1 job(s) active
+2026-08-02 22:13:46 round 93: 3 scene(s) remaining, 1 job(s) active
+2026-08-02 22:16:58 round 94: 2 scene(s) remaining, 1 job(s) active
+2026-08-02 22:20:04 round 95: 2 scene(s) remaining, 1 job(s) active
+2026-08-02 22:24:05 round 96: 1 scene(s) remaining, 1 job(s) active
+2026-08-02 22:27:53 all activities complete
+=== final aggregate per activity (GEODESIC MEDIAN) ===
+--- 01_tagging ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_tagging               W†=  206.3  GA=   83.0  PA=   43.7 mm   | single-view PA: best=40.8 median=48.4
+  002_tagging               W†=  185.1  GA=   64.0  PA=   38.8 mm   | single-view PA: best=37.7 median=44.0
+  003_tagging               W†=  238.8  GA=   74.2  PA=   44.1 mm   | single-view PA: best=41.7 median=49.4
+  004_tagging               W†=  237.6  GA=   78.1  PA=   46.8 mm   | single-view PA: best=43.9 median=52.4
+  005_tagging               W†=  189.3  GA=   71.0  PA=   43.3 mm   | single-view PA: best=42.0 median=47.7
+  006_tagging               W†=  227.0  GA=   70.4  PA=   43.9 mm   | single-view PA: best=42.5 median=47.5
+  007_tagging               W†=  265.8  GA=  102.1  PA=   44.2 mm   | single-view PA: best=42.3 median=48.4
+  008_tagging               W†=  267.3  GA=   81.9  PA=   47.7 mm   | single-view PA: best=46.0 median=52.4
+  009_tagging               W†=  186.9  GA=   67.5  PA=   44.6 mm   | single-view PA: best=43.0 median=47.6
+  010_tagging               W†=  221.5  GA=   72.4  PA=   46.4 mm   | single-view PA: best=44.8 median=50.3
+  011_tagging               W†=  195.8  GA=   70.2  PA=   42.8 mm   | single-view PA: best=41.5 median=46.2
+  012_tagging               W†=  360.9  GA=  109.3  PA=   48.5 mm   | single-view PA: best=47.7 median=56.8
+  013_tagging               W†=  343.0  GA=   95.7  PA=   49.6 mm   | single-view PA: best=48.1 median=57.2
+  014_tagging               W†=  367.5  GA=  106.7  PA=   48.3 mm   | single-view PA: best=45.2 median=53.5
+
+=== AGGREGATE (metres · mm) — CHROMM EgoHumans: W†0.51 GA0.15 PA0.05 ===
+  scenes: 14  (W† on 14)
+  W-MPJPE†  mean 0.249 m  (249.5 mm)
+  GA-MPJPE  mean 0.082 m  (81.9 mm)
+  PA-MPJPE  mean 0.045 m  (45.2 mm)
+--- 02_lego ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_legoassemble          W†=   84.3  GA=   57.3  PA=   44.9 mm   | single-view PA: best=43.4 median=50.3
+  002_legoassemble          W†=  100.5  GA=   63.1  PA=   46.4 mm   | single-view PA: best=43.8 median=51.4
+  003_legoassemble          W†=   95.4  GA=   58.0  PA=   42.2 mm   | single-view PA: best=41.6 median=47.1
+  004_legoassemble          W†=   96.7  GA=   58.0  PA=   43.6 mm   | single-view PA: best=42.4 median=49.0
+  005_legoassemble          W†=   90.5  GA=   54.9  PA=   42.6 mm   | single-view PA: best=40.4 median=48.5
+  006_legoassemble          W†=   94.9  GA=   63.6  PA=   46.5 mm   | single-view PA: best=44.4 median=51.4
+
+=== AGGREGATE (metres · mm) — CHROMM EgoHumans: W†0.51 GA0.15 PA0.05 ===
+  scenes: 6  (W† on 6)
+  W-MPJPE†  mean 0.094 m  (93.7 mm)
+  GA-MPJPE  mean 0.059 m  (59.1 mm)
+  PA-MPJPE  mean 0.044 m  (44.4 mm)
+--- 03_fencing ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_fencing               W†=  489.3  GA=  132.1  PA=   32.6 mm   | single-view PA: best=31.6 median=35.6
+  002_fencing               W†=  488.6  GA=  117.4  PA=   31.1 mm   | single-view PA: best=29.9 median=34.4
+  003_fencing               W†=  514.3  GA=  110.5  PA=   33.0 mm   | single-view PA: best=30.4 median=36.2
+  004_fencing               W†=  478.5  GA=  105.7  PA=   31.8 mm   | single-view PA: best=30.6 median=34.8
+  005_fencing               W†=  486.1  GA=  103.4  PA=   39.7 mm   | single-view PA: best=37.7 median=42.0
+  006_fencing               W†=  477.1  GA=  100.7  PA=   31.3 mm   | single-view PA: best=29.6 median=34.0
+  007_fencing               W†=  329.9  GA=   91.4  PA=   31.1 mm   | single-view PA: best=30.3 median=34.7
+  008_fencing               W†=  432.6  GA=   99.8  PA=   33.4 mm   | single-view PA: best=31.7 median=37.6
+  009_fencing               W†=  384.1  GA=  103.2  PA=   40.5 mm   | single-view PA: best=38.7 median=43.6
+  010_fencing               W†=  407.3  GA=   86.7  PA=   33.4 mm   | single-view PA: best=31.5 median=36.4
+  011_fencing               W†=  557.8  GA=   86.3  PA=   33.5 mm   | single-view PA: best=31.8 median=36.7
+  012_fencing               W†=  509.8  GA=   86.5  PA=   41.8 mm   | single-view PA: best=40.8 median=45.2
+  013_fencing               W†=  358.2  GA=   64.7  PA=   38.3 mm   | single-view PA: best=37.6 median=40.3
+  014_fencing               W†=  227.4  GA=   70.2  PA=   32.9 mm   | single-view PA: best=28.6 median=37.0
+
+=== AGGREGATE (metres · mm) — CHROMM EgoHumans: W†0.51 GA0.15 PA0.05 ===
+  scenes: 14  (W† on 14)
+  W-MPJPE†  mean 0.439 m  (438.6 mm)
+  GA-MPJPE  mean 0.097 m  (97.1 mm)
+  PA-MPJPE  mean 0.035 m  (34.6 mm)
+--- 04_basketball ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_basketball            W†=  151.2  GA=   61.6  PA=   28.3 mm   | single-view PA: best=27.3 median=34.3
+  002_basketball            W†=  199.8  GA=   68.9  PA=   31.5 mm   | single-view PA: best=29.8 median=38.0
+  003_basketball            W†=  282.8  GA=   66.1  PA=   30.9 mm   | single-view PA: best=31.6 median=38.9
+  004_basketball            W†=  211.3  GA=   59.0  PA=   33.3 mm   | single-view PA: best=32.0 median=39.3
+  005_basketball            W†=  242.4  GA=   61.9  PA=   32.3 mm   | single-view PA: best=31.0 median=38.6
+  006_basketball            W†=  185.2  GA=   56.3  PA=   30.5 mm   | single-view PA: best=30.3 median=36.8
+  007_basketball            W†=  233.0  GA=   81.8  PA=   37.7 mm   | single-view PA: best=35.7 median=44.5
+  008_basketball            W†=  161.0  GA=   60.7  PA=   31.7 mm   | single-view PA: best=30.5 median=39.3
+  009_basketball            W†=  228.0  GA=   57.2  PA=   30.5 mm   | single-view PA: best=29.8 median=36.5
+  011_basketball            W†=  108.9  GA=   54.6  PA=   25.2 mm   | single-view PA: best=24.5 median=29.4
+  012_basketball            W†=  138.5  GA=   67.4  PA=   27.0 mm   | single-view PA: best=25.8 median=31.4
+  013_basketball            W†=  157.7  GA=   65.0  PA=   34.4 mm   | single-view PA: best=32.5 median=40.2
+  014_basketball            W†=  220.6  GA=   72.2  PA=   35.1 mm   | single-view PA: best=33.6 median=42.5
+
+=== AGGREGATE (metres · mm) — CHROMM EgoHumans: W†0.51 GA0.15 PA0.05 ===
+  scenes: 13  (W† on 13)
+  W-MPJPE†  mean 0.194 m  (193.9 mm)
+  GA-MPJPE  mean 0.064 m  (64.0 mm)
+  PA-MPJPE  mean 0.031 m  (31.4 mm)
+--- 05_volleyball ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_volleyball            W†= 1036.2  GA=  351.9  PA=   29.2 mm   | single-view PA: best=28.5 median=36.6
+  002_volleyball            W†= 1433.8  GA=  784.5  PA=   29.8 mm   | single-view PA: best=28.5 median=37.2
+  003_volleyball            W†=  906.1  GA=  213.0  PA=   29.7 mm   | single-view PA: best=29.1 median=37.1
+  004_volleyball            W†=  784.7  GA=  225.4  PA=   29.4 mm   | single-view PA: best=28.5 median=36.9
+  005_volleyball            W†=  918.0  GA=  233.4  PA=   31.6 mm   | single-view PA: best=31.5 median=38.6
+  006_volleyball            W†=  915.4  GA=  279.4  PA=   30.3 mm   | single-view PA: best=29.4 median=38.2
+  007_volleyball            W†= 1033.1  GA=  301.1  PA=   28.8 mm   | single-view PA: best=28.5 median=35.5
+  008_volleyball            W†=  866.1  GA=  253.9  PA=   28.7 mm   | single-view PA: best=28.6 median=35.2
+  009_volleyball            W†=  988.9  GA=  426.6  PA=   29.7 mm   | single-view PA: best=28.9 median=36.7
+  010_volleyball            W†=  881.1  GA=  263.1  PA=   29.0 mm   | single-view PA: best=28.6 median=36.4
+  011_volleyball            W†=  940.1  GA=  226.5  PA=   30.8 mm   | single-view PA: best=29.1 median=38.8
+
+=== AGGREGATE (metres · mm) — CHROMM EgoHumans: W†0.51 GA0.15 PA0.05 ===
+  scenes: 11  (W† on 11)
+  W-MPJPE†  mean 0.973 m  (973.0 mm)
+  GA-MPJPE  mean 0.324 m  (323.5 mm)
+  PA-MPJPE  mean 0.030 m  (29.7 mm)
+--- 06_badminton ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_badminton             W†=  867.5  GA=  451.2  PA=   24.3 mm   | single-view PA: best=23.7 median=29.3
+  002_badminton             W†=  560.1  GA=   82.8  PA=   24.2 mm   | single-view PA: best=23.5 median=28.9
+  003_badminton             W†=  977.7  GA=  375.6  PA=   25.8 mm   | single-view PA: best=24.3 median=30.7
+  004_badminton             W†=  483.5  GA=   67.7  PA=   24.6 mm   | single-view PA: best=23.6 median=28.5
+  005_badminton             W†=  533.4  GA=   77.0  PA=   24.1 mm   | single-view PA: best=23.0 median=28.3
+  006_badminton             W†=  532.1  GA=   60.8  PA=   23.0 mm   | single-view PA: best=21.9 median=27.0
+  007_badminton             W†=  537.3  GA=   82.7  PA=   25.7 mm   | single-view PA: best=23.9 median=29.8
+  008_badminton             W†=  518.2  GA=   68.6  PA=   23.5 mm   | single-view PA: best=22.7 median=26.6
+  009_badminton             W†=  471.0  GA=   95.7  PA=   26.2 mm   | single-view PA: best=24.9 median=30.4
+  010_badminton             W†=  524.4  GA=   67.0  PA=   25.1 mm   | single-view PA: best=24.2 median=29.6
+  011_badminton             W†=  551.0  GA=   85.9  PA=   25.7 mm   | single-view PA: best=24.8 median=29.6
+  012_badminton             W†=  521.4  GA=  107.8  PA=   25.1 mm   | single-view PA: best=24.1 median=29.2
+  013_badminton             W†=  522.7  GA=  108.3  PA=   25.8 mm   | single-view PA: best=24.6 median=29.8
+  014_badminton             W†=  496.2  GA=   76.6  PA=   24.8 mm   | single-view PA: best=23.7 median=29.3
+  015_badminton             W†=  518.7  GA=   62.1  PA=   23.6 mm   | single-view PA: best=22.9 median=28.0
+  016_badminton             W†=  545.0  GA=   94.1  PA=   24.4 mm   | single-view PA: best=23.2 median=28.5
+  017_badminton             W†=  481.1  GA=   75.6  PA=   24.5 mm   | single-view PA: best=24.1 median=29.5
+  018_badminton             W†=  519.4  GA=   66.2  PA=   23.7 mm   | single-view PA: best=22.5 median=27.8
+  019_badminton             W†=  579.6  GA=   74.2  PA=   25.5 mm   | single-view PA: best=24.7 median=30.2
+  020_badminton             W†=  623.8  GA=   46.7  PA=   24.9 mm   | single-view PA: best=23.7 median=28.9
+  021_badminton             W†=  640.0  GA=  268.3  PA=   25.3 mm   | single-view PA: best=24.2 median=29.2
+  022_badminton             W†=  576.9  GA=   86.1  PA=   24.2 mm   | single-view PA: best=23.5 median=28.3
+  023_badminton             W†=  513.4  GA=   50.5  PA=   23.7 mm   | single-view PA: best=23.1 median=27.7
+  024_badminton             W†=  529.0  GA=   66.0  PA=   23.1 mm   | single-view PA: best=22.6 median=26.8
+  025_badminton             W†=  513.6  GA=   52.2  PA=   23.5 mm   | single-view PA: best=22.9 median=27.9
+  026_badminton             W†=  504.4  GA=   67.0  PA=   24.0 mm   | single-view PA: best=23.0 median=28.3
+  027_badminton             W†=  520.8  GA=   65.4  PA=   23.9 mm   | single-view PA: best=23.1 median=28.0
+  028_badminton             W†=  554.3  GA=   70.7  PA=   25.2 mm   | single-view PA: best=24.2 median=30.5
+  029_badminton             W†=  484.3  GA=   78.7  PA=   24.4 mm   | single-view PA: best=24.0 median=28.7
+  030_badminton             W†=  567.3  GA=   83.6  PA=   25.5 mm   | single-view PA: best=24.8 median=30.9
+  031_badminton             W†=  496.8  GA=   85.1  PA=   24.1 mm   | single-view PA: best=23.6 median=28.8
+  032_badminton             W†=  505.7  GA=   65.4  PA=   24.4 mm   | single-view PA: best=23.1 median=29.1
+  033_badminton             W†=  527.6  GA=   67.5  PA=   25.1 mm   | single-view PA: best=24.5 median=30.3
+  034_badminton             W†=  546.3  GA=   73.5  PA=   28.5 mm   | single-view PA: best=27.4 median=35.3
+  035_badminton             W†=  529.0  GA=   58.4  PA=   27.2 mm   | single-view PA: best=26.2 median=32.7
+  036_badminton             W†=  544.2  GA=   84.9  PA=   25.2 mm   | single-view PA: best=24.6 median=30.1
+  037_badminton             W†=  568.9  GA=   55.9  PA=   26.4 mm   | single-view PA: best=25.5 median=30.9
+  038_badminton             W†=  447.6  GA=   41.9  PA=   23.4 mm   | single-view PA: best=22.6 median=27.4
+  039_badminton             W†=  565.5  GA=   79.2  PA=   24.7 mm   | single-view PA: best=23.8 median=28.8
+  040_badminton             W†=  461.0  GA=   50.6  PA=   24.7 mm   | single-view PA: best=24.0 median=29.6
+  041_badminton             W†=  509.3  GA=   70.9  PA=   24.1 mm   | single-view PA: best=23.7 median=28.5
+  042_badminton             W†=  538.4  GA=   56.8  PA=   26.4 mm   | single-view PA: best=24.9 median=30.8
+  043_badminton             W†=  488.8  GA=   68.2  PA=   27.3 mm   | single-view PA: best=26.4 median=31.9
+  044_badminton             W†=  564.4  GA=   60.8  PA=   26.4 mm   | single-view PA: best=26.0 median=30.4
+  045_badminton             W†=  423.0  GA=   64.0  PA=   26.1 mm   | single-view PA: best=25.5 median=30.3
+  046_badminton             W†=  612.1  GA=   86.3  PA=   26.4 mm   | single-view PA: best=25.6 median=31.3
+  047_badminton             W†=  561.6  GA=   70.9  PA=   25.4 mm   | single-view PA: best=24.3 median=30.0
+  048_badminton             W†=  518.5  GA=   62.0  PA=   25.4 mm   | single-view PA: best=24.1 median=29.6
+  049_badminton             W†=  585.3  GA=   63.3  PA=   25.6 mm   | single-view PA: best=24.7 median=29.5
+  050_badminton             W†=  999.3  GA=  270.2  PA=   27.2 mm   | single-view PA: best=25.2 median=30.7
+  051_badminton             W†=  914.1  GA=  106.4  PA=   27.5 mm   | single-view PA: best=25.9 median=30.8
+  052_badminton             W†= 1028.4  GA=  425.4  PA=   27.3 mm   | single-view PA: best=26.1 median=30.8
+  053_badminton             W†=  917.8  GA=  160.0  PA=   27.4 mm   | single-view PA: best=26.0 median=31.3
+  054_badminton             W†=  819.7  GA=   97.6  PA=   27.1 mm   | single-view PA: best=26.2 median=30.3
+  055_badminton             W†=  906.9  GA=  180.2  PA=   26.4 mm   | single-view PA: best=24.7 median=29.8
+  056_badminton             W†=  972.2  GA=  197.0  PA=   28.7 mm   | single-view PA: best=27.0 median=32.4
+  057_badminton             W†= 1031.4  GA=  170.6  PA=   27.9 mm   | single-view PA: best=26.9 median=31.4
+  058_badminton             W†=  788.5  GA=  138.4  PA=   27.2 mm   | single-view PA: best=26.1 median=30.6
+  059_badminton             W†=  845.8  GA=  194.8  PA=   28.9 mm   | single-view PA: best=27.7 median=32.6
+  060_badminton             W†=  936.5  GA=  164.8  PA=   26.4 mm   | single-view PA: best=25.6 median=30.3
+  061_badminton             W†=  780.0  GA=  160.2  PA=   26.4 mm   | single-view PA: best=25.4 median=29.5
+
+=== AGGREGATE (metres · mm) — CHROMM EgoHumans: W†0.51 GA0.15 PA0.05 ===
+  scenes: 61  (W† on 61)
+  W-MPJPE†  mean 0.618 m  (618.1 mm)
+  GA-MPJPE  mean 0.109 m  (109.0 mm)
+  PA-MPJPE  mean 0.025 m  (25.4 mm)
+--- 07_tennis ---
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+  001_tennis                W†=  542.9  GA=   52.8  PA=   25.0 mm   | single-view PA: best=24.8 median=31.4
+  002_tennis                W†=  603.2  GA=   58.6  PA=   27.0 mm   | single-view PA: best=26.4 median=33.8
+  003_tennis                W†=  703.2  GA=   61.6  PA=   26.4 mm   | single-view PA: best=25.7 median=33.6
+  004_tennis                W†=  623.6  GA=   60.2  PA=   27.5 mm   | single-view PA: best=26.9 median=34.9
+  005_tennis                W†= 1000.7  GA=   71.3  PA=   26.7 mm   | single-view PA: best=25.9 median=33.1
+  006_tennis                W†=  873.7  GA=   73.4  PA=   26.6 mm   | single-view PA: best=25.9 median=32.1
+  007_tennis                W†=  851.6  GA=   66.6  PA=   26.9 mm   | single-view PA: best=25.8 median=33.3
+  008_tennis                W†=  829.6  GA=   65.6  PA=   26.1 mm   | single-view PA: best=25.5 median=32.3
+  009_tennis                W†= 1694.1  GA=   97.0  PA=   25.0 mm   | single-view PA: best=24.7 median=31.3
+  010_tennis                W†= 2085.5  GA=  116.1  PA=   26.7 mm   | single-view PA: best=25.8 median=33.3
+  011_tennis                W†= 2422.8  GA=  130.5  PA=   28.6 mm   | single-view PA: best=27.5 median=35.3
+  012_tennis                W†= 2444.6  GA=  127.3  PA=   26.7 mm   | single-view PA: best=25.7 median=32.9
+  013_tennis                W†= 2553.5  GA=  130.8  PA=   28.6 mm   | single-view PA: best=27.1 median=35.8
+
+=== AGGREGATE (metres · mm) — CHROMM EgoHumans: W†0.51 GA0.15 PA0.05 ===
+  scenes: 13  (W† on 13)
+  W-MPJPE†  mean 1.325 m  (1325.3 mm)
+  GA-MPJPE  mean 0.086 m  (85.5 mm)
+  PA-MPJPE  mean 0.027 m  (26.7 mm)
+2026-08-03 00:28:20 Driver exiting.

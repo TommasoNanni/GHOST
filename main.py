@@ -15,7 +15,7 @@ from data.video_dataset import Video, Scene, EgoExoSceneDataset
 from preprocessing.segmentation import PersonSegmenter
 from preprocessing.parameters_extraction import ParametersExtractor, CrossVideoReidentifier
 from synchronize_videos.synchronizer import Synchronizer
-from utilities.body_data import load_person_keypoints
+from utilities.body_data import load_person_smplx_pose
 
 
 def load_body_data(
@@ -88,7 +88,10 @@ def load_body_data(
             pid = int(npz_path.stem.split("_")[1])
             if fg_pids is not None and pid not in fg_pids:
                 continue
-            result = load_person_keypoints(npz_path)
+            # Synchronizer._compute_cost_matrix measures an SO(3) geodesic, so it
+            # needs axis-angle ROTATIONS (T, 51, 3) — not 3D joint positions.
+            # (evaluation/alignment_experiments_multi.py is the reference caller.)
+            result = load_person_smplx_pose(npz_path)
             if result is None:
                 continue
             joints, conf = result
@@ -207,8 +210,13 @@ def main(args):
         logging.info(f"Scene {scene.scene_id} offsets (frames): {initial_times.cpu().tolist()}")
 
         # Save offsets to disk for downstream steps (geometric post-ReID, fusion).
+        # estimate_initial_times returns a start *time* t0: a camera whose content
+        # runs d frames ahead comes back as -d (see evaluation/alignment_experiments_multi.py,
+        # where the slice start is max_shift - t0).  Consumers add this value to
+        # frame_indices to reach the common timeline, so it must be negated here —
+        # adding t0 unchanged would double the offset instead of removing it.
         offsets_dict = {
-            video.video_id: int(round(t0))
+            video.video_id: -int(round(t0))
             for video, t0 in zip(scene.videos, initial_times.cpu().tolist())
         }
         scene_dir.mkdir(parents=True, exist_ok=True)

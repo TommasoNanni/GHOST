@@ -20,6 +20,7 @@ the merged SAM2 ids are appended to the label, e.g. ``P1 [SAM2: 7, 12]``.
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 import cv2
@@ -42,6 +43,27 @@ _PALETTE: list[tuple[int, int, int]] = [
 
 def _color(person_id: int) -> tuple[int, int, int]:
     return _PALETTE[person_id % len(_PALETTE)]
+
+
+def _frame_index(frame_path: Path) -> int | None:
+    """Frame number from a filename, across every naming scheme in this repo.
+
+    ``00001_00.jpg``   RICH image sequences (frame_camera)  -> 1
+    ``000001.jpg``     Video._extract_frames ``{idx:06d}``  -> 1
+    ``00001.jpg``      EgoHumans ``images_undistorted/``    -> 1
+    ``frame_001426.jpg``  EgoHumans ``frames_root/``        -> 1426
+
+    Plain ``int(stem)`` is wrong for the RICH layout: Python reads ``_`` as a
+    digit separator, so ``int("00001_00")`` returns **100** instead of raising —
+    every bbox lands on the wrong frame and most fall past the end of the clip.
+    So: leading digit-run when the name starts with a digit, trailing one when a
+    prefix like ``frame_`` comes first.
+    """
+    stem = frame_path.stem
+    runs = re.findall(r"\d+", stem)
+    if not runs:
+        return None
+    return int(runs[0] if stem[0].isdigit() else runs[-1])
 
 
 def visualize_reid(
@@ -121,9 +143,8 @@ def visualize_reid(
     )
 
     for frame_path in tqdm(frame_files, desc=f"Rendering {video_dir.name}", leave=False):
-        try:
-            frame_idx = int(frame_path.stem)
-        except ValueError:
+        frame_idx = _frame_index(frame_path)
+        if frame_idx is None:
             continue
         frame = cv2.imread(str(frame_path))
         if frame is None:

@@ -1,0 +1,407 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO __main__: Fusion: GEODESIC MEDIAN over cameras, unweighted (no learned model, no checkpoint, no temporal padding).
+INFO __main__: GT subject identified automatically (self-verifying matcher); pass --use_manual_reid to override with manual_reid.json
+INFO __main__: Device: cuda
+INFO __main__: cmu_soccer06_3: auto-matched GT subject — cams=4 res=2px off=3cm
+INFO __main__:   cmu_soccer06_3                                 W= 130.2mm  PA=  42.6mm  (16j)
+INFO __main__: cmu_soccer12_2: auto-matched GT subject — cams=4 res=4px off=7cm (cam02:tie(p2@58 vs p1@97))
+INFO __main__:   cmu_soccer12_2                                 W= 614.0mm  PA=  56.1mm  (16j)
+WARNING __main__: cmu_soccer16_2: auto-match could not verify the GT subject (cams=2 res=1px off=23cm dropped cam02; dropped cam05) — skipping
+INFO __main__: georgiatech_bike_06_12: auto-matched GT subject — cams=2 res=2px off=12cm (dropped cam03; dropped cam04)
+INFO __main__:   georgiatech_bike_06_12                         W= 170.2mm  PA= 101.3mm  (15j)
+INFO __main__: georgiatech_bike_06_2: auto-matched GT subject — cams=4 res=6px off=3cm
+INFO __main__:   georgiatech_bike_06_2                          W=  90.0mm  PA=  34.8mm  (14j)
+INFO __main__: georgiatech_bike_06_6: auto-matched GT subject — cams=4 res=10px off=7cm
+INFO __main__:   georgiatech_bike_06_6                          W= 121.1mm  PA=  54.0mm  (16j)
+INFO __main__: georgiatech_bike_06_8: auto-matched GT subject — cams=4 res=11px off=4cm
+INFO __main__:   georgiatech_bike_06_8                          W=  71.8mm  PA=  45.3mm  (17j)
+INFO __main__: georgiatech_bike_07_10: auto-matched GT subject — cams=3 res=3px off=8cm (dropped cam03)
+INFO __main__:   georgiatech_bike_07_10                         W= 204.2mm  PA= 100.3mm  (16j)
+INFO __main__: georgiatech_bike_07_12: auto-matched GT subject — cams=3 res=7px off=11cm (dropped cam03)
+INFO __main__:   georgiatech_bike_07_12                         W= 227.3mm  PA=  90.3mm  (17j)
+INFO __main__: georgiatech_bike_07_2: auto-matched GT subject — cams=4 res=6px off=3cm
+INFO __main__:   georgiatech_bike_07_2                          W= 116.8mm  PA=  29.0mm  (17j)
+INFO __main__: georgiatech_bike_07_4: auto-matched GT subject — cams=4 res=7px off=5cm
+INFO __main__:   georgiatech_bike_07_4                          W= 164.0mm  PA=  49.2mm  (17j)
+INFO __main__: georgiatech_bike_07_6: auto-matched GT subject — cams=3 res=5px off=4cm (dropped cam04)
+INFO __main__:   georgiatech_bike_07_6                          W=  75.2mm  PA=  39.6mm  (17j)
+INFO __main__: georgiatech_bike_07_8: auto-matched GT subject — cams=4 res=10px off=3cm
+INFO __main__:   georgiatech_bike_07_8                          W= 227.5mm  PA=  47.7mm  (13j)
+INFO __main__: georgiatech_bike_14_12: auto-matched GT subject — cams=3 res=11px off=6cm (dropped cam03)
+INFO __main__:   georgiatech_bike_14_12                         W= 171.6mm  PA=  66.0mm  (14j)
+INFO __main__: georgiatech_bike_14_2: auto-matched GT subject — cams=4 res=5px off=5cm
+INFO __main__:   georgiatech_bike_14_2                          W= 125.4mm  PA=  47.1mm  (16j)
+INFO __main__: georgiatech_bike_14_6: auto-matched GT subject — cams=4 res=9px off=5cm
+INFO __main__:   georgiatech_bike_14_6                          W= 114.4mm  PA=  47.8mm  (15j)
+INFO __main__: georgiatech_bike_14_8: auto-matched GT subject — cams=4 res=10px off=6cm
+INFO __main__:   georgiatech_bike_14_8                          W= 129.8mm  PA=  49.3mm  (11j)
+INFO __main__: georgiatech_bike_15_2: auto-matched GT subject — cams=4 res=7px off=8cm
+INFO __main__:   georgiatech_bike_15_2                          W= 115.3mm  PA=  83.5mm  (17j)
+INFO __main__: georgiatech_bike_15_4: auto-matched GT subject — cams=4 res=5px off=8cm
+INFO __main__:   georgiatech_bike_15_4                          W= 100.2mm  PA=  71.7mm  (16j)
+INFO __main__: georgiatech_bike_15_6: auto-matched GT subject — cams=4 res=11px off=5cm
+INFO __main__:   georgiatech_bike_15_6                          W=  77.4mm  PA=  49.0mm  (14j)
+INFO __main__: georgiatech_bike_15_8: auto-matched GT subject — cams=3 res=7px off=4cm (dropped cam05)
+INFO __main__:   georgiatech_bike_15_8                          W= 111.0mm  PA=  34.7mm  (16j)
+INFO __main__: georgiatech_bike_16_2: auto-matched GT subject — cams=4 res=9px off=5cm
+INFO __main__:   georgiatech_bike_16_2                          W= 252.2mm  PA=  40.8mm  (15j)
+INFO __main__: georgiatech_bike_16_6: auto-matched GT subject — cams=4 res=9px off=9cm
+INFO __main__:   georgiatech_bike_16_6                          W= 154.0mm  PA=  73.0mm  (11j)
+INFO __main__: georgiatech_bike_16_8: auto-matched GT subject — cams=4 res=7px off=11cm
+INFO __main__:   georgiatech_bike_16_8                          W= 112.4mm  PA=  62.5mm  (17j)
+INFO __main__: georgiatech_covid_02_10: auto-matched GT subject — cams=4 res=8px off=5cm
+INFO __main__:   georgiatech_covid_02_10                        W=  63.8mm  PA=  40.1mm  (13j)
+INFO __main__: georgiatech_covid_02_12: auto-matched GT subject — cams=2 res=1px off=8cm (dropped cam01; dropped cam02)
+INFO __main__:   georgiatech_covid_02_12                        W= 452.0mm  PA=  42.7mm  (13j)
+INFO __main__: georgiatech_covid_02_14: auto-matched GT subject — cams=4 res=7px off=4cm
+INFO __main__:   georgiatech_covid_02_14                        W=  79.6mm  PA=  33.8mm  (12j)
+INFO __main__: georgiatech_covid_02_2: auto-matched GT subject — cams=4 res=8px off=5cm
+INFO __main__:   georgiatech_covid_02_2                         W=  64.7mm  PA=  42.9mm  (13j)
+INFO __main__: georgiatech_covid_02_4: auto-matched GT subject — cams=4 res=8px off=3cm
+INFO __main__:   georgiatech_covid_02_4                         W=  58.5mm  PA=  42.5mm  (13j)
+INFO __main__: georgiatech_covid_04_10: auto-matched GT subject — cams=2 res=11px off=17cm (dropped cam02; dropped cam01)
+INFO __main__:   georgiatech_covid_04_10                        W= 136.8mm  PA=  38.7mm  (12j)
+INFO __main__: georgiatech_covid_04_12: auto-matched GT subject — cams=4 res=9px off=7cm
+INFO __main__:   georgiatech_covid_04_12                        W= 112.0mm  PA=  48.0mm  (11j)
+INFO __main__: georgiatech_covid_04_4: auto-matched GT subject — cams=2 res=9px off=9cm (dropped cam01; dropped cam03)
+INFO __main__:   georgiatech_covid_04_4                         W= 130.5mm  PA=  49.5mm  (12j)
+INFO __main__: georgiatech_covid_04_6: auto-matched GT subject — cams=4 res=7px off=4cm
+INFO __main__:   georgiatech_covid_04_6                         W=  97.4mm  PA=  40.4mm  (12j)
+INFO __main__: georgiatech_covid_06_2: auto-matched GT subject — cams=2 res=4px off=17cm (dropped cam02; dropped cam01)
+INFO __main__:   georgiatech_covid_06_2                         W= 157.8mm  PA=  73.2mm  (11j)
+INFO __main__: georgiatech_covid_06_4: auto-matched GT subject — cams=4 res=8px off=6cm
+INFO __main__:   georgiatech_covid_06_4                         W= 101.6mm  PA=  70.8mm  (13j)
+INFO __main__: georgiatech_covid_18_10: auto-matched GT subject — cams=3 res=10px off=7cm (dropped cam04)
+INFO __main__:   georgiatech_covid_18_10                        W= 114.6mm  PA=  69.7mm  (17j)
+INFO __main__: georgiatech_covid_18_12: auto-matched GT subject — cams=4 res=6px off=5cm
+INFO __main__:   georgiatech_covid_18_12                        W= 156.3mm  PA=  43.1mm  (13j)
+INFO __main__: georgiatech_covid_18_2: auto-matched GT subject — cams=4 res=6px off=4cm
+INFO __main__:   georgiatech_covid_18_2                         W= 109.7mm  PA=  39.8mm  (13j)
+INFO __main__: georgiatech_covid_18_4: auto-matched GT subject — cams=4 res=11px off=10cm
+INFO __main__:   georgiatech_covid_18_4                         W= 105.0mm  PA=  64.6mm  (10j)
+INFO __main__: georgiatech_covid_18_6: auto-matched GT subject — cams=3 res=7px off=8cm (dropped cam05)
+INFO __main__:   georgiatech_covid_18_6                         W= 140.2mm  PA=  74.7mm  (14j)
+INFO __main__: georgiatech_covid_18_8: auto-matched GT subject — cams=3 res=12px off=5cm (dropped cam04)
+INFO __main__:   georgiatech_covid_18_8                         W= 150.4mm  PA=  51.3mm  (13j)
+INFO __main__: iiith_cooking_59_2: auto-matched GT subject — cams=4 res=4px off=9cm
+INFO __main__:   iiith_cooking_59_2                             W=  77.4mm  PA=  65.3mm  (17j)
+INFO __main__: iiith_cooking_64_2: auto-matched GT subject — cams=3 res=10px off=6cm
+INFO __main__:   iiith_cooking_64_2                             W=  67.4mm  PA=  54.9mm  (15j)
+INFO __main__: iiith_cooking_89_6: auto-matched GT subject — cams=4 res=12px off=7cm
+INFO __main__:   iiith_cooking_89_6                             W= 239.5mm  PA=  49.2mm  (15j)
+INFO __main__: iiith_cooking_90_4: auto-matched GT subject — cams=4 res=8px off=9cm
+INFO __main__:   iiith_cooking_90_4                             W= 132.7mm  PA=  69.4mm  (14j)
+INFO __main__: iiith_soccer_015_2: auto-matched GT subject — cams=4 res=4px off=4cm
+INFO __main__:   iiith_soccer_015_2                             W= 382.5mm  PA=  40.6mm  (17j)
+INFO __main__: nus_cpr_12_1: auto-matched GT subject — cams=4 res=3px off=4cm
+INFO __main__:   nus_cpr_12_1                                   W=  86.3mm  PA=  39.3mm  (17j)
+INFO __main__: nus_cpr_12_2: auto-matched GT subject — cams=4 res=4px off=14cm
+INFO __main__:   nus_cpr_12_2                                   W= 242.1mm  PA=  94.5mm  (17j)
+INFO __main__: sfu_basketball012_10: auto-matched GT subject — cams=4 res=2px off=7cm
+INFO __main__:   sfu_basketball012_10                           W= 477.8mm  PA=  58.4mm  (17j)
+INFO __main__: sfu_basketball012_12: auto-matched GT subject — cams=4 res=2px off=8cm
+INFO __main__:   sfu_basketball012_12                           W= 352.5mm  PA=  59.4mm  (16j)
+INFO __main__: sfu_basketball012_2: auto-matched GT subject — cams=4 res=3px off=6cm
+INFO __main__:   sfu_basketball012_2                            W= 498.7mm  PA=  53.7mm  (16j)
+INFO __main__: sfu_basketball012_3: auto-matched GT subject — cams=4 res=2px off=4cm
+INFO __main__:   sfu_basketball012_3                            W= 595.8mm  PA=  44.5mm  (14j)
+INFO __main__: sfu_basketball012_4: auto-matched GT subject — cams=4 res=3px off=9cm
+INFO __main__:   sfu_basketball012_4                            W= 393.9mm  PA=  81.4mm  (17j)
+INFO __main__: sfu_basketball012_6: auto-matched GT subject — cams=4 res=1px off=5cm
+INFO __main__:   sfu_basketball012_6                            W= 302.3mm  PA=  59.7mm  (17j)
+INFO __main__: sfu_basketball012_7: auto-matched GT subject — cams=4 res=2px off=5cm
+INFO __main__:   sfu_basketball012_7                            W= 690.8mm  PA=  52.4mm  (16j)
+INFO __main__: sfu_basketball012_8: auto-matched GT subject — cams=4 res=2px off=5cm
+INFO __main__:   sfu_basketball012_8                            W= 257.9mm  PA=  54.9mm  (17j)
+INFO __main__: sfu_basketball016_2: auto-matched GT subject — cams=4 res=2px off=6cm
+INFO __main__:   sfu_basketball016_2                            W= 800.9mm  PA=  75.5mm  (17j)
+INFO __main__: sfu_basketball_04_8: auto-matched GT subject — cams=3 res=1px off=4cm (cam01:tie(p7@7 vs p2@7))
+INFO __main__:   sfu_basketball_04_8                            W=3087.3mm  PA=  60.4mm  (17j)
+INFO __main__: sfu_basketball_05_22: auto-matched GT subject — cams=4 res=2px off=4cm
+INFO __main__:   sfu_basketball_05_22                           W= 957.4mm  PA=  52.6mm  (17j)
+INFO __main__: sfu_basketball_05_26: auto-matched GT subject — cams=3 res=1px off=8cm (dropped cam03)
+INFO __main__:   sfu_basketball_05_26                           W= 618.8mm  PA=  82.4mm  (16j)
+INFO __main__: sfu_basketball_09_11: auto-matched GT subject — cams=4 res=2px off=4cm
+INFO __main__:   sfu_basketball_09_11                           W= 469.4mm  PA=  38.8mm  (17j)
+INFO __main__: sfu_basketball_09_12: auto-matched GT subject — cams=4 res=2px off=5cm
+INFO __main__:   sfu_basketball_09_12                           W= 486.3mm  PA=  57.3mm  (15j)
+INFO __main__: sfu_cooking028_12: auto-matched GT subject — cams=3 res=4px off=4cm (dropped cam02)
+INFO __main__:   sfu_cooking028_12                              W=  89.1mm  PA=  47.4mm  (11j)
+INFO __main__: sfu_cooking_007_7: auto-matched GT subject — cams=4 res=7px off=6cm
+INFO __main__:   sfu_cooking_007_7                              W=  79.0mm  PA=  56.4mm  (17j)
+INFO __main__: sfu_cooking_008_3: auto-matched GT subject — cams=4 res=5px off=7cm
+INFO __main__:   sfu_cooking_008_3                              W= 184.4mm  PA=  60.6mm  (11j)
+INFO __main__: sfu_cooking_008_5: auto-matched GT subject — cams=4 res=5px off=5cm
+INFO __main__:   sfu_cooking_008_5                              W= 126.6mm  PA=  37.3mm  (15j)
+INFO __main__: sfu_covid_004_2: auto-matched GT subject — cams=2 res=2px off=6cm (dropped cam04)
+INFO __main__:   sfu_covid_004_2                                W=  84.7mm  PA=  49.0mm  (11j)
+INFO __main__: sfu_covid_004_4: auto-matched GT subject — cams=3 res=4px off=9cm
+INFO __main__:   sfu_covid_004_4                                W= 152.1mm  PA=  84.8mm  (11j)
+INFO __main__: sfu_covid_008_16: auto-matched GT subject — cams=4 res=6px off=7cm
+INFO __main__:   sfu_covid_008_16                               W= 181.5mm  PA=  76.7mm  (12j)
+INFO __main__: unc_basketball_02-24-23_01_3: auto-matched GT subject — cams=4 res=2px off=5cm
+INFO __main__:   unc_basketball_02-24-23_01_3                   W= 141.6mm  PA=  54.3mm  (14j)
+INFO __main__: unc_basketball_02-24-23_02_10: auto-matched GT subject — cams=4 res=1px off=4cm
+INFO __main__:   unc_basketball_02-24-23_02_10                  W=  79.4mm  PA=  39.9mm  (17j)
+INFO __main__: unc_basketball_02-24-23_02_11: auto-matched GT subject — cams=4 res=3px off=6cm
+INFO __main__:   unc_basketball_02-24-23_02_11                  W= 104.1mm  PA=  54.6mm  (17j)
+INFO __main__: unc_basketball_03-30-23_02_10: auto-matched GT subject — cams=4 res=1px off=4cm
+INFO __main__:   unc_basketball_03-30-23_02_10                  W= 217.4mm  PA=  43.7mm  (17j)
+INFO __main__: unc_basketball_03-30-23_02_14: auto-matched GT subject — cams=3 res=1px off=12cm (dropped cam01)
+INFO __main__:   unc_basketball_03-30-23_02_14                  W=1310.7mm  PA=  65.2mm  (16j)
+INFO __main__: unc_basketball_03-30-23_02_15: auto-matched GT subject — cams=4 res=2px off=4cm
+INFO __main__:   unc_basketball_03-30-23_02_15                  W= 268.1mm  PA=  39.3mm  (16j)
+INFO __main__: unc_basketball_03-30-23_02_17: auto-matched GT subject — cams=4 res=1px off=4cm
+INFO __main__:   unc_basketball_03-30-23_02_17                  W= 167.5mm  PA=  49.8mm  (17j)
+INFO __main__: unc_basketball_03-30-23_02_18: auto-matched GT subject — cams=4 res=2px off=4cm
+INFO __main__:   unc_basketball_03-30-23_02_18                  W= 377.2mm  PA=  38.3mm  (17j)
+INFO __main__: unc_basketball_03-30-23_02_19: auto-matched GT subject — cams=4 res=1px off=3cm
+INFO __main__:   unc_basketball_03-30-23_02_19                  W= 188.2mm  PA=  43.3mm  (17j)
+INFO __main__: unc_basketball_03-30-23_02_4: auto-matched GT subject — cams=4 res=1px off=4cm
+INFO __main__:   unc_basketball_03-30-23_02_4                   W= 196.7mm  PA=  47.6mm  (17j)
+INFO __main__: unc_basketball_03-30-23_02_5: auto-matched GT subject — cams=4 res=2px off=7cm
+INFO __main__:   unc_basketball_03-30-23_02_5                   W= 546.8mm  PA=  59.4mm  (17j)
+INFO __main__: unc_basketball_03-30-23_02_7: auto-matched GT subject — cams=4 res=1px off=4cm
+INFO __main__:   unc_basketball_03-30-23_02_7                   W= 135.7mm  PA=  41.3mm  (17j)
+INFO __main__: uniandes_basketball_001_23: auto-matched GT subject — cams=4 res=2px off=5cm
+INFO __main__:   uniandes_basketball_001_23                     W= 312.6mm  PA=  43.5mm  (17j)
+INFO __main__: uniandes_basketball_001_24: auto-matched GT subject — cams=4 res=3px off=6cm
+INFO __main__:   uniandes_basketball_001_24                     W= 370.7mm  PA=  49.6mm  (16j)
+INFO __main__: uniandes_basketball_001_26: auto-matched GT subject — cams=4 res=1px off=4cm
+INFO __main__:   uniandes_basketball_001_26                     W= 216.4mm  PA=  36.2mm  (16j)
+INFO __main__: uniandes_basketball_001_27: auto-matched GT subject — cams=4 res=2px off=6cm
+INFO __main__:   uniandes_basketball_001_27                     W= 470.2mm  PA=  50.3mm  (16j)
+INFO __main__: uniandes_basketball_003_38: auto-matched GT subject — cams=4 res=1px off=5cm
+INFO __main__:   uniandes_basketball_003_38                     W= 571.4mm  PA=  50.7mm  (14j)
+INFO __main__: uniandes_basketball_004_23: auto-matched GT subject — cams=3 res=10px off=15cm (cam04:tie(p11@10 vs p1@11))
+INFO __main__:   uniandes_basketball_004_23                     W= 793.6mm  PA= 224.0mm  (16j)
+INFO __main__: uniandes_basketball_004_44: auto-matched GT subject — cams=4 res=10px off=7cm
+INFO __main__:   uniandes_basketball_004_44                     W= 523.0mm  PA= 104.6mm  (17j)
+INFO __main__: uniandes_basketball_004_45: auto-matched GT subject — cams=4 res=6px off=5cm
+INFO __main__:   uniandes_basketball_004_45                     W= 539.9mm  PA=  83.9mm  (16j)
+WARNING __main__: uniandes_dance_002_11: auto-match could not verify the GT subject (cams=2 res=1px off=37cm dropped cam05; dropped cam03; dropped cam01) — skipping
+WARNING __main__: uniandes_dance_002_2: auto-match could not verify the GT subject (cams=2 res=1px off=38cm cam04:tie(p1@40 vs p4@45); dropped cam05; dropped cam03) — skipping
+INFO __main__: uniandes_dance_008_29: auto-matched GT subject — cams=5 res=6px off=9cm
+INFO __main__:   uniandes_dance_008_29                          W= 109.2mm  PA=  58.8mm  (16j)
+INFO __main__: uniandes_dance_008_30: auto-matched GT subject — cams=5 res=4px off=3cm
+INFO __main__:   uniandes_dance_008_30                          W= 204.9mm  PA=  27.3mm  (17j)
+INFO __main__: uniandes_dance_008_31: auto-matched GT subject — cams=5 res=6px off=3cm
+INFO __main__:   uniandes_dance_008_31                          W= 270.1mm  PA=  42.2mm  (17j)
+INFO __main__: uniandes_dance_008_32: auto-matched GT subject — cams=5 res=7px off=12cm
+INFO __main__:   uniandes_dance_008_32                          W= 148.4mm  PA=  83.7mm  (16j)
+INFO __main__: uniandes_dance_008_33: auto-matched GT subject — cams=5 res=11px off=5cm
+INFO __main__:   uniandes_dance_008_33                          W= 224.5mm  PA=  35.2mm  (17j)
+INFO __main__: uniandes_dance_008_34: auto-matched GT subject — cams=5 res=9px off=5cm
+INFO __main__:   uniandes_dance_008_34                          W= 245.6mm  PA=  53.5mm  (17j)
+INFO __main__: uniandes_dance_008_35: auto-matched GT subject — cams=5 res=8px off=7cm
+INFO __main__:   uniandes_dance_008_35                          W= 247.0mm  PA=  59.4mm  (17j)
+INFO __main__: uniandes_dance_008_36: auto-matched GT subject — cams=5 res=12px off=8cm
+INFO __main__:   uniandes_dance_008_36                          W= 384.8mm  PA=  61.2mm  (17j)
+INFO __main__: uniandes_dance_008_37: auto-matched GT subject — cams=5 res=6px off=4cm
+INFO __main__:   uniandes_dance_008_37                          W= 252.3mm  PA=  48.3mm  (17j)
+INFO __main__: uniandes_dance_008_38: auto-matched GT subject — cams=5 res=8px off=5cm
+INFO __main__:   uniandes_dance_008_38                          W= 240.2mm  PA=  47.3mm  (17j)
+INFO __main__: uniandes_dance_016_10: auto-matched GT subject — cams=5 res=7px off=4cm
+INFO __main__:   uniandes_dance_016_10                          W= 243.5mm  PA=  41.7mm  (17j)
+INFO __main__: uniandes_dance_016_11: auto-matched GT subject — cams=5 res=6px off=4cm
+INFO __main__:   uniandes_dance_016_11                          W= 280.6mm  PA=  35.3mm  (17j)
+INFO __main__: uniandes_dance_016_12: auto-matched GT subject — cams=5 res=6px off=4cm
+INFO __main__:   uniandes_dance_016_12                          W= 399.2mm  PA=  32.9mm  (17j)
+INFO __main__: uniandes_dance_016_13: auto-matched GT subject — cams=5 res=9px off=5cm
+INFO __main__:   uniandes_dance_016_13                          W= 353.6mm  PA=  41.2mm  (17j)
+INFO __main__: uniandes_dance_016_14: auto-matched GT subject — cams=5 res=9px off=5cm
+INFO __main__:   uniandes_dance_016_14                          W= 266.4mm  PA=  40.7mm  (17j)
+INFO __main__: uniandes_dance_016_3: auto-matched GT subject — cams=5 res=7px off=4cm
+INFO __main__:   uniandes_dance_016_3                           W= 245.5mm  PA=  38.1mm  (16j)
+INFO __main__: uniandes_dance_016_30: auto-matched GT subject — cams=5 res=6px off=3cm
+INFO __main__:   uniandes_dance_016_30                          W= 294.0mm  PA=  32.2mm  (17j)
+INFO __main__: uniandes_dance_016_31: auto-matched GT subject — cams=5 res=6px off=3cm
+INFO __main__:   uniandes_dance_016_31                          W= 284.3mm  PA=  44.9mm  (16j)
+INFO __main__: uniandes_dance_016_32: auto-matched GT subject — cams=4 res=4px off=3cm (cam04:tie(p6@8 vs p2@8))
+INFO __main__:   uniandes_dance_016_32                          W= 341.5mm  PA=  33.6mm  (17j)
+INFO __main__: uniandes_dance_016_33: auto-matched GT subject — cams=5 res=6px off=4cm
+INFO __main__:   uniandes_dance_016_33                          W= 307.6mm  PA=  37.1mm  (17j)
+INFO __main__: uniandes_dance_016_36: auto-matched GT subject — cams=5 res=4px off=5cm
+INFO __main__:   uniandes_dance_016_36                          W= 333.0mm  PA=  49.2mm  (17j)
+INFO __main__: uniandes_dance_016_37: auto-matched GT subject — cams=5 res=3px off=4cm
+INFO __main__:   uniandes_dance_016_37                          W= 309.2mm  PA=  46.0mm  (17j)
+INFO __main__: uniandes_dance_016_38: auto-matched GT subject — cams=5 res=8px off=4cm
+INFO __main__:   uniandes_dance_016_38                          W= 429.4mm  PA=  35.4mm  (16j)
+INFO __main__: uniandes_dance_016_39: auto-matched GT subject — cams=5 res=11px off=4cm
+INFO __main__:   uniandes_dance_016_39                          W= 253.9mm  PA=  30.2mm  (17j)
+INFO __main__: uniandes_dance_016_42: auto-matched GT subject — cams=4 res=4px off=6cm (dropped cam05)
+INFO __main__:   uniandes_dance_016_42                          W= 303.4mm  PA=  49.8mm  (16j)
+INFO __main__: uniandes_dance_016_43: auto-matched GT subject — cams=5 res=8px off=4cm
+INFO __main__:   uniandes_dance_016_43                          W= 288.8mm  PA=  41.3mm  (17j)
+INFO __main__: uniandes_dance_016_44: auto-matched GT subject — cams=5 res=6px off=5cm
+INFO __main__:   uniandes_dance_016_44                          W= 294.0mm  PA=  47.3mm  (17j)
+INFO __main__: uniandes_dance_016_45: auto-matched GT subject — cams=5 res=10px off=5cm
+INFO __main__:   uniandes_dance_016_45                          W= 338.3mm  PA=  42.9mm  (17j)
+INFO __main__: uniandes_dance_016_6: auto-matched GT subject — cams=5 res=4px off=4cm
+INFO __main__:   uniandes_dance_016_6                           W= 286.4mm  PA=  33.9mm  (16j)
+INFO __main__: uniandes_dance_016_7: auto-matched GT subject — cams=5 res=6px off=11cm
+INFO __main__:   uniandes_dance_016_7                           W= 180.9mm  PA=  69.8mm  (17j)
+INFO __main__: uniandes_dance_016_8: auto-matched GT subject — cams=5 res=10px off=5cm
+INFO __main__:   uniandes_dance_016_8                           W= 316.6mm  PA=  42.3mm  (17j)
+INFO __main__: uniandes_dance_017_6: auto-matched GT subject — cams=5 res=3px off=4cm
+INFO __main__:   uniandes_dance_017_6                           W= 271.4mm  PA=  42.7mm  (17j)
+INFO __main__: uniandes_dance_019_17: auto-matched GT subject — cams=4 res=1px off=3cm (cam05:tie(p4@23 vs p1@33))
+INFO __main__:   uniandes_dance_019_17                          W= 227.5mm  PA=  31.7mm  (16j)
+INFO __main__: uniandes_dance_019_18: auto-matched GT subject — cams=5 res=6px off=3cm
+INFO __main__:   uniandes_dance_019_18                          W= 276.3mm  PA=  32.3mm  (17j)
+INFO __main__: uniandes_dance_019_19: auto-matched GT subject — cams=2 res=3px off=19cm (cam04:tie(p7@28 vs p4@32); dropped cam03; dropped cam05)
+INFO __main__:   uniandes_dance_019_19                          W= 228.2mm  PA=  75.9mm  (17j)
+INFO __main__: uniandes_dance_019_20: auto-matched GT subject — cams=5 res=4px off=4cm
+INFO __main__:   uniandes_dance_019_20                          W= 244.8mm  PA=  36.2mm  (17j)
+INFO __main__: uniandes_dance_019_22: auto-matched GT subject — cams=5 res=2px off=3cm
+INFO __main__:   uniandes_dance_019_22                          W= 302.0mm  PA=  33.6mm  (17j)
+INFO __main__: uniandes_dance_019_24: auto-matched GT subject — cams=5 res=3px off=3cm
+INFO __main__:   uniandes_dance_019_24                          W= 331.7mm  PA=  32.4mm  (17j)
+INFO __main__: uniandes_dance_019_25: auto-matched GT subject — cams=5 res=3px off=3cm
+INFO __main__:   uniandes_dance_019_25                          W= 435.4mm  PA=  32.8mm  (17j)
+INFO __main__: uniandes_dance_019_26: auto-matched GT subject — cams=5 res=4px off=4cm
+INFO __main__:   uniandes_dance_019_26                          W= 270.8mm  PA=  38.6mm  (17j)
+INFO __main__: uniandes_dance_019_27: auto-matched GT subject — cams=5 res=3px off=3cm
+INFO __main__:   uniandes_dance_019_27                          W= 419.3mm  PA=  32.2mm  (17j)
+INFO __main__: uniandes_dance_019_28: auto-matched GT subject — cams=5 res=3px off=3cm
+INFO __main__:   uniandes_dance_019_28                          W= 306.4mm  PA=  35.2mm  (17j)
+INFO __main__: uniandes_dance_019_46: auto-matched GT subject — cams=5 res=4px off=3cm
+INFO __main__:   uniandes_dance_019_46                          W= 213.8mm  PA=  37.6mm  (17j)
+INFO __main__: uniandes_dance_019_47: auto-matched GT subject — cams=5 res=7px off=4cm
+INFO __main__:   uniandes_dance_019_47                          W= 276.9mm  PA=  28.8mm  (16j)
+INFO __main__: uniandes_dance_019_49: auto-matched GT subject — cams=5 res=5px off=4cm
+INFO __main__:   uniandes_dance_019_49                          W= 291.2mm  PA=  34.6mm  (17j)
+INFO __main__: uniandes_dance_019_51: auto-matched GT subject — cams=5 res=5px off=4cm
+INFO __main__:   uniandes_dance_019_51                          W= 287.9mm  PA=  43.0mm  (17j)
+INFO __main__: uniandes_dance_019_52: auto-matched GT subject — cams=4 res=5px off=5cm (cam04:tie(p3@7 vs p1@7))
+INFO __main__:   uniandes_dance_019_52                          W= 245.6mm  PA=  48.0mm  (17j)
+INFO __main__: uniandes_dance_019_54: auto-matched GT subject — cams=4 res=5px off=4cm (cam03:tie(p1@6 vs p8@8))
+INFO __main__:   uniandes_dance_019_54                          W= 243.7mm  PA=  36.5mm  (17j)
+INFO __main__: uniandes_dance_019_55: auto-matched GT subject — cams=4 res=6px off=5cm (cam04:tie(p1@9 vs p7@13))
+INFO __main__:   uniandes_dance_019_55                          W= 242.1mm  PA=  54.1mm  (16j)
+INFO __main__: uniandes_dance_019_56: auto-matched GT subject — cams=4 res=6px off=7cm (cam04:tie(p1@10 vs p6@15))
+INFO __main__:   uniandes_dance_019_56                          W= 184.9mm  PA=  57.5mm  (17j)
+INFO __main__: uniandes_dance_019_57: auto-matched GT subject — cams=4 res=2px off=4cm (dropped cam05)
+INFO __main__:   uniandes_dance_019_57                          W= 260.4mm  PA=  38.3mm  (17j)
+INFO __main__: uniandes_dance_019_58: auto-matched GT subject — cams=2 res=1px off=4cm (cam04:tie(p4@9 vs p7@12); dropped cam05; dropped cam03)
+INFO __main__:   uniandes_dance_019_58                          W=  66.5mm  PA=  39.1mm  (17j)
+INFO __main__: uniandes_dance_024_11: auto-matched GT subject — cams=5 res=6px off=3cm
+INFO __main__:   uniandes_dance_024_11                          W= 333.5mm  PA=  33.8mm  (17j)
+INFO __main__: uniandes_dance_024_12: auto-matched GT subject — cams=5 res=3px off=3cm
+INFO __main__:   uniandes_dance_024_12                          W= 397.4mm  PA=  40.2mm  (17j)
+INFO __main__: uniandes_dance_024_13: auto-matched GT subject — cams=5 res=7px off=5cm
+INFO __main__:   uniandes_dance_024_13                          W= 346.8mm  PA=  46.2mm  (16j)
+INFO __main__: uniandes_dance_024_14: auto-matched GT subject — cams=5 res=7px off=4cm
+INFO __main__:   uniandes_dance_024_14                          W= 326.4mm  PA=  44.1mm  (14j)
+INFO __main__: uniandes_dance_024_15: auto-matched GT subject — cams=5 res=4px off=4cm
+INFO __main__:   uniandes_dance_024_15                          W= 419.6mm  PA=  38.6mm  (17j)
+INFO __main__: uniandes_dance_024_16: auto-matched GT subject — cams=5 res=9px off=5cm
+INFO __main__:   uniandes_dance_024_16                          W= 372.1mm  PA=  50.0mm  (17j)
+INFO __main__: uniandes_dance_024_17: auto-matched GT subject — cams=5 res=7px off=6cm
+INFO __main__:   uniandes_dance_024_17                          W= 341.8mm  PA=  44.0mm  (17j)
+INFO __main__: uniandes_dance_024_45: auto-matched GT subject — cams=5 res=8px off=4cm
+INFO __main__:   uniandes_dance_024_45                          W= 299.0mm  PA=  44.2mm  (17j)
+INFO __main__: uniandes_dance_024_47: auto-matched GT subject — cams=5 res=7px off=4cm
+INFO __main__:   uniandes_dance_024_47                          W= 273.7mm  PA=  33.1mm  (17j)
+INFO __main__: uniandes_dance_024_48: auto-matched GT subject — cams=4 res=10px off=12cm (dropped cam05)
+INFO __main__:   uniandes_dance_024_48                          W= 229.6mm  PA=  83.1mm  (17j)
+INFO __main__: uniandes_dance_024_49: auto-matched GT subject — cams=5 res=7px off=11cm
+INFO __main__:   uniandes_dance_024_49                          W= 165.1mm  PA=  94.3mm  (17j)
+INFO __main__: upenn_0706_Dance_4_2: auto-matched GT subject — cams=5 res=6px off=4cm
+INFO __main__:   upenn_0706_Dance_4_2                           W= 260.6mm  PA=  42.6mm  (17j)
+INFO __main__: upenn_0706_Dance_4_3: auto-matched GT subject — cams=5 res=4px off=3cm
+INFO __main__:   upenn_0706_Dance_4_3                           W= 262.7mm  PA=  32.7mm  (17j)
+INFO __main__: upenn_0706_Dance_4_4: auto-matched GT subject — cams=5 res=3px off=3cm
+INFO __main__:   upenn_0706_Dance_4_4                           W= 251.3mm  PA=  36.9mm  (16j)
+INFO __main__: upenn_0706_Dance_4_5: auto-matched GT subject — cams=5 res=4px off=3cm
+INFO __main__:   upenn_0706_Dance_4_5                           W= 303.9mm  PA=  33.8mm  (17j)
+INFO __main__: upenn_0713_Dance_3_2: auto-matched GT subject — cams=5 res=2px off=3cm
+INFO __main__:   upenn_0713_Dance_3_2                           W= 348.2mm  PA=  33.2mm  (17j)
+INFO __main__: upenn_0713_Dance_3_3: auto-matched GT subject — cams=5 res=2px off=4cm
+INFO __main__:   upenn_0713_Dance_3_3                           W= 382.2mm  PA=  42.9mm  (16j)
+INFO __main__: upenn_0713_Dance_3_4: auto-matched GT subject — cams=5 res=3px off=2cm
+INFO __main__:   upenn_0713_Dance_3_4                           W= 461.1mm  PA=  31.8mm  (17j)
+INFO __main__: upenn_0713_Dance_3_5: auto-matched GT subject — cams=5 res=3px off=5cm
+INFO __main__:   upenn_0713_Dance_3_5                           W= 342.5mm  PA=  51.8mm  (17j)
+INFO __main__: upenn_0713_Dance_4_2: auto-matched GT subject — cams=5 res=3px off=3cm
+INFO __main__:   upenn_0713_Dance_4_2                           W= 516.5mm  PA=  43.7mm  (17j)
+INFO __main__: upenn_0713_Dance_4_3: auto-matched GT subject — cams=5 res=5px off=3cm
+INFO __main__:   upenn_0713_Dance_4_3                           W= 586.7mm  PA=  41.5mm  (15j)
+INFO __main__: upenn_0713_Dance_4_4: auto-matched GT subject — cams=5 res=2px off=3cm
+INFO __main__:   upenn_0713_Dance_4_4                           W= 368.7mm  PA=  38.9mm  (17j)
+INFO __main__: upenn_0713_Dance_4_5: auto-matched GT subject — cams=5 res=2px off=3cm
+INFO __main__:   upenn_0713_Dance_4_5                           W= 340.4mm  PA=  37.5mm  (17j)
+INFO __main__: upenn_0713_Dance_5_4: auto-matched GT subject — cams=5 res=3px off=3cm
+INFO __main__:   upenn_0713_Dance_5_4                           W= 333.6mm  PA=  28.6mm  (17j)
+INFO __main__: upenn_0713_Dance_5_6: auto-matched GT subject — cams=5 res=3px off=4cm
+INFO __main__:   upenn_0713_Dance_5_6                           W= 377.2mm  PA=  40.1mm  (16j)
+INFO __main__: upenn_0721_Piano_1_2: auto-matched GT subject — cams=5 res=4px off=2cm
+INFO __main__:   upenn_0721_Piano_1_2                           W= 166.4mm  PA=  31.5mm  (15j)
+INFO __main__: upenn_0721_Piano_1_3: auto-matched GT subject — cams=5 res=3px off=4cm
+INFO __main__:   upenn_0721_Piano_1_3                           W= 153.7mm  PA=  43.8mm  (15j)
+INFO __main__: upenn_0722_Piano_1_2: auto-matched GT subject — cams=5 res=4px off=4cm
+INFO __main__:   upenn_0722_Piano_1_2                           W= 169.7mm  PA=  44.5mm  (13j)
+INFO __main__: upenn_0727_Partner_Dance_3_1_2: auto-matched GT subject — cams=4 res=3px off=4cm (gp03:tie(p4@9 vs p2@9))
+INFO __main__:   upenn_0727_Partner_Dance_3_1_2                 W= 371.5mm  PA=  38.3mm  (17j)
+INFO __main__: utokyo_pcr_2001_29_2: auto-matched GT subject — cams=4 res=11px off=5cm
+INFO __main__:   utokyo_pcr_2001_29_2                           W= 119.2mm  PA=  55.6mm  (12j)
+INFO __main__: utokyo_pcr_2001_29_4: auto-matched GT subject — cams=4 res=8px off=7cm
+INFO __main__:   utokyo_pcr_2001_29_4                           W= 150.7mm  PA=  63.9mm  (15j)
+INFO __main__: utokyo_pcr_2001_29_6: auto-matched GT subject — cams=4 res=9px off=11cm
+INFO __main__:   utokyo_pcr_2001_29_6                           W= 115.7mm  PA=  56.1mm  (14j)
+INFO __main__: utokyo_pcr_2001_30_2: auto-matched GT subject — cams=4 res=9px off=8cm
+INFO __main__:   utokyo_pcr_2001_30_2                           W= 137.2mm  PA=  74.3mm  (15j)
+INFO __main__: utokyo_pcr_2001_30_4: auto-matched GT subject — cams=4 res=9px off=5cm
+INFO __main__:   utokyo_pcr_2001_30_4                           W= 146.4mm  PA=  47.6mm  (16j)
+INFO __main__: utokyo_pcr_2001_32_2: auto-matched GT subject — cams=2 res=1px off=5cm (dropped cam04; dropped cam02)
+INFO __main__:   utokyo_pcr_2001_32_2                           W= 168.5mm  PA=  30.7mm  (11j)
+INFO __main__: utokyo_pcr_2001_32_4: auto-matched GT subject — cams=3 res=7px off=6cm (dropped cam01)
+INFO __main__:   utokyo_pcr_2001_32_4                           W= 158.6mm  PA=  38.2mm  (11j)
+INFO __main__: utokyo_soccer_8000_43_2: auto-matched GT subject — cams=5 res=4px off=5cm
+INFO __main__:   utokyo_soccer_8000_43_2                        W= 384.1mm  PA=  57.2mm  (15j)
+INFO __main__: utokyo_soccer_8000_43_4: auto-matched GT subject — cams=5 res=4px off=5cm
+INFO __main__:   utokyo_soccer_8000_43_4                        W= 270.4mm  PA=  52.2mm  (16j)
+INFO __main__: utokyo_soccer_8000_43_6: auto-matched GT subject — cams=5 res=2px off=6cm
+INFO __main__:   utokyo_soccer_8000_43_6                        W= 214.7mm  PA=  54.4mm  (17j)
+
+============================================================
+EgoExo4D evaluation — GEODESIC-MEDIAN FUSION — 179 body-GT scenes  [scale=baseline]
+  Skipped (hand-only GT): 3
+  Skipped (missing files): 0
+------------------------------------------------------------
+  ALL evaluated scenes  (n=179)
+    W-MPJPE†   MEAN:   286.2 mm      (median  245.6)
+    PA-MPJPE   MEAN:    50.6 mm      (median   44.9)
+
+  EXCLUDING broken GT/calibration  (n=179)
+    W-MPJPE†   MEAN:   286.2 mm      (median  245.6)
+    PA-MPJPE   MEAN:    50.6 mm      (median   44.9)
+  (excluded takes not present in results: ['cmu_soccer16_2', 'uniandes_dance_002_2', 'uniandes_dance_002_11'])
+------------------------------------------------------------
+  PA-MPJPE per joint (mean over scenes, EXCLUDING broken GT/calibration):
+    left-hip          115.1 mm  (n=168)
+    right-hip         113.5 mm  (n=172)
+    right-wrist        52.2 mm  (n=177)
+    left-wrist         48.2 mm  (n=174)
+    left-shoulder      45.7 mm  (n=178)
+    left-ear           41.9 mm  (n=139)
+    right-knee         41.7 mm  (n=153)
+    right-ear          41.7 mm  (n=166)
+    right-shoulder     41.5 mm  (n=177)
+    left-knee          40.6 mm  (n=157)
+    nose               40.4 mm  (n=170)
+    right-elbow        39.4 mm  (n=178)
+    left-ankle         39.0 mm  (n=148)
+    left-elbow         38.2 mm  (n=177)
+    right-ankle        38.0 mm  (n=149)
+    left-eye           37.3 mm  (n=162)
+    right-eye          37.1 mm  (n=171)
+============================================================
+
+CHROMM reference (Table 2):
+  W-MPJPE†:  260 mm
+  PA-MPJPE:   60 mm
+
+HSfM reference:
+  W-MPJPE:   500 mm

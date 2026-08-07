@@ -271,40 +271,29 @@ class BodyPlacer:
     # Public API
     # ------------------------------------------------------------------
 
-    _SCALE_MODE_FILES = {
-        "centered": "mapanything_scale_centered.npy",
-        "baseline": "mapanything_scale_baseline.npy",
-    }
-
     def load_mapanything_scale(
         self,
         filename: str = "mapanything_scale_baseline.npy",
-        scale_mode: str | None = None,
-        smooth: str = "none",
     ) -> np.ndarray | None:
         """Load per-frame scale from MapAnything preprocessing output, if available.
 
-        ``scale_mode`` (preferred) selects the estimator output by name:
-        ``"centered"`` = legacy conditioned depth-ratio scale, ``"baseline"`` =
-        images-only camera-baseline scale (unbiased on wide-FOV rigs). When
-        given it overrides ``filename``. ``filename`` is kept for direct callers.
+        ``mapanything_scale_baseline.npy`` (images-only camera-baseline ratio,
+        unbiased on wide-FOV rigs) is the only scale source this pipeline uses.
+        The legacy conditioned depth-ratio scale ("centered") is still produced
+        by preprocessing (``mapanything_scale_centered.npy`` is also a completion
+        marker for several pipeline drivers) but is no longer a selectable scale
+        source here — removed 2026-08-04, no live caller used it.
 
-        ``smooth`` denoises the per-frame estimate. VGGT is run per-frame, so
-        each frame is an independent reconstruction with its own arbitrary scale;
-        the scene's *physical* metric scale is constant, so per-frame variation is
-        estimation noise. ``"median"`` collapses to one robust scalar per scene
-        (kills the frame-to-frame jitter that inflates world-aligned metrics).
-        ``"none"`` (default) keeps the raw per-frame array unchanged.
+        Always returns one robust scalar per scene (median of the positive
+        per-frame values, broadcast to ``(T,)``). VGGT is run per-frame, so each
+        frame is an independent reconstruction with its own arbitrary scale; the
+        scene's *physical* metric scale is constant, so per-frame variation is
+        pure estimation noise, not signal. There is no valid reason to skip this,
+        so unlike everything else in this class it is not configurable — see
+        [[scale-smoothing-confound]]: an un-smoothed run cost a wasted 1h job and
+        a wrong RICH comparison before this was made unconditional (2026-08-04).
         Returns ``(T,)`` float32 or None when the file is absent or mismatched.
         """
-        if scale_mode is not None:
-            try:
-                filename = self._SCALE_MODE_FILES[scale_mode]
-            except KeyError:
-                raise ValueError(
-                    f"unknown scale_mode {scale_mode!r}; "
-                    f"choose from {list(self._SCALE_MODE_FILES)}"
-                )
         path = self.scene_dir / filename
         if not path.exists():
             return None
@@ -315,12 +304,9 @@ class BodyPlacer:
                 f"mapanything_scale.npy has shape {scale.shape}, expected ({self.T},) — ignoring"
             )
             return None
-        if smooth == "median":
-            valid = scale[scale > 0]
-            if valid.size:
-                scale = np.full_like(scale, float(np.median(valid)))
-        elif smooth != "none":
-            raise ValueError(f"unknown smooth {smooth!r}; choose 'none' or 'median'")
+        valid = scale[scale > 0]
+        if valid.size:
+            scale = np.full_like(scale, float(np.median(valid)))
         return scale
 
     def estimate_scale_triangulated(

@@ -151,11 +151,41 @@ def _parse_args():
         "--resume", action="store_true",
         help="Resume from the last checkpoint in CONFIG.fusion.checkpoint_dir.",
     )
+    # R0/R1/R2 overrides. Each defaults to None = "take the config value", so the
+    # config carries the R2 setting and the earlier runs switch pieces off.
+    parser.add_argument(
+        "--kintree_k", type=int, default=None,
+        help="CHANGE 2 hop radius for the joint-attention kintree mask. "
+             "Negative disables the mask (R0/R1). Omit to use the config value.",
+    )
+    parser.add_argument(
+        "--joint_body_only", type=int, choices=(0, 1), default=None,
+        help="CHANGE 1: restrict JointPositionLoss to root + 21 body joints. "
+             "0 for the R0 baseline. Omit to use the config value.",
+    )
+    parser.add_argument(
+        "--pose_hand_weight", type=float, default=None,
+        help="CHANGE 1: per-joint hand weight inside PoseMSELoss. "
+             "1.0 for the R0 baseline. Omit to use the config value.",
+    )
+    parser.add_argument(
+        "--run_tag", default=None,
+        help="Label printed at the top of the log (e.g. R0/R1/R2).",
+    )
+    parser.add_argument(
+        "--checkpoint_dir", default=None,
+        help="Override CONFIG.fusion.checkpoint_dir so R0/R1/R2 never share a "
+             "directory. Omit to use the config value.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
+
+    # Applied before anything reads it (resume path, wandb, trainer).
+    if args.checkpoint_dir:
+        CONFIG.fusion.checkpoint_dir = args.checkpoint_dir
 
     use_ddp    = "LOCAL_RANK" in os.environ
     local_rank = 0
@@ -233,6 +263,34 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False) if val_ds else None
 
     # ── Model ─────────────────────────────────────────────────────────────────
+    # ── R0 / R1 / R2 flags ────────────────────────────────────────────────────
+    # Config holds the R2 values; the CLI overrides them so all three runs come
+    # from one codebase. Resolved here and logged below so every run's log states
+    # exactly which changes were active.
+    kintree_mask_k = getattr(CONFIG.fusion.architecture, "kintree_mask_k", None)
+    if args.kintree_k is not None:
+        kintree_mask_k = None if args.kintree_k < 0 else args.kintree_k
+    joint_body_only = getattr(CONFIG.fusion.loss, "joint_position_body_only", False)
+    if args.joint_body_only is not None:
+        joint_body_only = bool(args.joint_body_only)
+    pose_hand_weight = getattr(CONFIG.fusion.loss, "pose_hand_weight", 1.0)
+    if args.pose_hand_weight is not None:
+        pose_hand_weight = args.pose_hand_weight
+    pose_body_weight = getattr(CONFIG.fusion.loss, "pose_body_weight", 1.0)
+    pose_face_weight = getattr(CONFIG.fusion.loss, "pose_face_weight", 1.0)
+
+    if is_main:
+        logger.info("=" * 72)
+        logger.info(f"RUN CONFIG          : {args.run_tag or '(untagged)'}")
+        logger.info(f"  CHANGE 1 L_joint body_only : {joint_body_only}")
+        logger.info(f"  CHANGE 1 L_pose weights    : body={pose_body_weight} "
+                    f"hands={pose_hand_weight} face={pose_face_weight}")
+        logger.info(f"  CHANGE 2 kintree_mask_k    : {kintree_mask_k}")
+        logger.info(f"  joint confidence bias      : "
+                    f"{getattr(CONFIG.fusion, 'use_joint_confidence', False)}")
+        logger.info(f"  checkpoint_dir             : {CONFIG.fusion.checkpoint_dir}")
+        logger.info("=" * 72)
+
     pose_module = PoseFusionModule(
         embedding_dim=embedding_dim,
         num_heads=num_heads,
@@ -240,6 +298,7 @@ def main():
         max_temporal_len=max_T,
         dropout=dropout,
         temporal_window=temporal_window,
+        kintree_mask_k=kintree_mask_k,
     )
     model = pose_module.to(device)
 
@@ -271,16 +330,24 @@ def main():
     # ── Losses ────────────────────────────────────────────────────────────────
     # JointPositionLoss uses GT betas for FK to keep pose gradients clean.
     losses = {
-        "pose":           (PoseMSELoss(),          pose_mse_weight),
-        "joint_position": (JointPositionLoss(),    joint_position_weight),
+        "pose":           (PoseMSELoss(body_weight=pose_body_weight,
+                                        hand_weight=pose_hand_weight,
+                                        face_weight=pose_face_weight),
+                                                   pose_mse_weight),
+        "joint_position": (JointPositionLoss(body_only=joint_body_only),
+                                                   joint_position_weight),
         "vposer":         (VPoserLoss(),           vposer_weight),
         "temporal":       (TemporalSmoothnessLoss(), temporal_weight),
     }
 
     # ── Curriculum ────────────────────────────────────────────────────────────
+    # vposer/temporal deliberately absent: the fusion module that produced our good
+    # numbers trained without either. VPoser also dominated the objective here —
+    # its raw value (~28) x 0.001 was ~75% of the total loss, vs 14% for
+    # joint_position — so leaving it in makes any regression unattributable
+    # between the data fixes and the changed objective.
     curriculum_schedule = {
         0: ["pose", "joint_position"],
-        50: ["vposer", "temporal"],
     }
 
     # ── Metrics ───────────────────────────────────────────────────────────────
@@ -380,6 +447,18 @@ def main():
         train_sampler=train_sampler,
         device=device,
         resume_checkpoint=resume_checkpoint,
+        model_config={
+            "embedding_dim":    embedding_dim,
+            "num_heads":        num_heads,
+            "num_layers":       num_layers,
+            "max_temporal_len": max_T,
+            "temporal_window":  temporal_window,
+            "num_joints":       pose_module.num_joints,
+            # The kintree mask is a non-persistent buffer, so it never lands in
+            # state_dict. Without this entry a checkpoint cannot be reconstructed
+            # faithfully — every loader would silently rebuild an UNMASKED model.
+            "kintree_mask_k":   kintree_mask_k,
+        },
     )
 
     try:

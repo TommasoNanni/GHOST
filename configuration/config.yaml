@@ -1,6 +1,9 @@
 data:
   egoexo_data_root: null
-  rich_data_root: "/capstor/scratch/cscs/tnanni/datasets/rich/centered_train"
+  # centered_train exists only as centered_train.sqsh; capstor is Lustre and refuses
+  # a FUSE mount over it, so jobs mount the archive node-locally at this path
+  # (see bash_jobs/rich_pipeline_v3.sh). Valid only inside a job that mounted it.
+  rich_data_root: "/tmp/centered_train"
   rich_gt_dir: "/capstor/scratch/cscs/tnanni/datasets/rich"
   egohumans_data_root: "/capstor/scratch/cscs/tnanni/datasets/egohumans"
   rich_max_side: 1440  # resize RICH frames so longest side <= this before SAM3; null to skip
@@ -45,10 +48,14 @@ synchronization:
   enabled: false  # Set true to run temporal sync before camera alignment (uses random-shift evaluation)
 
 fusion:
-  checkpoint_dir: "checkpoints/fusion_module"
+  # New run: the old checkpoint (checkpoints/fusion_module/best.pt, backed up in
+  # checkpoints/fusion_module_paper_backup) was trained on MISALIGNED confidence.
+  checkpoint_dir: "checkpoints/fusion_r0"
   use_wandb: true
-  # Feed per-joint confidence to the fusion attention. Off: evaluation never
-  # feeds it, and enabling it hurts (RICH PA 31.4 vs 30.4 mm).
+  # Feed per-joint confidence to the fusion attention, correctly ordered
+  # (data/fusion_dataset.py remaps canonical SMPL-X -> packed-pose layout).
+  # OFF for the R0/R1/R2 comparison: the confidence bias is a third variable and
+  # would make the two changes under test unattributable.
   use_joint_confidence: false
   architecture:
     embedding_dimension: 128
@@ -58,12 +65,32 @@ fusion:
     num_layers: 4
     dropout: 0.1
     max_cameras: 64
+    # CHANGE 2 — kinematic-tree hard mask on the joint-attention axis: a joint
+    # may attend only to joints within k edges of it in the SMPL-X tree (the
+    # diagonal is always open). null disables it, which is bit-identical to the
+    # pre-change model. k=2 keeps ~10.6% of pairs.
+    # R0/R1 override this to null on the command line; R2 uses it as-is.
+    kintree_mask_k: 2
+    # ── v3 only (fusion/fusion_module_v3.py) — ignored by v2 ──────────────────
+    # The module predicts a CORRECTION to the visibility-weighted chordal mean of
+    # the per-camera estimates instead of the pose itself, and its tokens carry
+    # each camera's DEVIATION from that mean instead of its absolute rotation.
+    # Parameter shapes are unchanged, so a v3 checkpoint loaded with these flags
+    # wrong produces silent garbage rather than an error — they are persisted in
+    # model_config and restored by every loader.
+    residual_head: true
+    centered_input: true
+    # LR multiplier for the zero-initialised output layer. Zero weights mean the
+    # transformer body receives gradients scaled by ||W||, which starts at 0 and
+    # grows at ~lr/step; a larger LR on this one layer removes that warm-up ramp.
+    # 1.0 disables the boost.
+    head_lr_mult: 10.0
   loss:
     VPoser_path: "checkpoints/V02_05/"
     pose_mse_weight: 0.05
     shape_mse_weight: 0.1
     epipolar_weight: 10.0
-    temporal_weight: 0.1
+    temporal_weight: 0.0   # off: not used by the fusion module that trained well
     bone_length_weight: 0.01
     camera_rotation_mse_weight: 10.0
     camera_translation_mse_weight: 1.0
@@ -72,8 +99,19 @@ fusion:
     translation_mse_weight: 1.0
     shape_reg_weight: 1.0
     translation_temporal_weight: 0.1
-    vposer_weight: 0.001
+    vposer_weight: 0.0     # off: was ~75% of total loss, never part of the good run
     joint_position_weight: 1.0
+    # CHANGE 1 — rebalance the objective.
+    # ~70% of L_joint's magnitude came from the 30 hand joints (FK makes a joint's
+    # weight scale with its descendant count) while the trunk got ~2%, and no
+    # evaluation metric looks at fingers. So restrict L_joint to root + the 21
+    # body joints, and keep hand supervision in L_pose, which weights joints
+    # equally. Weights are mean-normalised, so lambda_pose stays 0.05.
+    # R0 overrides these to false / 1.0 on the command line.
+    joint_position_body_only: true
+    pose_hand_weight: 3.0
+    pose_body_weight: 1.0
+    pose_face_weight: 1.0
   training:
     max_epochs: 400
     lr: 0.0001

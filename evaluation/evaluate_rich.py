@@ -92,12 +92,10 @@ _USE_JOINT_CONF = False
 # on, the two layouts describe different joints: every hand slot is offset by 3, packed
 # left-hand joints 0-2 receive jaw/eye confidence (which is ~0 always, since those joints sit
 # inside the head mesh and the z-buffer marks them self-occluded), and the three zero-padding
-# slots collect real right-hand values. Root and all 21 body joints ARE aligned, so the
-# body-only metrics are unaffected; hands leak in only as attention keys.
-# The same misalignment is present in data/fusion_dataset.py:669-674, so the model was
-# TRAINED this way — enabling the fix at inference is therefore a mild distribution shift,
-# not a strict correction. Set by --fix_conf_alignment; only meaningful with --joint_conf.
-_FIX_CONF_ALIGNMENT = False
+# slots collect real right-hand values. Root and all 21 body joints ARE aligned.
+# The remap below is UNCONDITIONAL: there is no case where feeding misaligned confidence
+# is correct. Whether confidence is fed at all stays optional (--joint_conf), and
+# data/fusion_dataset.py applies the same remap, so training and evaluation agree.
 
 
 def _remap_conf_to_packed(conf: np.ndarray) -> np.ndarray:
@@ -623,8 +621,7 @@ def build_fusion_tensors(
             # Per-joint confidence (SAM3D occlusion estimate), (n_frames, 55).
             jconf = pdata.get("pred_joint_confidence")
             if jconf is not None and jconf.ndim == 2 and jconf.shape[1] >= num_joints:
-                if _FIX_CONF_ALIGNMENT:
-                    jconf = _remap_conf_to_packed(jconf[:, :num_joints])
+                jconf = _remap_conf_to_packed(jconf[:, :num_joints])
                 jconf = jconf[:, 1:num_joints]          # drop root, (n_frames, 54)
             else:
                 jconf = None
@@ -669,13 +666,48 @@ def load_fusion_model(checkpoint: Path, device: torch.device) -> PoseFusionModul
     n_layers = sum(1 for k in state if k.startswith("layers.") and k.endswith(".ff.norm.weight"))
     max_tlen = state["temporal_pe.pe"].shape[0]
 
-    model = PoseFusionModule(
-        embedding_dim=emb_dim, num_layers=n_layers,
-        num_joints=n_joints, max_temporal_len=max_tlen,
-    ).to(device)
+    # num_heads and temporal_window change no parameter shape, so they cannot be
+    # read off the state dict and load_state_dict(strict=True) cannot catch a
+    # mismatch — a wrong value silently alters the attention masking. Trainer
+    # persists them under "model_config"; checkpoints written before that fall
+    # back to the constructor defaults, which is what they were trained with.
+    cfg = ckpt.get("model_config") or {}
+    num_heads       = cfg.get("num_heads", 8)
+    temporal_window = cfg.get("temporal_window", 128)
+    # kintree_bias is a non-persistent buffer: absent from state_dict, invisible
+    # to strict=True. Only model_config knows whether the model was masked.
+    kintree_mask_k  = cfg.get("kintree_mask_k")
+
+    # v3 (fusion/fusion_module_v3.py) has EXACTLY v2's parameter shapes — its
+    # flags only change what those weights mean — so a v3 checkpoint loads into
+    # the v2 class without any error and silently produces garbage. The presence
+    # of the v3 keys in model_config is the only way to tell them apart.
+    is_v3 = "residual_head" in cfg or "centered_input" in cfg
+    if is_v3:
+        from fusion.fusion_module_v3 import PoseFusionModuleV3
+        model = PoseFusionModuleV3(
+            embedding_dim=emb_dim, num_layers=n_layers,
+            num_joints=n_joints, max_temporal_len=max_tlen,
+            num_heads=num_heads, temporal_window=temporal_window,
+            kintree_mask_k=kintree_mask_k,
+            residual_head=cfg.get("residual_head", True),
+            centered_input=cfg.get("centered_input", True),
+        ).to(device)
+    else:
+        model = PoseFusionModule(
+            embedding_dim=emb_dim, num_layers=n_layers,
+            num_joints=n_joints, max_temporal_len=max_tlen,
+            num_heads=num_heads, temporal_window=temporal_window,
+            kintree_mask_k=kintree_mask_k,
+        ).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
-    logger.info(f"Loaded checkpoint: emb={emb_dim} layers={n_layers} joints={n_joints}")
+    logger.info(
+        f"Loaded checkpoint: {'V3-residual' if is_v3 else 'V2-direct'} "
+        f"emb={emb_dim} layers={n_layers} joints={n_joints} "
+        f"heads={num_heads} twin={temporal_window} kintree_k={kintree_mask_k}"
+        f"{'' if cfg else '  (no model_config in ckpt -> defaults)'}"
+    )
     return model
 
 
@@ -692,8 +724,6 @@ def evaluate_scene(
     smplx_model_path: Path,
     gt_split:         str = "test",
     exclude_cameras:  list[str] | None = None,
-    scale_mode:       str = "baseline",
-    scale_smooth:     str = "none",
     centered_root:    Path | None = None,
 ) -> dict[str, float] | None:
     """Run full inference + evaluation for one scene. Returns metric dict or None."""
@@ -801,9 +831,9 @@ def evaluate_scene(
                 if pid in sam3d_betas_by_pid:
                     sam3d_betas_map[bf] = sam3d_betas_by_pid[pid]
 
-        pred_scale_pf = placer.load_mapanything_scale(scale_mode=scale_mode, smooth=scale_smooth)
+        pred_scale_pf = placer.load_mapanything_scale()
         if pred_scale_pf is not None:
-            logger.info(f"  [scale] using MapAnything ({scale_mode}, smooth={scale_smooth})  median={float(np.median(pred_scale_pf)):.4f}")
+            logger.info(f"  [scale] using MapAnything (baseline, always median-smoothed)  median={float(np.median(pred_scale_pf)):.4f}")
         else:
             pred_scale_pf = placer.estimate_scale_triangulated(
                 fused_pose_by_pid=fused_pose_by_pid,
@@ -912,7 +942,7 @@ def evaluate_scene(
     }
 
     match_scale = placer.load_mapanything_scale(
-        filename="mapanything_scale_baseline.npy", smooth="median")
+        filename="mapanything_scale_baseline.npy")
     if match_scale is None:
         match_scale = pred_scale_pf
     try:
@@ -1113,14 +1143,6 @@ def main() -> None:
                         help="Comma-separated scene names to skip")
     parser.add_argument("--skip_cameras",      default="",
                         help="Per-scene camera exclusions: 'scene:cam1,cam2;scene2:cam3'")
-    parser.add_argument("--scale",              default="baseline",
-                        choices=["centered", "baseline"],
-                        help="MapAnything scale variant "
-                             "(centered=legacy depth-ratio, baseline=images-only camera baselines).")
-    parser.add_argument("--scale_smooth",       default="none",
-                        choices=["none", "median"],
-                        help="Temporal denoise of per-frame scale: median=one robust scalar "
-                             "per scene (kills VGGT per-frame jitter).")
     parser.add_argument("--centered_root",      type=Path, default=None,
                         help="Dir holding <scene>/crop_meta.json from the centered-image step. "
                              "Default: <rich_root>/centered_<gt_split>. The sqsh CANNOT be "
@@ -1176,8 +1198,6 @@ def main() -> None:
             gt_split=args.gt_split,
             centered_root=args.centered_root,
             exclude_cameras=skip_cameras.get(scene_dir.name),
-            scale_mode=args.scale,
-            scale_smooth=args.scale_smooth,
         )
         if result is not None:
             all_results.append(result)

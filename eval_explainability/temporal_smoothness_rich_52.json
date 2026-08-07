@@ -1,0 +1,577 @@
+{
+  "config": {
+    "checkpoint": "checkpoints/fusion_module/best.pt",
+    "body_split": "test_body",
+    "min_views": 1,
+    "min_run": 5,
+    "joint_set": "SMPL-X body joints 1..21 (packed slots 0..20), global orientation excluded",
+    "n_scenes": 52,
+    "cache_dir": "/iopsstor/scratch/cscs/tnanni/ghost_outputs/fused_cache/rich_test"
+  },
+  "variants": {
+    "chordal": {
+      "mean_angular_velocity_deg": 1.6675851345062256,
+      "median_angular_velocity_deg": 1.2363808155059814,
+      "mean_angular_acceleration_deg": 0.7949826121330261,
+      "median_angular_acceleration_deg": 0.5122973918914795,
+      "per_joint_mean_acceleration_deg": {
+        "left_hip": 0.8158468386045535,
+        "right_hip": 0.8176389148386137,
+        "spine1": 0.5284751272458247,
+        "left_knee": 1.0375362136322268,
+        "right_knee": 1.0582420682201155,
+        "spine2": 0.42611938333126287,
+        "left_ankle": 0.7680342832452356,
+        "right_ankle": 0.7879292124212991,
+        "spine3": 0.39336140653166124,
+        "left_foot": 0.551080522193883,
+        "right_foot": 0.5971105701348983,
+        "neck": 0.7515863090151893,
+        "left_collar": 0.6975783496974776,
+        "right_collar": 0.6893590582171166,
+        "head": 0.5485799758944505,
+        "left_shoulder": 0.7935741765983654,
+        "right_shoulder": 0.8444803641108773,
+        "left_elbow": 1.218440305336327,
+        "right_elbow": 1.3082656909768065,
+        "left_wrist": 1.0297801881908248,
+        "right_wrist": 1.031615894543531
+      },
+      "n_velocity_triplets": 625401,
+      "n_acceleration_triplets": 624120
+    },
+    "ghost": {
+      "mean_angular_velocity_deg": 1.5328021049499512,
+      "median_angular_velocity_deg": 1.0176029205322266,
+      "mean_angular_acceleration_deg": 0.7837435603141785,
+      "median_angular_acceleration_deg": 0.4451015889644623,
+      "per_joint_mean_acceleration_deg": {
+        "left_hip": 0.8721048228673306,
+        "right_hip": 0.9121887545887265,
+        "spine1": 0.5245339471270226,
+        "left_knee": 1.176162556395396,
+        "right_knee": 1.1237708892989127,
+        "spine2": 0.29689129754640214,
+        "left_ankle": 0.7175240291721247,
+        "right_ankle": 0.7575983293605204,
+        "spine3": 0.1975689492508027,
+        "left_foot": 0.2539333756967958,
+        "right_foot": 0.3834401448995557,
+        "neck": 0.6673549145420018,
+        "left_collar": 0.5787465586957508,
+        "right_collar": 0.6738002715168538,
+        "head": 0.4927031476918011,
+        "left_shoulder": 0.9207355752126044,
+        "right_shoulder": 0.9148364340793718,
+        "left_elbow": 1.2556496595790858,
+        "right_elbow": 1.3437830788931968,
+        "left_wrist": 1.1453827863105372,
+        "right_wrist": 1.2499051114591904
+      },
+      "n_velocity_triplets": 625401,
+      "n_acceleration_triplets": 624120
+    },
+    "gt": {
+      "mean_angular_velocity_deg": 1.8542901277542114,
+      "median_angular_velocity_deg": 1.1572444438934326,
+      "mean_angular_acceleration_deg": 0.8200708627700806,
+      "median_angular_acceleration_deg": 0.4259207844734192,
+      "per_joint_mean_acceleration_deg": {
+        "left_hip": 0.649644488842298,
+        "right_hip": 0.6419503293801124,
+        "spine1": 0.6096790225797836,
+        "left_knee": 0.8808665509820787,
+        "right_knee": 0.9105747136100625,
+        "spine2": 0.5084946792668,
+        "left_ankle": 1.0722407475615254,
+        "right_ankle": 1.1421065003201265,
+        "spine3": 0.4623227301869707,
+        "left_foot": 0.25786831355672507,
+        "right_foot": 0.20830083583277295,
+        "neck": 0.6579585159129763,
+        "left_collar": 0.6566041773132488,
+        "right_collar": 0.7046433212298243,
+        "head": 0.734257958257824,
+        "left_shoulder": 0.7374872353003131,
+        "right_shoulder": 0.8046688416443796,
+        "left_elbow": 1.1743145546072424,
+        "right_elbow": 1.194648016959148,
+        "left_wrist": 1.5741872489051254,
+        "right_wrist": 1.6386691146711962
+      },
+      "n_velocity_triplets": 625401,
+      "n_acceleration_triplets": 624120
+    }
+  },
+  "skipped": [],
+  "per_scene": [
+    {
+      "scene": "Gym_010_cooking1",
+      "T": 779,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 16254,
+      "n_a": 16233
+    },
+    {
+      "scene": "Gym_010_dips1",
+      "T": 572,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 11529,
+      "n_a": 11508
+    },
+    {
+      "scene": "Gym_010_dips2",
+      "T": 603,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 12558,
+      "n_a": 12537
+    },
+    {
+      "scene": "Gym_010_lunge1",
+      "T": 337,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 6279,
+      "n_a": 6258
+    },
+    {
+      "scene": "Gym_010_lunge2",
+      "T": 312,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 6279,
+      "n_a": 6258
+    },
+    {
+      "scene": "Gym_010_mountainclimber1",
+      "T": 504,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 10479,
+      "n_a": 10458
+    },
+    {
+      "scene": "Gym_010_mountainclimber2",
+      "T": 471,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "Gym_010_pushup1",
+      "T": 475,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "Gym_010_pushup2",
+      "T": 407,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 8379,
+      "n_a": 8358
+    },
+    {
+      "scene": "Gym_011_burpee2",
+      "T": 479,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "Gym_011_cooking1",
+      "T": 1141,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 23079,
+      "n_a": 23058
+    },
+    {
+      "scene": "Gym_011_cooking2",
+      "T": 1145,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 20979,
+      "n_a": 20958
+    },
+    {
+      "scene": "Gym_011_dips1",
+      "T": 494,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 8379,
+      "n_a": 8358
+    },
+    {
+      "scene": "Gym_011_dips2",
+      "T": 382,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 7329,
+      "n_a": 7308
+    },
+    {
+      "scene": "Gym_011_dips3",
+      "T": 320,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 6279,
+      "n_a": 6258
+    },
+    {
+      "scene": "Gym_011_dips4",
+      "T": 495,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "Gym_011_pushup1",
+      "T": 346,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 6279,
+      "n_a": 6258
+    },
+    {
+      "scene": "Gym_011_pushup2",
+      "T": 540,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 10479,
+      "n_a": 10458
+    },
+    {
+      "scene": "Gym_012_cooking2",
+      "T": 993,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 20139,
+      "n_a": 20118
+    },
+    {
+      "scene": "Gym_012_lunge1",
+      "T": 225,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 4179,
+      "n_a": 4158
+    },
+    {
+      "scene": "Gym_012_lunge2",
+      "T": 318,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 5229,
+      "n_a": 5208
+    },
+    {
+      "scene": "Gym_012_pushup2",
+      "T": 291,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 5481,
+      "n_a": 5460
+    },
+    {
+      "scene": "Gym_013_burpee4",
+      "T": 320,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 6279,
+      "n_a": 6258
+    },
+    {
+      "scene": "Gym_013_dips1",
+      "T": 503,
+      "K": 4,
+      "P": 1,
+      "n_runs": 4,
+      "n_w": 9555,
+      "n_a": 9471
+    },
+    {
+      "scene": "Gym_013_dips2",
+      "T": 333,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 6699,
+      "n_a": 6678
+    },
+    {
+      "scene": "Gym_013_dips3",
+      "T": 502,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9450,
+      "n_a": 9429
+    },
+    {
+      "scene": "Gym_013_lunge1",
+      "T": 690,
+      "K": 4,
+      "P": 1,
+      "n_runs": 3,
+      "n_w": 13545,
+      "n_a": 13482
+    },
+    {
+      "scene": "Gym_013_lunge2",
+      "T": 834,
+      "K": 4,
+      "P": 1,
+      "n_runs": 2,
+      "n_w": 17136,
+      "n_a": 17094
+    },
+    {
+      "scene": "Gym_013_pushup1",
+      "T": 861,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 17829,
+      "n_a": 17808
+    },
+    {
+      "scene": "Gym_013_pushup2",
+      "T": 477,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "LectureHall_009_021_reparingprojector1",
+      "T": 499,
+      "K": 4,
+      "P": 2,
+      "n_runs": 4,
+      "n_w": 20517,
+      "n_a": 20433
+    },
+    {
+      "scene": "LectureHall_009_sidebalancerun1",
+      "T": 673,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 13629,
+      "n_a": 13608
+    },
+    {
+      "scene": "LectureHall_010_plankjack1",
+      "T": 532,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 10920,
+      "n_a": 10899
+    },
+    {
+      "scene": "LectureHall_010_sidebalancerun1",
+      "T": 919,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 18879,
+      "n_a": 18858
+    },
+    {
+      "scene": "LectureHall_019_wipingchairs1",
+      "T": 978,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 20433,
+      "n_a": 20412
+    },
+    {
+      "scene": "LectureHall_021_plankjack1",
+      "T": 507,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 10479,
+      "n_a": 10458
+    },
+    {
+      "scene": "LectureHall_021_sidebalancerun1",
+      "T": 855,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 17829,
+      "n_a": 17808
+    },
+    {
+      "scene": "ParkingLot2_009_burpeejump1",
+      "T": 886,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 18102,
+      "n_a": 18081
+    },
+    {
+      "scene": "ParkingLot2_009_burpeejump2",
+      "T": 250,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 5229,
+      "n_a": 5208
+    },
+    {
+      "scene": "ParkingLot2_009_impro1",
+      "T": 891,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 16779,
+      "n_a": 16758
+    },
+    {
+      "scene": "ParkingLot2_009_impro2",
+      "T": 1041,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 8379,
+      "n_a": 8358
+    },
+    {
+      "scene": "ParkingLot2_009_impro5",
+      "T": 550,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 11529,
+      "n_a": 11508
+    },
+    {
+      "scene": "ParkingLot2_009_overfence1",
+      "T": 462,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "ParkingLot2_009_overfence2",
+      "T": 410,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 8379,
+      "n_a": 8358
+    },
+    {
+      "scene": "ParkingLot2_009_spray1",
+      "T": 1098,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 22050,
+      "n_a": 22029
+    },
+    {
+      "scene": "ParkingLot2_017_burpeejump1",
+      "T": 778,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 15729,
+      "n_a": 15708
+    },
+    {
+      "scene": "ParkingLot2_017_burpeejump2",
+      "T": 495,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "ParkingLot2_017_eating1",
+      "T": 799,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 16758,
+      "n_a": 16737
+    },
+    {
+      "scene": "ParkingLot2_017_overfence1",
+      "T": 552,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 11529,
+      "n_a": 11508
+    },
+    {
+      "scene": "ParkingLot2_017_overfence2",
+      "T": 855,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 17829,
+      "n_a": 17808
+    },
+    {
+      "scene": "ParkingLot2_017_pushup1",
+      "T": 529,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "ParkingLot2_017_pushup2",
+      "T": 738,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 14910,
+      "n_a": 14889
+    }
+  ]
+}

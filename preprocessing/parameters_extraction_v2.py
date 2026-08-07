@@ -264,6 +264,7 @@ class ParametersExtractor:
         # Dynamic task queue — workers pull tasks until they receive a None sentinel
         mp.set_start_method("spawn", force=True)
         task_queue: mp.Queue = mp.Queue()
+        n_tasks = 0
         for video in scene.videos:
             if ParametersExtractor._is_estimated(video_dirs[video.video_id]):
                 logging.info(f"  {video.video_id}: body data already exists, skipping")
@@ -281,13 +282,22 @@ class ParametersExtractor:
                 video.fps,
                 cam_int,
             ))
-        # If every video was already estimated, nothing to do
-        if task_queue.empty():
+            n_tasks += 1
+
+        # Count what we enqueued rather than asking the queue. mp.Queue.put() hands the
+        # item to a background feeder thread, so empty() can still report True right
+        # after a put — documented as unreliable. With exactly ONE remaining video that
+        # race fired every time: workers were never spawned and the camera was silently
+        # dropped, so the scene could never finish (seen on cam_06 of
+        # Pavallion_003_phonesiteat, Pavallion_006_phonesiteat, Pavallion_006_sidebalancerun).
+        if n_tasks == 0:
             logging.info("All videos already estimated — skipping body estimation workers")
             return
+        logging.info(f"  {n_tasks} video(s) queued for body estimation")
 
-        # One sentinel per worker signals end of work
-        num_workers = min(num_gpus, num_videos)
+        # One sentinel per worker signals end of work. Size the pool to the actual task
+        # count, not the total video count, or 1 task spawns 4 SAM3D loads for nothing.
+        num_workers = min(num_gpus, n_tasks)
         for _ in range(num_workers):
             task_queue.put(None)
 

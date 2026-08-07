@@ -20,12 +20,18 @@ export HF_TOKEN=$(cat ~/.hf_token)
 export HF_HUB_OFFLINE=1
 ulimit -c 0  # disable core dumps — they fill up home quota
 
-# Mount the test-set SquashFS archive so it looks like a normal directory.
-SQSH=/capstor/scratch/cscs/tnanni/datasets/rich/train_dataset.sqsh
-MOUNT=/tmp/rich_train
+# Mount the PP-centered train archive node-locally. It must land on the path
+# CONFIG.data.rich_data_root points at: capstor is Lustre and refuses a FUSE mount,
+# and the surviving vggt_cameras_centered.npz were computed from CENTERED images, so
+# segmentation/body estimation must run on the same image set to stay consistent.
+SQSH=/capstor/scratch/cscs/tnanni/datasets/rich/centered_train.sqsh
+MOUNT=/tmp/centered_train
 mkdir -p "$MOUNT"
 squashfuse "$SQSH" "$MOUNT"
 echo "Mounted $SQSH → $MOUNT"
+N_SCENES=$(ls "$MOUNT" | wc -l)
+echo "[sqsh] scenes visible: $N_SCENES"
+if [ "$N_SCENES" -eq 0 ]; then echo "ERROR: empty mount, aborting"; exit 1; fi
 
 # Unmount on exit (success or failure).
 trap "fusermount -u '$MOUNT' && echo 'Unmounted $MOUNT'" EXIT
@@ -39,7 +45,11 @@ echo "Node:         $SLURMD_NODENAME"
 echo "Start:        $(date)"
 echo ""
 
-pixi run python -m scripts.rich_pipeline_v3
+# NOT `-m scripts.rich_pipeline_v3`: a dependency installs a top-level `scripts`
+# package into the pixi env which shadows this repo's scripts/ directory. Invoke by
+# file path and put the repo root on PYTHONPATH so `configuration` etc. still import.
+# PIPELINE_ARGS lets a driver pass through e.g. --skip-mapanything or --scene.
+PYTHONPATH=/users/tnanni/ghost pixi run python scripts/rich_pipeline_v3.py ${PIPELINE_ARGS:-}
 
 echo ""
 echo "Done: $(date)"

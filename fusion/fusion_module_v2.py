@@ -308,6 +308,64 @@ class PoseStreamLayer(nn.Module):
 # Main module
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Kinematic tree, for the joint-attention hop mask
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# LAYOUT WARNING — two different joint orderings are in play (verified
+# empirically by scripts/verify_joint_layout.py):
+#
+#   canonical (SMPL-X FK OUTPUT) : pelvis | body 1..21 | jaw,eyes 22..24 | lhand 25..39 | rhand 40..54
+#   packed    (the POSE TENSOR)  : pelvis | body 1..21 | lhand 22..36     | rhand 37..51 | jaw,eyes 52..54
+#
+# `parents` below is CANONICAL (it is model.parents from the SMPL-X model,
+# checked against it in verify_joint_layout.py). The pose tensor this module
+# consumes is PACKED, and by the time the mask is applied the root has been
+# stripped, so index i of the attention axis == packed slot i+1. The permutation
+# is applied in ONE place, `_packed_hop_matrix`, and nowhere else.
+_SMPLX_PARENTS_CANONICAL = [
+    -1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19,
+    15, 15, 15, 20, 25, 26, 20, 28, 29, 20, 31, 32, 20, 34, 35, 20, 37, 38, 21,
+    40, 41, 21, 43, 44, 21, 46, 47, 21, 49, 50, 21, 52, 53,
+]
+_N_SMPLX_JOINTS = 55
+
+
+def _canonical_to_packed() -> list[int]:
+    """canonical index -> packed index. See the layout warning above."""
+    mapping = list(range(22))                       # pelvis + 21 body joints align
+    mapping += [52, 53, 54]                         # canonical 22,23,24 = jaw, leye, reye
+    mapping += list(range(22, 37))                  # canonical 25..39 = left hand
+    mapping += list(range(37, 52))                  # canonical 40..54 = right hand
+    assert sorted(mapping) == list(range(_N_SMPLX_JOINTS))
+    return mapping
+
+
+def _packed_hop_matrix(num_joints: int) -> torch.Tensor:
+    """(num_joints, num_joints) hop distance in ROOT-STRIPPED PACKED order.
+
+    Undirected edge count along the kinematic tree. Row/col i corresponds to
+    packed slot i+1, i.e. exactly the axis the joint attention runs over.
+    """
+    c2p = _canonical_to_packed()
+    n = _N_SMPLX_JOINTS
+    INF = 10 ** 6
+    hop = torch.full((n, n), INF, dtype=torch.long)
+    hop.fill_diagonal_(0)
+    for c in range(1, n):
+        pc = _SMPLX_PARENTS_CANONICAL[c]
+        if pc >= 0:
+            i, j = c2p[c], c2p[pc]
+            hop[i, j] = 1
+            hop[j, i] = 1
+    for k in range(n):                                   # Floyd-Warshall
+        hop = torch.minimum(hop, hop[:, k, None] + hop[None, k, :])
+    hop = hop[1:, 1:]                                    # drop root -> pose_aggr space
+    if num_joints > hop.shape[0]:
+        raise ValueError(f"num_joints={num_joints} exceeds the SMPL-X tree ({hop.shape[0]})")
+    return hop[:num_joints, :num_joints].contiguous()
+
+
 class PoseFusionModule(nn.Module):
     """Fuse per-camera SMPL-X pose estimates into a single world-frame prediction.
 
@@ -331,12 +389,31 @@ class PoseFusionModule(nn.Module):
         dropout: float = 0.1,
         temporal_window: int = 128,
         num_joints: int = 54,
+        kintree_mask_k: int | None = None,
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.num_joints = num_joints
+        self.kintree_mask_k = kintree_mask_k
+
+        # CHANGE 2 — kinematic-tree hard mask on the joint attention axis.
+        # A joint may attend only to joints within `kintree_mask_k` edges of it in
+        # the SMPL-X tree; the diagonal is always allowed. Stored as an ADDITIVE
+        # bias (0 = allowed, -inf = blocked) because the joint attention already
+        # receives an additive log-confidence mask, and -inf + finite = -inf.
+        # None disables the mask entirely (baseline behaviour, bit-identical).
+        if kintree_mask_k is not None:
+            hop = _packed_hop_matrix(num_joints)
+            allowed = hop <= int(kintree_mask_k)
+            allowed.fill_diagonal_(True)               # never let a row go empty
+            assert allowed.any(dim=1).all(), "kintree mask has an all-False row"
+            bias = torch.zeros(num_joints, num_joints)
+            bias.masked_fill_(~allowed, float("-inf"))
+            self.register_buffer("kintree_bias", bias, persistent=False)
+        else:
+            self.kintree_bias = None
 
         self.dropout = nn.Dropout(dropout)
         self.temporal_pe = PositionalEncoding(max_temporal_len, embedding_dim)
@@ -438,6 +515,19 @@ class PoseFusionModule(nn.Module):
         joint_attn_mask = self._build_confidence_mask(
             conf.reshape(B * T * K * P, J), H,
         )  # (B*T*K*P*H, J, J)
+
+        # CHANGE 2 — add the kinematic-tree hard mask on top of the confidence
+        # bias. Both are additive, so -inf on a blocked pair survives whatever
+        # finite confidence bias sits there. The diagonal is always 0, so every
+        # row keeps at least one finite entry and softmax cannot produce NaN —
+        # including rows that _build_confidence_mask reset to 0 for absent people.
+        if self.kintree_bias is not None:
+            if self.kintree_bias.shape[0] != J:
+                raise RuntimeError(
+                    f"kintree mask built for {self.kintree_bias.shape[0]} joints "
+                    f"but attention runs over J={J}")
+            joint_attn_mask = joint_attn_mask + self.kintree_bias.to(
+                joint_attn_mask.dtype).unsqueeze(0)
 
         # Cross-view attention: each slot (b,t,p,j) sees K×K interactions.
         view_attn_mask = self._build_confidence_mask(

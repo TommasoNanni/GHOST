@@ -1,0 +1,4888 @@
+[
+ {
+  "scene": "001_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 81,
+    "mean_iou_all": 0.8713842627087982,
+    "anchor_check": {
+     "aria01_matched": 81,
+     "aria01_mean_iou": 0.8713842627087982,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.8272527151227342
+    },
+    "pids": {
+     "1": {
+      "track_frames": 591,
+      "matched": 40,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8272527151227342,
+      "hist": {
+       "aria01": 40
+      }
+     },
+     "2": {
+      "track_frames": 601,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.9144394310854462,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "4": {
+      "track_frames": 601,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 601.5831596906795,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 1,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 70,
+    "mean_iou_all": 0.5909002050263378,
+    "anchor_check": {
+     "aria01_matched": 70,
+     "aria01_mean_iou": 0.5909002050263378,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.7376449806894686
+    },
+    "pids": {
+     "1": {
+      "track_frames": 601,
+      "matched": 40,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7376449806894686,
+      "hist": {
+       "aria01": 40
+      }
+     },
+     "2": {
+      "track_frames": 601,
+      "matched": 30,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.3952405041421635,
+      "hist": {
+       "aria02": 30
+      }
+     },
+     "3": {
+      "track_frames": 601,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 601,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 624.3199406113736,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.780815155415682,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.780815155415682,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7647929836275041
+    },
+    "pids": {
+     "1": {
+      "track_frames": 601,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7647929836275041,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "2": {
+      "track_frames": 601,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.7968373272038596,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 601,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "5": {
+      "track_frames": 39,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "7": {
+      "track_frames": 517,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 367,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 1,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "13": {
+      "track_frames": 250,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 623.5660357807958,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.687958030294313,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.687958030294313,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.5353768309043838
+    },
+    "pids": {
+     "6": {
+      "track_frames": 601,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5353768309043838,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "8": {
+      "track_frames": 601,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8405392296842424,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "10": {
+      "track_frames": 147,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 611.0285914221475,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "1": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.8272527151227342
+     },
+     {
+      "token": "c9p1",
+      "cam": "cam09",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.7376449806894686
+     },
+     {
+      "token": "c12p1",
+      "cam": "cam12",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7647929836275041
+     },
+     {
+      "token": "c20p6",
+      "cam": "cam20",
+      "pid": "6",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.5353768309043838
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "2": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.9144394310854462
+     },
+     {
+      "token": "c9p2",
+      "cam": "cam09",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 30,
+      "mean_iou": 0.3952405041421635
+     },
+     {
+      "token": "c12p2",
+      "cam": "cam12",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7968373272038596
+     },
+     {
+      "token": "c20p8",
+      "cam": "cam20",
+      "pid": "8",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8405392296842424
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "002_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 79,
+    "mean_iou_all": 0.8389424136191826,
+    "anchor_check": {
+     "aria01_matched": 79,
+     "aria01_mean_iou": 0.8389424136191826,
+     "perperson_matched": 39,
+     "perperson_mean_iou": 0.7574076254172092
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.9096459174480153,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "2": {
+      "track_frames": 1146,
+      "matched": 38,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7626570542249154,
+      "hist": {
+       "aria01": 38
+      }
+     },
+     "9": {
+      "track_frames": 1151,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 602.3424299373183,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 39
+    },
+    "matched_pairs": 66,
+    "mean_iou_all": 0.6251928947192585,
+    "anchor_check": {
+     "aria01_matched": 66,
+     "aria01_mean_iou": 0.6251928947192585,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7530173746512379
+    },
+    "pids": {
+     "3": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7530173746512379,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "6": {
+      "track_frames": 1183,
+      "matched": 25,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.41556074763081213,
+      "hist": {
+       "aria02": 25
+      }
+     },
+     "10": {
+      "track_frames": 53,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 1194,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "14": {
+      "track_frames": 670,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "16": {
+      "track_frames": 361,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 624.5708376862283,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.7541738717787143,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.7541738717787143,
+     "perperson_matched": 42,
+     "perperson_mean_iou": 0.7695220059906892
+    },
+    "pids": {
+     "4": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7798141842398828,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "7": {
+      "track_frames": 566,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 1196,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.7285335593175455,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "13": {
+      "track_frames": 310,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "15": {
+      "track_frames": 11,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "17": {
+      "track_frames": 1050,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "18": {
+      "track_frames": 956,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "20": {
+      "track_frames": 1,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "21": {
+      "track_frames": 1,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "22": {
+      "track_frames": 469,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "23": {
+      "track_frames": 9,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 627.139339003452,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 38,
+     "aria02": 41
+    },
+    "matched_pairs": 78,
+    "mean_iou_all": 0.6836687027171404,
+    "anchor_check": {
+     "aria01_matched": 78,
+     "aria01_mean_iou": 0.6836687027171404,
+     "perperson_matched": 37,
+     "perperson_mean_iou": 0.49718393873784383
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8519598311862618,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "5": {
+      "track_frames": 1187,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "8": {
+      "track_frames": 1127,
+      "matched": 37,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.49718393873784383,
+      "hist": {
+       "aria01": 37
+      }
+     },
+     "19": {
+      "track_frames": 926,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 613.3379559184231,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "2": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.9096459174480153
+     },
+     {
+      "token": "c9p6",
+      "cam": "cam09",
+      "pid": "6",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 25,
+      "mean_iou": 0.41556074763081213
+     },
+     {
+      "token": "c12p12",
+      "cam": "cam12",
+      "pid": "12",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7285335593175455
+     },
+     {
+      "token": "c20p1",
+      "cam": "cam20",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8519598311862618
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "1": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 38,
+      "mean_iou": 0.7626570542249154
+     },
+     {
+      "token": "c9p3",
+      "cam": "cam09",
+      "pid": "3",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7530173746512379
+     },
+     {
+      "token": "c12p4",
+      "cam": "cam12",
+      "pid": "4",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7798141842398828
+     },
+     {
+      "token": "c20p8",
+      "cam": "cam20",
+      "pid": "8",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 37,
+      "mean_iou": 0.49718393873784383
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "003_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 80,
+    "mean_iou_all": 0.8522121533165847,
+    "anchor_check": {
+     "aria01_matched": 80,
+     "aria01_mean_iou": 0.8522121533165847,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.7679988776222877
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1138,
+      "matched": 39,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7796139730681689,
+      "hist": {
+       "aria01": 39
+      }
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.9212689589187362,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "9": {
+      "track_frames": 60,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 601.1968497342842,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 48,
+    "mean_iou_all": 0.6678140187234086,
+    "anchor_check": {
+     "aria01_matched": 48,
+     "aria01_mean_iou": 0.6678140187234086,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7268392845362129
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7268392845362129,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 7,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.32209460467698336,
+      "hist": {
+       "aria02": 7
+      }
+     },
+     "3": {
+      "track_frames": 1201,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "10": {
+      "track_frames": 233,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 840,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 626.1490364961846,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.7430015604947208,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.7430015604947208,
+     "perperson_matched": 42,
+     "perperson_mean_iou": 0.7284727130222597
+    },
+    "pids": {
+     "4": {
+      "track_frames": 219,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "6": {
+      "track_frames": 226,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7377879506144647,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "13": {
+      "track_frames": 1189,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.7482151703749764,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "14": {
+      "track_frames": 1060,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "16": {
+      "track_frames": 986,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "17": {
+      "track_frames": 1,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "18": {
+      "track_frames": 580,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "19": {
+      "track_frames": 402,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "21": {
+      "track_frames": 103,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 627.3354960596839,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 80,
+    "mean_iou_all": 0.7032111562828215,
+    "anchor_check": {
+     "aria01_matched": 80,
+     "aria01_mean_iou": 0.7032111562828215,
+     "perperson_matched": 39,
+     "perperson_mean_iou": 0.5187096176639258
+    },
+    "pids": {
+     "5": {
+      "track_frames": 1201,
+      "matched": 39,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5187096176639258,
+      "hist": {
+       "aria01": 39
+      }
+     },
+     "7": {
+      "track_frames": 128,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "8": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8787126198471373,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "15": {
+      "track_frames": 986,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "20": {
+      "track_frames": 49,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 611.1931947220204,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "1": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 39,
+      "mean_iou": 0.7796139730681689
+     },
+     {
+      "token": "c9p1",
+      "cam": "cam09",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7268392845362129
+     },
+     {
+      "token": "c12p11",
+      "cam": "cam12",
+      "pid": "11",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7377879506144647
+     },
+     {
+      "token": "c20p5",
+      "cam": "cam20",
+      "pid": "5",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 39,
+      "mean_iou": 0.5187096176639258
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "2": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.9212689589187362
+     },
+     {
+      "token": "c9p2",
+      "cam": "cam09",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 7,
+      "mean_iou": 0.32209460467698336
+     },
+     {
+      "token": "c12p13",
+      "cam": "cam12",
+      "pid": "13",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7482151703749764
+     },
+     {
+      "token": "c20p8",
+      "cam": "cam20",
+      "pid": "8",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8787126198471373
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "004_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 80,
+    "mean_iou_all": 0.8680050175405114,
+    "anchor_check": {
+     "aria01_matched": 80,
+     "aria01_mean_iou": 0.8680050175405114,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.8119359325148447
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.9090659873050685,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "2": {
+      "track_frames": 1167,
+      "matched": 39,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8248383570187986,
+      "hist": {
+       "aria01": 39
+      }
+     },
+     "3": {
+      "track_frames": 1057,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "4": {
+      "track_frames": 181,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 601.1552677598111,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 64,
+    "mean_iou_all": 0.613194048413234,
+    "anchor_check": {
+     "aria01_matched": 64,
+     "aria01_mean_iou": 0.613194048413234,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7234384061630993
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1201,
+      "matched": 23,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.4166714976417344,
+      "hist": {
+       "aria02": 23
+      }
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7234384061630993,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "6": {
+      "track_frames": 357,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 625.6699176167333,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 81,
+    "mean_iou_all": 0.7500653204453721,
+    "anchor_check": {
+     "aria01_matched": 81,
+     "aria01_mean_iou": 0.7500653204453721,
+     "perperson_matched": 42,
+     "perperson_mean_iou": 0.7252078408859434
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1188,
+      "matched": 40,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.7660441655306862,
+      "hist": {
+       "aria02": 40
+      }
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7344762032889681,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "3": {
+      "track_frames": 900,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 1114,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 1015,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 12,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "15": {
+      "track_frames": 4,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "16": {
+      "track_frames": 198,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "19": {
+      "track_frames": 1,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "21": {
+      "track_frames": 210,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "22": {
+      "track_frames": 93,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 627.9181546943133,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 39,
+     "aria02": 41
+    },
+    "matched_pairs": 79,
+    "mean_iou_all": 0.6952222706038805,
+    "anchor_check": {
+     "aria01_matched": 79,
+     "aria01_mean_iou": 0.6952222706038805,
+     "perperson_matched": 39,
+     "perperson_mean_iou": 0.5107456823905637
+    },
+    "pids": {
+     "5": {
+      "track_frames": 1170,
+      "matched": 38,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5148229536449473,
+      "hist": {
+       "aria01": 38
+      }
+     },
+     "7": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8624216375414284,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "8": {
+      "track_frames": 1168,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "10": {
+      "track_frames": 754,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "13": {
+      "track_frames": 319,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "14": {
+      "track_frames": 432,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "17": {
+      "track_frames": 223,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "18": {
+      "track_frames": 110,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "20": {
+      "track_frames": 533,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 612.2350435478743,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "2": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.9090659873050685
+     },
+     {
+      "token": "c9p1",
+      "cam": "cam09",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 23,
+      "mean_iou": 0.4166714976417344
+     },
+     {
+      "token": "c12p1",
+      "cam": "cam12",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.7660441655306862
+     },
+     {
+      "token": "c20p7",
+      "cam": "cam20",
+      "pid": "7",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8624216375414284
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "1": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 39,
+      "mean_iou": 0.8248383570187986
+     },
+     {
+      "token": "c9p2",
+      "cam": "cam09",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7234384061630993
+     },
+     {
+      "token": "c12p2",
+      "cam": "cam12",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7344762032889681
+     },
+     {
+      "token": "c20p5",
+      "cam": "cam20",
+      "pid": "5",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 38,
+      "mean_iou": 0.5148229536449473
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "005_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 80,
+    "mean_iou_all": 0.869147622868414,
+    "anchor_check": {
+     "aria01_matched": 80,
+     "aria01_mean_iou": 0.869147622868414,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.7979642495879844
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1132,
+      "matched": 39,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8105173841597592,
+      "hist": {
+       "aria01": 39
+      }
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "6": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.924917849932744,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "14": {
+      "track_frames": 621,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 601.9927197833395,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 1,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 39
+    },
+    "matched_pairs": 58,
+    "mean_iou_all": 0.5953074378756956,
+    "anchor_check": {
+     "aria01_matched": 58,
+     "aria01_mean_iou": 0.5953074378756956,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.6765823559949441
+    },
+    "pids": {
+     "3": {
+      "track_frames": 1174,
+      "matched": 18,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.4146965087218109,
+      "hist": {
+       "aria02": 18
+      }
+     },
+     "7": {
+      "track_frames": 1201,
+      "matched": 40,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.6765823559949441,
+      "hist": {
+       "aria01": 40
+      }
+     },
+     "10": {
+      "track_frames": 1164,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 627.2306149504906,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.7226250154024816,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.7226250154024816,
+     "perperson_matched": 43,
+     "perperson_mean_iou": 0.6899367635476461
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7082210358637575,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "4": {
+      "track_frames": 982,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "8": {
+      "track_frames": 130,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 708,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "15": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.7370289949412062,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "17": {
+      "track_frames": 1079,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "20": {
+      "track_frames": 308,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "23": {
+      "track_frames": 6,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "24": {
+      "track_frames": 10,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "25": {
+      "track_frames": 35,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "26": {
+      "track_frames": 356,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "27": {
+      "track_frames": 285,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "28": {
+      "track_frames": 1,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 629.5465584688409,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 39,
+     "aria02": 41
+    },
+    "matched_pairs": 72,
+    "mean_iou_all": 0.7100895520378516,
+    "anchor_check": {
+     "aria01_matched": 72,
+     "aria01_mean_iou": 0.7100895520378516,
+     "perperson_matched": 31,
+     "perperson_mean_iou": 0.49272343869585683
+    },
+    "pids": {
+     "5": {
+      "track_frames": 1197,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 902,
+      "matched": 27,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.48856544306383215,
+      "hist": {
+       "aria01": 27
+      }
+     },
+     "11": {
+      "track_frames": 95,
+      "matched": 3,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5063032582272956,
+      "hist": {
+       "aria01": 3
+      }
+     },
+     "13": {
+      "track_frames": 505,
+      "matched": 1,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5642498621662079,
+      "hist": {
+       "aria01": 1
+      }
+     },
+     "16": {
+      "track_frames": 9,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "18": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8744395401744823,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "19": {
+      "track_frames": 1183,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "21": {
+      "track_frames": 1044,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "22": {
+      "track_frames": 649,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 612.2289116438045,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "1": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 39,
+      "mean_iou": 0.8105173841597592
+     },
+     {
+      "token": "c9p7",
+      "cam": "cam09",
+      "pid": "7",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.6765823559949441
+     },
+     {
+      "token": "c12p1",
+      "cam": "cam12",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7082210358637575
+     },
+     {
+      "token": "c20p11",
+      "cam": "cam20",
+      "pid": "11",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 3,
+      "mean_iou": 0.5063032582272956
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "2": {
+    "members": [
+     {
+      "token": "c4p6",
+      "cam": "cam04",
+      "pid": "6",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.924917849932744
+     },
+     {
+      "token": "c9p3",
+      "cam": "cam09",
+      "pid": "3",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 18,
+      "mean_iou": 0.4146965087218109
+     },
+     {
+      "token": "c12p15",
+      "cam": "cam12",
+      "pid": "15",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7370289949412062
+     },
+     {
+      "token": "c20p18",
+      "cam": "cam20",
+      "pid": "18",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8744395401744823
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "006_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": -1,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 81,
+    "mean_iou_all": 0.8571767023533181,
+    "anchor_check": {
+     "aria01_matched": 81,
+     "aria01_mean_iou": 0.8571767023533181,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.8145164398151585
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1301,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "2": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8987964706832294,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 1245,
+      "matched": 40,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8145164398151585,
+      "hist": {
+       "aria01": 40
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 602.4945139330488,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": -1,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 38
+    },
+    "matched_pairs": 57,
+    "mean_iou_all": 0.6146223413387525,
+    "anchor_check": {
+     "aria01_matched": 57,
+     "aria01_mean_iou": 0.6146223413387525,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.705599883675834
+    },
+    "pids": {
+     "4": {
+      "track_frames": 382,
+      "matched": 2,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.32238468619104643,
+      "hist": {
+       "aria02": 2
+      }
+     },
+     "7": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.705599883675834,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "9": {
+      "track_frames": 1285,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 884,
+      "matched": 14,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.38993634665839993,
+      "hist": {
+       "aria02": 14
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 627.2079396802326,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.721777970890959,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.721777970890959,
+     "perperson_matched": 43,
+     "perperson_mean_iou": 0.6758206080253405
+    },
+    "pids": {
+     "5": {
+      "track_frames": 1301,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "8": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.6901125801901717,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "10": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.7534433615917463,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "12": {
+      "track_frames": 450,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "16": {
+      "track_frames": 548,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "18": {
+      "track_frames": 116,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "19": {
+      "track_frames": 508,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "20": {
+      "track_frames": 803,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "21": {
+      "track_frames": 2,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "22": {
+      "track_frames": 396,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "23": {
+      "track_frames": 5,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "24": {
+      "track_frames": 502,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "25": {
+      "track_frames": 347,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "26": {
+      "track_frames": 177,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 627.3236793695495,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 34,
+     "aria02": 41
+    },
+    "matched_pairs": 69,
+    "mean_iou_all": 0.7279079966508547,
+    "anchor_check": {
+     "aria01_matched": 69,
+     "aria01_mean_iou": 0.7279079966508547,
+     "perperson_matched": 28,
+     "perperson_mean_iou": 0.514844032634955
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1296,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "2": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8734150940275661,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 420,
+      "matched": 11,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5003552355795082,
+      "hist": {
+       "aria01": 11
+      }
+     },
+     "6": {
+      "track_frames": 640,
+      "matched": 14,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5278576803500871,
+      "hist": {
+       "aria01": 14
+      }
+     },
+     "13": {
+      "track_frames": 1041,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "14": {
+      "track_frames": 484,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "15": {
+      "track_frames": 622,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "17": {
+      "track_frames": 122,
+      "matched": 3,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5072392658343116,
+      "hist": {
+       "aria01": 3
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 611.011409315952,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "1": {
+    "members": [
+     {
+      "token": "c4p3",
+      "cam": "cam04",
+      "pid": "3",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.8145164398151585
+     },
+     {
+      "token": "c9p7",
+      "cam": "cam09",
+      "pid": "7",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.705599883675834
+     },
+     {
+      "token": "c12p8",
+      "cam": "cam12",
+      "pid": "8",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.6901125801901717
+     },
+     {
+      "token": "c20p3",
+      "cam": "cam20",
+      "pid": "3",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 11,
+      "mean_iou": 0.5003552355795082
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "2": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8987964706832294
+     },
+     {
+      "token": "c9p4",
+      "cam": "cam09",
+      "pid": "4",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 2,
+      "mean_iou": 0.32238468619104643
+     },
+     {
+      "token": "c12p10",
+      "cam": "cam12",
+      "pid": "10",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7534433615917463
+     },
+     {
+      "token": "c20p2",
+      "cam": "cam20",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8734150940275661
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "007_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": -1,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 81,
+    "mean_iou_all": 0.8337261613234778,
+    "anchor_check": {
+     "aria01_matched": 81,
+     "aria01_mean_iou": 0.8337261613234778,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.7877485582468153
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1466,
+      "matched": 40,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7877485582468153,
+      "hist": {
+       "aria01": 40
+      }
+     },
+     "2": {
+      "track_frames": 1551,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8785823594470511,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 1551,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "14": {
+      "track_frames": 8,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 600.6855383584666,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 54,
+    "mean_iou_all": 0.6254276814561703,
+    "anchor_check": {
+     "aria01_matched": 54,
+     "aria01_mean_iou": 0.6254276814561703,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.6954732136292053
+    },
+    "pids": {
+     "4": {
+      "track_frames": 1551,
+      "matched": 13,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.4045148492181372,
+      "hist": {
+       "aria02": 13
+      }
+     },
+     "7": {
+      "track_frames": 1551,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.6954732136292053,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "10": {
+      "track_frames": 1542,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 627.5080197356468,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.7383728709768206,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.7383728709768206,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7190030150290917
+    },
+    "pids": {
+     "5": {
+      "track_frames": 1551,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "8": {
+      "track_frames": 1551,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.7577427269245497,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "11": {
+      "track_frames": 1551,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7190030150290917,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "12": {
+      "track_frames": 1178,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "13": {
+      "track_frames": 1022,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "16": {
+      "track_frames": 562,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "17": {
+      "track_frames": 2,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 626.4401741914971,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 36,
+     "aria02": 41
+    },
+    "matched_pairs": 74,
+    "mean_iou_all": 0.7388722602422032,
+    "anchor_check": {
+     "aria01_matched": 74,
+     "aria01_mean_iou": 0.7388722602422032,
+     "perperson_matched": 34,
+     "perperson_mean_iou": 0.5547284071662238
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1352,
+      "matched": 33,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5616942337024424,
+      "hist": {
+       "aria01": 33
+      }
+     },
+     "2": {
+      "track_frames": 1551,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8814789645303029,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "6": {
+      "track_frames": 1523,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 139,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "15": {
+      "track_frames": 1261,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 609.8570783748183,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "1": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.7877485582468153
+     },
+     {
+      "token": "c9p7",
+      "cam": "cam09",
+      "pid": "7",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.6954732136292053
+     },
+     {
+      "token": "c12p11",
+      "cam": "cam12",
+      "pid": "11",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7190030150290917
+     },
+     {
+      "token": "c20p1",
+      "cam": "cam20",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 33,
+      "mean_iou": 0.5616942337024424
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "2": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8785823594470511
+     },
+     {
+      "token": "c9p4",
+      "cam": "cam09",
+      "pid": "4",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 13,
+      "mean_iou": 0.4045148492181372
+     },
+     {
+      "token": "c12p8",
+      "cam": "cam12",
+      "pid": "8",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7577427269245497
+     },
+     {
+      "token": "c20p2",
+      "cam": "cam20",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8814789645303029
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "008_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 80,
+    "mean_iou_all": 0.8533725042577724,
+    "anchor_check": {
+     "aria01_matched": 80,
+     "aria01_mean_iou": 0.8533725042577724,
+     "perperson_matched": 39,
+     "perperson_mean_iou": 0.8001927529393067
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1139,
+      "matched": 39,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8001927529393067,
+      "hist": {
+       "aria01": 39
+      }
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.9039581213655806,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 1201,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 601.1635713799055,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 53,
+    "mean_iou_all": 0.5959114187357857,
+    "anchor_check": {
+     "aria01_matched": 53,
+     "aria01_mean_iou": 0.5959114187357857,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.6650366209236022
+    },
+    "pids": {
+     "4": {
+      "track_frames": 1201,
+      "matched": 12,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.35973364459407947,
+      "hist": {
+       "aria02": 12
+      }
+     },
+     "7": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.6650366209236022,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "10": {
+      "track_frames": 1147,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 509,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 629.6688133062319,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.757191155586887,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.757191155586887,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7466914747881968
+    },
+    "pids": {
+     "5": {
+      "track_frames": 1201,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "8": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7466914747881968,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "11": {
+      "track_frames": 1167,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "13": {
+      "track_frames": 1183,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.767690836385577,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "15": {
+      "track_frames": 784,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "16": {
+      "track_frames": 251,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "17": {
+      "track_frames": 1,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "18": {
+      "track_frames": 2,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 626.5909168332123,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 36,
+     "aria02": 41
+    },
+    "matched_pairs": 76,
+    "mean_iou_all": 0.7108683248240378,
+    "anchor_check": {
+     "aria01_matched": 76,
+     "aria01_mean_iou": 0.7108683248240378,
+     "perperson_matched": 36,
+     "perperson_mean_iou": 0.5201697584502454
+    },
+    "pids": {
+     "1": {
+      "track_frames": 261,
+      "matched": 9,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5601247373020707,
+      "hist": {
+       "aria01": 9
+      }
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8704265870926735,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "6": {
+      "track_frames": 1201,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 834,
+      "matched": 26,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.511437691542639,
+      "hist": {
+       "aria01": 26
+      }
+     },
+     "14": {
+      "track_frames": 1175,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 612.22412109375,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "1": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 39,
+      "mean_iou": 0.8001927529393067
+     },
+     {
+      "token": "c9p7",
+      "cam": "cam09",
+      "pid": "7",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.6650366209236022
+     },
+     {
+      "token": "c12p8",
+      "cam": "cam12",
+      "pid": "8",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7466914747881968
+     },
+     {
+      "token": "c20p9",
+      "cam": "cam20",
+      "pid": "9",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 26,
+      "mean_iou": 0.511437691542639
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "2": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.9039581213655806
+     },
+     {
+      "token": "c9p4",
+      "cam": "cam09",
+      "pid": "4",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 12,
+      "mean_iou": 0.35973364459407947
+     },
+     {
+      "token": "c12p13",
+      "cam": "cam12",
+      "pid": "13",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.767690836385577
+     },
+     {
+      "token": "c20p2",
+      "cam": "cam20",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8704265870926735
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "009_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 81,
+    "mean_iou_all": 0.8744476441097432,
+    "anchor_check": {
+     "aria01_matched": 81,
+     "aria01_mean_iou": 0.8744476441097432,
+     "perperson_matched": 40,
+     "perperson_mean_iou": 0.8164605430727174
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1201,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.93102042560928,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 1184,
+      "matched": 40,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8164605430727174,
+      "hist": {
+       "aria01": 40
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 599.8899238054142,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 61,
+    "mean_iou_all": 0.6204167193492274,
+    "anchor_check": {
+     "aria01_matched": 61,
+     "aria01_mean_iou": 0.6204167193492274,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7199508551094164
+    },
+    "pids": {
+     "4": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7199508551094164,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "5": {
+      "track_frames": 1201,
+      "matched": 20,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.41637174104083974,
+      "hist": {
+       "aria02": 20
+      }
+     },
+     "6": {
+      "track_frames": 1194,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 624.3308630654979,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.7983612243251383,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.7983612243251383,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7848865395878871
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1201,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8118359090623897,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7848865395878871,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "7": {
+      "track_frames": 676,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 946,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "10": {
+      "track_frames": 247,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 6,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 3,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 619.393530557322,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 40,
+     "aria02": 41
+    },
+    "matched_pairs": 79,
+    "mean_iou_all": 0.734326178754712,
+    "anchor_check": {
+     "aria01_matched": 79,
+     "aria01_mean_iou": 0.734326178754712,
+     "perperson_matched": 38,
+     "perperson_mean_iou": 0.558384776071332
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1192,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "2": {
+      "track_frames": 1201,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8973938202661373,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 1025,
+      "matched": 33,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5562953058525077,
+      "hist": {
+       "aria01": 33
+      }
+     },
+     "8": {
+      "track_frames": 839,
+      "matched": 5,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5721752795155716,
+      "hist": {
+       "aria01": 5
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 610.5582232807958,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "2": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.93102042560928
+     },
+     {
+      "token": "c9p5",
+      "cam": "cam09",
+      "pid": "5",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 20,
+      "mean_iou": 0.41637174104083974
+     },
+     {
+      "token": "c12p2",
+      "cam": "cam12",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8118359090623897
+     },
+     {
+      "token": "c20p2",
+      "cam": "cam20",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8973938202661373
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "1": {
+    "members": [
+     {
+      "token": "c4p3",
+      "cam": "cam04",
+      "pid": "3",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.8164605430727174
+     },
+     {
+      "token": "c9p4",
+      "cam": "cam09",
+      "pid": "4",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7199508551094164
+     },
+     {
+      "token": "c12p3",
+      "cam": "cam12",
+      "pid": "3",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7848865395878871
+     },
+     {
+      "token": "c20p3",
+      "cam": "cam20",
+      "pid": "3",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 33,
+      "mean_iou": 0.5562953058525077
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "010_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": -1,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 80,
+    "mean_iou_all": 0.8426787941155929,
+    "anchor_check": {
+     "aria01_matched": 80,
+     "aria01_mean_iou": 0.8426787941155929,
+     "perperson_matched": 39,
+     "perperson_mean_iou": 0.8027770491953167
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1501,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8806341124543917,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "3": {
+      "track_frames": 1408,
+      "matched": 39,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8027770491953167,
+      "hist": {
+       "aria01": 39
+      }
+     },
+     "6": {
+      "track_frames": 1156,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 599.4085054619368,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 64,
+    "mean_iou_all": 0.6380553233408294,
+    "anchor_check": {
+     "aria01_matched": 64,
+     "aria01_mean_iou": 0.6380553233408294,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7986995619371292
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1501,
+      "matched": 23,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.3516895067126427,
+      "hist": {
+       "aria02": 23
+      }
+     },
+     "2": {
+      "track_frames": 1501,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7986995619371292,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "8": {
+      "track_frames": 1427,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 790,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 619.7172439930051,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.8086399936764967,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.8086399936764967,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.8050967402925412
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1501,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8121832470604518,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "2": {
+      "track_frames": 1501,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8050967402925412,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "4": {
+      "track_frames": 793,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "10": {
+      "track_frames": 546,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 1221,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "13": {
+      "track_frames": 1,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "14": {
+      "track_frames": 467,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 613.7504542151163,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 39,
+     "aria02": 41
+    },
+    "matched_pairs": 78,
+    "mean_iou_all": 0.7487913620813347,
+    "anchor_check": {
+     "aria01_matched": 78,
+     "aria01_mean_iou": 0.7487913620813347,
+     "perperson_matched": 37,
+     "perperson_mean_iou": 0.5883532348197502
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1501,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8935769891222771,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "5": {
+      "track_frames": 1465,
+      "matched": 37,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.5883532348197502,
+      "hist": {
+       "aria01": 37
+      }
+     },
+     "7": {
+      "track_frames": 541,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 277,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 609.0563539017079,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "1": {
+    "members": [
+     {
+      "token": "c4p3",
+      "cam": "cam04",
+      "pid": "3",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 39,
+      "mean_iou": 0.8027770491953167
+     },
+     {
+      "token": "c9p2",
+      "cam": "cam09",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7986995619371292
+     },
+     {
+      "token": "c12p2",
+      "cam": "cam12",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8050967402925412
+     },
+     {
+      "token": "c20p5",
+      "cam": "cam20",
+      "pid": "5",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 37,
+      "mean_iou": 0.5883532348197502
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "2": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8806341124543917
+     },
+     {
+      "token": "c9p1",
+      "cam": "cam09",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 23,
+      "mean_iou": 0.3516895067126427
+     },
+     {
+      "token": "c12p1",
+      "cam": "cam12",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8121832470604518
+     },
+     {
+      "token": "c20p1",
+      "cam": "cam20",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8935769891222771
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "011_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 79,
+    "mean_iou_all": 0.8414343606120095,
+    "anchor_check": {
+     "aria01_matched": 79,
+     "aria01_mean_iou": 0.8414343606120095,
+     "perperson_matched": 38,
+     "perperson_mean_iou": 0.7687701547836192
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1141,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.9087816733310055,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "5": {
+      "track_frames": 895,
+      "matched": 22,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7880277847879988,
+      "hist": {
+       "aria01": 22
+      }
+     },
+     "12": {
+      "track_frames": 428,
+      "matched": 16,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.742290913527597,
+      "hist": {
+       "aria01": 16
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 600.1367329442224,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": -1,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 78,
+    "mean_iou_all": 0.6301279071759669,
+    "anchor_check": {
+     "aria01_matched": 78,
+     "aria01_mean_iou": 0.6301279071759669,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.7823066972242114
+    },
+    "pids": {
+     "2": {
+      "track_frames": 1141,
+      "matched": 37,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.4614973560414257,
+      "hist": {
+       "aria02": 37
+      }
+     },
+     "6": {
+      "track_frames": 1141,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.7823066972242114,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "9": {
+      "track_frames": 1141,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "13": {
+      "track_frames": 1083,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 619.0265105491461,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 81,
+    "mean_iou_all": 0.8178374228236241,
+    "anchor_check": {
+     "aria01_matched": 81,
+     "aria01_mean_iou": 0.8178374228236241,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.8258603477877411
+    },
+    "pids": {
+     "3": {
+      "track_frames": 1055,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "7": {
+      "track_frames": 1141,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8258603477877411,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "10": {
+      "track_frames": 1119,
+      "matched": 40,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8096139247354049,
+      "hist": {
+       "aria02": 40
+      }
+     },
+     "14": {
+      "track_frames": 788,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "15": {
+      "track_frames": 71,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "16": {
+      "track_frames": 7,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "17": {
+      "track_frames": 514,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "18": {
+      "track_frames": 81,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 614.1497305936592,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": -1,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 40,
+     "aria02": 41
+    },
+    "matched_pairs": 79,
+    "mean_iou_all": 0.7790546663972848,
+    "anchor_check": {
+     "aria01_matched": 79,
+     "aria01_mean_iou": 0.7790546663972848,
+     "perperson_matched": 38,
+     "perperson_mean_iou": 0.6702758677360313
+    },
+    "pids": {
+     "4": {
+      "track_frames": 877,
+      "matched": 32,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.6707722885701912,
+      "hist": {
+       "aria01": 32
+      }
+     },
+     "8": {
+      "track_frames": 1141,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8798740407662516,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "11": {
+      "track_frames": 298,
+      "matched": 6,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.6676282899538449,
+      "hist": {
+       "aria01": 6
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 607.9453934070676,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "2": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.9087816733310055
+     },
+     {
+      "token": "c9p2",
+      "cam": "cam09",
+      "pid": "2",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 37,
+      "mean_iou": 0.4614973560414257
+     },
+     {
+      "token": "c12p10",
+      "cam": "cam12",
+      "pid": "10",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.8096139247354049
+     },
+     {
+      "token": "c20p8",
+      "cam": "cam20",
+      "pid": "8",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8798740407662516
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "1": {
+    "members": [
+     {
+      "token": "c4p5",
+      "cam": "cam04",
+      "pid": "5",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 22,
+      "mean_iou": 0.7880277847879988
+     },
+     {
+      "token": "c9p6",
+      "cam": "cam09",
+      "pid": "6",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7823066972242114
+     },
+     {
+      "token": "c12p7",
+      "cam": "cam12",
+      "pid": "7",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8258603477877411
+     },
+     {
+      "token": "c20p4",
+      "cam": "cam20",
+      "pid": "4",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 32,
+      "mean_iou": 0.6707722885701912
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "012_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 80,
+    "mean_iou_all": 0.8638550457159951,
+    "anchor_check": {
+     "aria01_matched": 80,
+     "aria01_mean_iou": 0.8638550457159951,
+     "perperson_matched": 39,
+     "perperson_mean_iou": 0.8086105831510939
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.9164046564484627,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "2": {
+      "track_frames": 1264,
+      "matched": 39,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8086105831510939,
+      "hist": {
+       "aria01": 39
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 597.9754922556323,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 81,
+    "mean_iou_all": 0.6452007843526082,
+    "anchor_check": {
+     "aria01_matched": 81,
+     "aria01_mean_iou": 0.6452007843526082,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.788576815522859
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1300,
+      "matched": 40,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.49824035240310016,
+      "hist": {
+       "aria02": 40
+      }
+     },
+     "2": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.788576815522859,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "3": {
+      "track_frames": 493,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "6": {
+      "track_frames": 1235,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 615.791164664335,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.8123952498511975,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.8123952498511975,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.8116875737856546
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8131029259167407,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "2": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8116875737856546,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "5": {
+      "track_frames": 31,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "7": {
+      "track_frames": 1134,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 1063,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "10": {
+      "track_frames": 711,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 691,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 613.0556328352108,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 81,
+    "mean_iou_all": 0.7847891067137029,
+    "anchor_check": {
+     "aria01_matched": 81,
+     "aria01_mean_iou": 0.7847891067137029,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.6704982543929664
+    },
+    "pids": {
+     "1": {
+      "track_frames": 1301,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8881660000248386,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "2": {
+      "track_frames": 1301,
+      "matched": 40,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.6788277910697894,
+      "hist": {
+       "aria01": 40
+      }
+     },
+     "4": {
+      "track_frames": 1281,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "8": {
+      "track_frames": 726,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 134,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 607.2081596906795,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "2": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.9164046564484627
+     },
+     {
+      "token": "c9p1",
+      "cam": "cam09",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.49824035240310016
+     },
+     {
+      "token": "c12p1",
+      "cam": "cam12",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8131029259167407
+     },
+     {
+      "token": "c20p1",
+      "cam": "cam20",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8881660000248386
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "1": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 39,
+      "mean_iou": 0.8086105831510939
+     },
+     {
+      "token": "c9p2",
+      "cam": "cam09",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.788576815522859
+     },
+     {
+      "token": "c12p2",
+      "cam": "cam12",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8116875737856546
+     },
+     {
+      "token": "c20p2",
+      "cam": "cam20",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 40,
+      "mean_iou": 0.6788277910697894
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ },
+ {
+  "scene": "013_tennis",
+  "cams": {
+   "cam04": {
+    "cam": "cam04",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.8481754932548129,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.8481754932548129,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.8017671190646375
+    },
+    "pids": {
+     "1": {
+      "track_frames": 901,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8945838674449875,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "2": {
+      "track_frames": 901,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8017671190646375,
+      "hist": {
+       "aria01": 41
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00024894164651660357,
+    "fx_used": 599.2175860737646,
+    "fx_calib_json": 441.5481472446081
+   },
+   "cam09": {
+    "cam": "cam09",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 77,
+    "mean_iou_all": 0.6443188903398552,
+    "anchor_check": {
+     "aria01_matched": 77,
+     "aria01_mean_iou": 0.6443188903398552,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.8027066203730175
+    },
+    "pids": {
+     "1": {
+      "track_frames": 901,
+      "matched": 35,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.4682596948552839,
+      "hist": {
+       "aria02": 35
+      }
+     },
+     "2": {
+      "track_frames": 901,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8027066203730175,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "3": {
+      "track_frames": 781,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "10": {
+      "track_frames": 475,
+      "matched": 1,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.3124938009401967,
+      "hist": {
+       "aria02": 1
+      }
+     }
+    },
+    "extrinsic_spread_m": 0.00034253630817618325,
+    "fx_used": 616.0666532294696,
+    "fx_calib_json": 440.5227428660064
+   },
+   "cam12": {
+    "cam": "cam12",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 82,
+    "mean_iou_all": 0.8062043388008551,
+    "anchor_check": {
+     "aria01_matched": 82,
+     "aria01_mean_iou": 0.8062043388008551,
+     "perperson_matched": 41,
+     "perperson_mean_iou": 0.8225175155078948
+    },
+    "pids": {
+     "4": {
+      "track_frames": 890,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.7898911620938147,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "6": {
+      "track_frames": 901,
+      "matched": 41,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.8225175155078948,
+      "hist": {
+       "aria01": 41
+      }
+     },
+     "8": {
+      "track_frames": 782,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "11": {
+      "track_frames": 532,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "13": {
+      "track_frames": 352,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "15": {
+      "track_frames": 436,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00011694271633169221,
+    "fx_used": 614.7564697265625,
+    "fx_calib_json": 439.08081147057567
+   },
+   "cam20": {
+    "cam": "cam20",
+    "frame_offset": 0,
+    "gt_frames_sampled": 41,
+    "gt_people": {
+     "aria01": 41,
+     "aria02": 41
+    },
+    "matched_pairs": 80,
+    "mean_iou_all": 0.758864122312555,
+    "anchor_check": {
+     "aria01_matched": 80,
+     "aria01_mean_iou": 0.758864122312555,
+     "perperson_matched": 39,
+     "perperson_mean_iou": 0.6195003995556921
+    },
+    "pids": {
+     "3": {
+      "track_frames": 464,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "5": {
+      "track_frames": 897,
+      "matched": 39,
+      "identity": "aria01",
+      "purity": 1.0,
+      "mean_iou": 0.6195003995556921,
+      "hist": {
+       "aria01": 39
+      }
+     },
+     "7": {
+      "track_frames": 197,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "9": {
+      "track_frames": 827,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "12": {
+      "track_frames": 901,
+      "matched": 41,
+      "identity": "aria02",
+      "purity": 1.0,
+      "mean_iou": 0.8914296146910337,
+      "hist": {
+       "aria02": 41
+      }
+     },
+     "14": {
+      "track_frames": 317,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     },
+     "16": {
+      "track_frames": 586,
+      "matched": 0,
+      "identity": null,
+      "purity": 0.0,
+      "mean_iou": 0.0,
+      "hist": {}
+     }
+    },
+    "extrinsic_spread_m": 0.00017731849200154306,
+    "fx_used": 608.6733015193496,
+    "fx_calib_json": 440.53746698932804
+   }
+  },
+  "groups": {
+   "2": {
+    "members": [
+     {
+      "token": "c4p1",
+      "cam": "cam04",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8945838674449875
+     },
+     {
+      "token": "c9p1",
+      "cam": "cam09",
+      "pid": "1",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 35,
+      "mean_iou": 0.4682596948552839
+     },
+     {
+      "token": "c12p4",
+      "cam": "cam12",
+      "pid": "4",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.7898911620938147
+     },
+     {
+      "token": "c20p12",
+      "cam": "cam20",
+      "pid": "12",
+      "identity": "aria02",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8914296146910337
+     }
+    ],
+    "identities": [
+     "aria02"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   },
+   "1": {
+    "members": [
+     {
+      "token": "c4p2",
+      "cam": "cam04",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8017671190646375
+     },
+     {
+      "token": "c9p2",
+      "cam": "cam09",
+      "pid": "2",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8027066203730175
+     },
+     {
+      "token": "c12p6",
+      "cam": "cam12",
+      "pid": "6",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 41,
+      "mean_iou": 0.8225175155078948
+     },
+     {
+      "token": "c20p5",
+      "cam": "cam20",
+      "pid": "5",
+      "identity": "aria01",
+      "purity": 1.0,
+      "matched": 39,
+      "mean_iou": 0.6195003995556921
+     }
+    ],
+    "identities": [
+     "aria01"
+    ],
+    "consistent": true,
+    "unmatched_tokens": []
+   }
+  },
+  "gt_people_not_in_any_group": {}
+ }
+]

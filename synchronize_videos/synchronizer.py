@@ -222,7 +222,22 @@ class Synchronizer:
                 if i1 - i0 < self.min_overlap:
                     continue
                 i_idx = torch.arange(i0, i1, device=cost.device)
-                p_scores[k] = cost[i_idx, i_idx + k].median().item()
+                # _compute_cost_matrix writes +inf wherever two frames share no
+                # confident joint.  A person who is present in both videos but
+                # only sparsely observed (someone in the background, tracked in a
+                # few hundred frames) is mostly inf, so a plain median returns inf
+                # for EVERY k.  estimate_couple_offset then sums finite + inf =
+                # inf at every offset and the argmin degenerates to whichever k
+                # iterates first (≈0), silently erasing the well-tracked persons'
+                # evidence.  Median only the finite entries, and require
+                # min_overlap genuinely comparable frames rather than
+                # min_overlap index positions.
+                diag = cost[i_idx, i_idx + k]
+                finite = torch.isfinite(diag)
+                n_finite = int(finite.sum().item())
+                if n_finite < self.min_overlap:
+                    continue
+                p_scores[k] = diag[finite].median().item()
             if not p_scores:
                 if self.verbose:
                     logger.debug(f"    person {p}: no valid overlap — skipping")
@@ -238,19 +253,25 @@ class Synchronizer:
             logger.warning("    no person had valid overlap — returning offset=0")
             return 0.0
 
-        # Sum median costs across all persons for each k that every person covers.
-        common_ks = set(per_person_costs[0].keys())
-        for p_scores in per_person_costs[1:]:
-            common_ks &= set(p_scores.keys())
+        # Sum median costs across all persons over every k that ANY person can
+        # score.  This was the intersection, which let a briefly co-visible person
+        # veto offsets it cannot judge: with windows [348,767] and [1,442] such a
+        # person only reaches min_overlap at negative shifts, so k=0 was deleted
+        # from the candidate set even though the fully tracked subject scored it
+        # perfectly, and the pair resolved to k=-35 instead of k=0.  Persons that
+        # cannot score a given k simply do not contribute to it.
+        common_ks = set().union(*[set(p.keys()) for p in per_person_costs])
 
-        if not common_ks:
-            # Fall back to the union and treat missing persons as having cost=0
-            common_ks = set().union(*[set(p.keys()) for p in per_person_costs])
-
-        combined: dict[int, float] = {
-            k: sum(p_scores.get(k, 0.0) for p_scores in per_person_costs)
-            for k in common_ks
-        }
+        # Mean over the persons that can actually score k, not a sum.  Costs are
+        # non-negative, so summing (with absent persons counted as 0) makes an
+        # offset cheaper simply because fewer persons could judge it — which
+        # systematically pushes the argmin away from the range where a briefly
+        # co-visible person contributes.  Averaging keeps every person's opinion
+        # weighted equally regardless of how many are available at that offset.
+        combined: dict[int, float] = {}
+        for k in common_ks:
+            vals = [p_scores[k] for p_scores in per_person_costs if k in p_scores]
+            combined[k] = sum(vals) / len(vals)
         best_k = min(combined, key=combined.__getitem__)
         if self.verbose:
             sorted_combined = sorted(combined.items(), key=lambda x: x[1])

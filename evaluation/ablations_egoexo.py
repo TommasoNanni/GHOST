@@ -89,6 +89,14 @@ _MODALITY_LABELS = {
 # convention offset -> systematic PA-MPJPE inflation.  We therefore regress
 # COCO-17 from the posed SMPL-X mesh and index GT by COCO order.
 GT_TO_COCO: dict[str, int] = {
+    # All 17 COCO joints — the EgoExo4D body-pose benchmark definition. GT
+    # annotates all 17 (verified 2026-08-04). Matching is unaffected: it gates
+    # on GT_TO_MHR70 (12 limbs only), so this is a metric-only change.
+    "nose":            0,
+    "left-eye":        1,
+    "right-eye":       2,
+    "left-ear":        3,
+    "right-ear":       4,
     "left-shoulder":   5,
     "right-shoulder":  6,
     "left-elbow":      7,

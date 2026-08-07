@@ -1,0 +1,199 @@
+{
+  "config": {
+    "checkpoint": "checkpoints/fusion_r2/snapshot_ep106.pt",
+    "body_split": "test_body",
+    "min_views": 1,
+    "min_run": 5,
+    "joint_set": "SMPL-X body joints 1..21 (packed slots 0..20), global orientation excluded",
+    "n_scenes": 10,
+    "cache_dir": "/iopsstor/scratch/cscs/tnanni/ghost_outputs/fused_cache/rich_test_r2"
+  },
+  "variants": {
+    "chordal": {
+      "mean_angular_velocity_deg": 1.5530990362167358,
+      "median_angular_velocity_deg": 1.1555522680282593,
+      "mean_angular_acceleration_deg": 0.7602375745773315,
+      "median_angular_acceleration_deg": 0.4857461452484131,
+      "per_joint_mean_acceleration_deg": {
+        "left_hip": 0.748659315953324,
+        "right_hip": 0.744187026389209,
+        "spine1": 0.4917638276653214,
+        "left_knee": 0.9550094771416688,
+        "right_knee": 1.0261016033757158,
+        "spine2": 0.40809097760104757,
+        "left_ankle": 0.6950460251917769,
+        "right_ankle": 0.6997732272078843,
+        "spine3": 0.3729480985291253,
+        "left_foot": 0.5215557994741745,
+        "right_foot": 0.5558113248691534,
+        "neck": 0.749407478178823,
+        "left_collar": 0.6587451575926777,
+        "right_collar": 0.6547566038929172,
+        "head": 0.5277543080530205,
+        "left_shoulder": 0.7669675158068557,
+        "right_shoulder": 0.8350505696577629,
+        "left_elbow": 1.1824216294635082,
+        "right_elbow": 1.3321201269031357,
+        "left_wrist": 0.9659264706557461,
+        "right_wrist": 1.0728927931035999
+      },
+      "n_velocity_triplets": 127512,
+      "n_acceleration_triplets": 127176
+    },
+    "ghost": {
+      "mean_angular_velocity_deg": 1.4410042762756348,
+      "median_angular_velocity_deg": 0.9540860652923584,
+      "mean_angular_acceleration_deg": 0.7580838799476624,
+      "median_angular_acceleration_deg": 0.40941911935806274,
+      "per_joint_mean_acceleration_deg": {
+        "left_hip": 0.7862825155888082,
+        "right_hip": 0.7834169929219678,
+        "spine1": 0.3980249662537871,
+        "left_knee": 1.0292828659400284,
+        "right_knee": 1.0587938064943059,
+        "spine2": 0.2602963868031571,
+        "left_ankle": 0.6438552961639243,
+        "right_ankle": 0.7274318736642008,
+        "spine3": 0.1828106398272231,
+        "left_foot": 0.20882874191830936,
+        "right_foot": 0.24918577086815275,
+        "neck": 0.5166565915237488,
+        "left_collar": 0.6491191000573071,
+        "right_collar": 0.6316700677733126,
+        "head": 0.665976991584153,
+        "left_shoulder": 0.8430329912404876,
+        "right_shoulder": 0.9232549610667059,
+        "left_elbow": 1.4144803954871517,
+        "right_elbow": 1.5972682204555173,
+        "left_wrist": 1.0090561511494525,
+        "right_wrist": 1.3410369307393284
+      },
+      "n_velocity_triplets": 127512,
+      "n_acceleration_triplets": 127176
+    },
+    "gt": {
+      "mean_angular_velocity_deg": 1.8540198802947998,
+      "median_angular_velocity_deg": 1.157582402229309,
+      "mean_angular_acceleration_deg": 0.8584567308425903,
+      "median_angular_acceleration_deg": 0.440762996673584,
+      "per_joint_mean_acceleration_deg": {
+        "left_hip": 0.6485030909353078,
+        "right_hip": 0.6269460829907396,
+        "spine1": 0.6233075775274984,
+        "left_knee": 0.8784484082200568,
+        "right_knee": 0.8898328867109795,
+        "spine2": 0.5237507782335168,
+        "left_ankle": 1.021445505527713,
+        "right_ankle": 1.0614110628238915,
+        "spine3": 0.4760406887358057,
+        "left_foot": 0.26575410480228406,
+        "right_foot": 0.2151644993844089,
+        "neck": 0.7091657810671012,
+        "left_collar": 0.7045542248961475,
+        "right_collar": 0.7408910355920678,
+        "head": 0.7944157686542174,
+        "left_shoulder": 0.7761560332822359,
+        "right_shoulder": 0.8707382934096625,
+        "left_elbow": 1.297594922221951,
+        "right_elbow": 1.2780121412113448,
+        "left_wrist": 1.7053649860140196,
+        "right_wrist": 1.9200937218836152
+      },
+      "n_velocity_triplets": 127512,
+      "n_acceleration_triplets": 127176
+    }
+  },
+  "skipped": [],
+  "per_scene": [
+    {
+      "scene": "Gym_010_cooking1",
+      "T": 779,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 16254,
+      "n_a": 16233
+    },
+    {
+      "scene": "Gym_010_mountainclimber1",
+      "T": 504,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 10479,
+      "n_a": 10458
+    },
+    {
+      "scene": "Gym_011_burpee2",
+      "T": 479,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "Gym_012_lunge1",
+      "T": 225,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 4179,
+      "n_a": 4158
+    },
+    {
+      "scene": "Gym_013_dips1",
+      "T": 503,
+      "K": 4,
+      "P": 1,
+      "n_runs": 4,
+      "n_w": 9555,
+      "n_a": 9471
+    },
+    {
+      "scene": "LectureHall_009_021_reparingprojector1",
+      "T": 499,
+      "K": 4,
+      "P": 2,
+      "n_runs": 4,
+      "n_w": 20517,
+      "n_a": 20433
+    },
+    {
+      "scene": "LectureHall_019_wipingchairs1",
+      "T": 978,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 20433,
+      "n_a": 20412
+    },
+    {
+      "scene": "LectureHall_021_plankjack1",
+      "T": 507,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 10479,
+      "n_a": 10458
+    },
+    {
+      "scene": "ParkingLot2_009_overfence1",
+      "T": 462,
+      "K": 4,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 9429,
+      "n_a": 9408
+    },
+    {
+      "scene": "ParkingLot2_017_eating1",
+      "T": 799,
+      "K": 3,
+      "P": 1,
+      "n_runs": 1,
+      "n_w": 16758,
+      "n_a": 16737
+    }
+  ]
+}
