@@ -1,0 +1,28 @@
+Job 3018847  activity=04_basketball  modalities=2  fusion=geodesic-median  start=Thu Aug  6 11:58:26 AM CEST 2026
+GPU 0: NVIDIA GH200 120GB (UUID: GPU-7c584077-9cbd-2ed0-f29d-ef99fc2e09fc)
+GPU 1: NVIDIA GH200 120GB (UUID: GPU-9ef2c1c7-078e-7cbb-6ea4-cd44a169f2e0)
+GPU 2: NVIDIA GH200 120GB (UUID: GPU-40a18a96-de88-c3e3-f128-39eb55af4463)
+GPU 3: NVIDIA GH200 120GB (UUID: GPU-a9c03120-7502-be2c-af9f-3769594c4ad0)
+=== Stage B: aggregate ===
+  001_basketball            M2: W†=  159.4 GA=  61.5 PA= 28.3 mm   | single-view PA: best=27.3 median=34.3
+  002_basketball            M2: W†=  132.6 GA=  66.4 PA= 31.5 mm   | single-view PA: best=29.8 median=38.0
+  003_basketball            M2: W†=  137.9 GA=  61.2 PA= 30.9 mm   | single-view PA: best=31.6 median=38.9
+  004_basketball            M2: W†=  123.3 GA=  54.8 PA= 33.3 mm   | single-view PA: best=32.0 median=39.3
+  005_basketball            M2: W†=  135.9 GA=  57.7 PA= 32.3 mm   | single-view PA: best=31.0 median=38.6
+  006_basketball            M2: W†=  133.8 GA=  53.8 PA= 30.5 mm   | single-view PA: best=30.3 median=36.8
+  007_basketball            M2: W†=  207.9 GA=  79.2 PA= 37.7 mm   | single-view PA: best=35.7 median=44.5
+  008_basketball            M2: W†=  165.4 GA=  58.9 PA= 31.7 mm   | single-view PA: best=30.5 median=39.3
+  009_basketball            M2: W†=  175.4 GA=  53.7 PA= 30.5 mm   | single-view PA: best=29.8 median=36.5
+  011_basketball            M2: W†=  108.6 GA=  54.5 PA= 25.2 mm   | single-view PA: best=24.5 median=29.4
+  012_basketball            M2: W†=  128.3 GA=  66.7 PA= 27.0 mm   | single-view PA: best=25.8 median=31.4
+  013_basketball            M2: W†=  151.4 GA=  61.6 PA= 34.4 mm   | single-view PA: best=32.5 median=40.2
+  014_basketball            M2: W†=  170.5 GA=  69.3 PA= 35.1 mm   | single-view PA: best=33.6 median=42.5
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        13      148.5       61.5       31.4
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+Done: Thu Aug  6 12:23:14 PM CEST 2026

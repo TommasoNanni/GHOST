@@ -1,0 +1,76 @@
+Job 3019729  activity=06_badminton  modalities=2  fusion=geodesic-median  start=Thu Aug  6 02:24:34 PM CEST 2026
+GPU 0: NVIDIA GH200 120GB (UUID: GPU-a6c31214-96b9-36a9-3d91-dfd3229047ea)
+GPU 1: NVIDIA GH200 120GB (UUID: GPU-8681bfe0-4e9b-e2b7-e344-10a4f976d684)
+GPU 2: NVIDIA GH200 120GB (UUID: GPU-800494a7-571a-267e-e05e-89c541104b01)
+GPU 3: NVIDIA GH200 120GB (UUID: GPU-a375717e-b6a1-c030-bf02-a1b9b6473979)
+=== Stage B: aggregate ===
+  001_badminton             M2: W†=  899.1 GA= 453.3 PA= 24.3 mm   | single-view PA: best=23.7 median=29.3
+  002_badminton             M2: W†=  604.1 GA=  84.5 PA= 24.2 mm   | single-view PA: best=23.5 median=28.9
+  003_badminton             M2: W†=  940.2 GA= 376.8 PA= 25.8 mm   | single-view PA: best=24.3 median=30.7
+  004_badminton             M2: W†=  517.0 GA=  68.6 PA= 24.6 mm   | single-view PA: best=23.6 median=28.5
+  005_badminton             M2: W†=  609.3 GA=  80.2 PA= 24.1 mm   | single-view PA: best=23.0 median=28.3
+  006_badminton             M2: W†=  588.6 GA=  64.6 PA= 23.0 mm   | single-view PA: best=21.9 median=27.0
+  007_badminton             M2: W†=  567.9 GA=  87.4 PA= 25.7 mm   | single-view PA: best=23.9 median=29.8
+  008_badminton             M2: W†=  584.9 GA=  73.8 PA= 23.5 mm   | single-view PA: best=22.7 median=26.6
+  009_badminton             M2: W†=  522.9 GA=  95.6 PA= 26.2 mm   | single-view PA: best=24.9 median=30.4
+  010_badminton             M2: W†=  562.5 GA=  65.8 PA= 25.1 mm   | single-view PA: best=24.2 median=29.6
+  011_badminton             M2: W†=  582.7 GA=  84.6 PA= 25.7 mm   | single-view PA: best=24.8 median=29.6
+  012_badminton             M2: W†=  565.1 GA= 109.0 PA= 25.1 mm   | single-view PA: best=24.1 median=29.2
+  013_badminton             M2: W†=  573.5 GA= 111.4 PA= 25.8 mm   | single-view PA: best=24.6 median=29.8
+  014_badminton             M2: W†=  547.0 GA=  78.3 PA= 24.8 mm   | single-view PA: best=23.7 median=29.3
+  015_badminton             M2: W†=  567.9 GA=  63.2 PA= 23.6 mm   | single-view PA: best=22.9 median=28.0
+  016_badminton             M2: W†=  575.6 GA=  96.1 PA= 24.4 mm   | single-view PA: best=23.2 median=28.5
+  017_badminton             M2: W†=  504.4 GA=  77.2 PA= 24.5 mm   | single-view PA: best=24.1 median=29.5
+  018_badminton             M2: W†=  553.3 GA=  68.6 PA= 23.7 mm   | single-view PA: best=22.5 median=27.8
+  019_badminton             M2: W†=  636.2 GA=  79.4 PA= 25.5 mm   | single-view PA: best=24.7 median=30.2
+  020_badminton             M2: W†=  565.4 GA=  53.2 PA= 24.9 mm   | single-view PA: best=23.7 median=28.9
+  021_badminton             M2: W†=  636.7 GA= 269.2 PA= 25.3 mm   | single-view PA: best=24.2 median=29.2
+  022_badminton             M2: W†=  623.7 GA=  87.2 PA= 24.2 mm   | single-view PA: best=23.5 median=28.3
+  023_badminton             M2: W†=  543.7 GA=  55.0 PA= 23.7 mm   | single-view PA: best=23.1 median=27.7
+  024_badminton             M2: W†=  528.8 GA=  68.0 PA= 23.1 mm   | single-view PA: best=22.6 median=26.8
+  025_badminton             M2: W†=  541.2 GA=  56.8 PA= 23.5 mm   | single-view PA: best=22.9 median=27.9
+  026_badminton             M2: W†=  517.6 GA=  68.7 PA= 24.0 mm   | single-view PA: best=23.0 median=28.3
+  027_badminton             M2: W†=  538.3 GA=  67.9 PA= 23.9 mm   | single-view PA: best=23.1 median=28.0
+  028_badminton             M2: W†=  567.3 GA=  74.2 PA= 25.2 mm   | single-view PA: best=24.2 median=30.5
+  029_badminton             M2: W†=  495.6 GA=  79.6 PA= 24.4 mm   | single-view PA: best=24.0 median=28.7
+  030_badminton             M2: W†=  569.0 GA=  85.5 PA= 25.5 mm   | single-view PA: best=24.8 median=30.9
+  031_badminton             M2: W†=  498.4 GA=  85.1 PA= 24.1 mm   | single-view PA: best=23.6 median=28.8
+  032_badminton             M2: W†=  506.3 GA=  67.1 PA= 24.4 mm   | single-view PA: best=23.1 median=29.1
+  033_badminton             M2: W†=  534.9 GA=  70.0 PA= 25.1 mm   | single-view PA: best=24.5 median=30.3
+  034_badminton             M2: W†=  578.8 GA=  75.6 PA= 28.5 mm   | single-view PA: best=27.4 median=35.3
+  035_badminton             M2: W†=  551.9 GA=  63.3 PA= 27.2 mm   | single-view PA: best=26.2 median=32.7
+  036_badminton             M2: W†=  570.3 GA=  88.8 PA= 25.2 mm   | single-view PA: best=24.6 median=30.1
+  037_badminton             M2: W†=  586.5 GA=  62.0 PA= 26.4 mm   | single-view PA: best=25.5 median=30.9
+  038_badminton             M2: W†=  472.6 GA=  46.7 PA= 23.4 mm   | single-view PA: best=22.6 median=27.4
+  039_badminton             M2: W†=  592.9 GA=  85.2 PA= 24.7 mm   | single-view PA: best=23.8 median=28.8
+  040_badminton             M2: W†=  493.6 GA=  54.7 PA= 24.7 mm   | single-view PA: best=24.0 median=29.6
+  041_badminton             M2: W†=  531.2 GA=  72.9 PA= 24.1 mm   | single-view PA: best=23.7 median=28.5
+  042_badminton             M2: W†=  544.3 GA=  60.6 PA= 26.4 mm   | single-view PA: best=24.9 median=30.8
+  043_badminton             M2: W†=  533.9 GA=  73.6 PA= 27.3 mm   | single-view PA: best=26.4 median=31.9
+  044_badminton             M2: W†=  602.8 GA=  67.2 PA= 26.4 mm   | single-view PA: best=26.0 median=30.4
+  045_badminton             M2: W†=  473.6 GA=  64.5 PA= 26.1 mm   | single-view PA: best=25.5 median=30.3
+  046_badminton             M2: W†=  622.7 GA=  90.6 PA= 26.4 mm   | single-view PA: best=25.6 median=31.3
+  047_badminton             M2: W†=  588.6 GA=  77.0 PA= 25.4 mm   | single-view PA: best=24.3 median=30.0
+  048_badminton             M2: W†=  575.2 GA=  67.7 PA= 25.4 mm   | single-view PA: best=24.1 median=29.6
+  049_badminton             M2: W†=  612.2 GA=  66.5 PA= 25.6 mm   | single-view PA: best=24.7 median=29.5
+  050_badminton             M2: W†=  867.3 GA= 274.2 PA= 27.2 mm   | single-view PA: best=25.2 median=30.7
+  051_badminton             M2: W†=  798.2 GA= 112.5 PA= 27.5 mm   | single-view PA: best=25.9 median=30.8
+  052_badminton             M2: W†=  798.9 GA= 416.7 PA= 27.3 mm   | single-view PA: best=26.1 median=30.8
+  053_badminton             M2: W†=  776.1 GA= 163.0 PA= 27.4 mm   | single-view PA: best=26.0 median=31.3
+  054_badminton             M2: W†=  685.3 GA=  95.4 PA= 27.1 mm   | single-view PA: best=26.2 median=30.3
+  055_badminton             M2: W†=  715.3 GA= 175.5 PA= 26.4 mm   | single-view PA: best=24.7 median=29.8
+  056_badminton             M2: W†=  796.9 GA= 195.9 PA= 28.7 mm   | single-view PA: best=27.0 median=32.4
+  057_badminton             M2: W†=  914.1 GA= 176.3 PA= 27.9 mm   | single-view PA: best=26.9 median=31.4
+  058_badminton             M2: W†=  603.8 GA= 131.6 PA= 27.2 mm   | single-view PA: best=26.1 median=30.6
+  059_badminton             M2: W†=  712.6 GA= 191.2 PA= 28.9 mm   | single-view PA: best=27.7 median=32.6
+  060_badminton             M2: W†=  801.7 GA= 166.0 PA= 26.4 mm   | single-view PA: best=25.6 median=30.3
+  061_badminton             M2: W†=  703.3 GA= 159.0 PA= 26.4 mm   | single-view PA: best=25.4 median=29.5
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        61      611.0      111.2       25.4
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+Done: Thu Aug  6 03:15:10 PM CEST 2026

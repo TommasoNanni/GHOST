@@ -1,0 +1,68 @@
+=== GPU STATUS ===
+Wed Aug  5 15:22:34 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 590.48.01              Driver Version: 590.48.01      CUDA Version: 13.1     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GH200 120GB             Off |   00000009:01:00.0 Off |                    0 |
+| N/A   23C    P0             97W /  900W |      13MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   1  NVIDIA GH200 120GB             Off |   00000019:01:00.0 Off |                    0 |
+| N/A   25C    P0             86W /  900W |      10MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   2  NVIDIA GH200 120GB             Off |   00000029:01:00.0 Off |                    0 |
+| N/A   25C    P0            103W /  900W |      10MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   3  NVIDIA GH200 120GB             Off |   00000039:01:00.0 Off |                    0 |
+| N/A   24C    P0             86W /  900W |      13MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+=========================
+Job ID: 3007975  |  Modality: M2  |  Fusion: geodesic median (no checkpoint)  |  Start: Wed Aug  5 03:22:34 PM CEST 2026
+
+[sqsh] mounted /capstor/scratch/cscs/tnanni/datasets/rich/centered_test.sqsh -> /tmp/centered_test_3007975
+[sqsh] scenes with crop_meta.json: 52
+
+
+=================================================================
+AGGREGATE  (52 scenes evaluated)
+=================================================================
+  Metric                       M2 pred-cam+GT-sc            CHROMM multi
+  ----------------------------------------------------------------------
+  WA-MPJPE                                  60.1mm                     —
+  W-MPJPE                                   98.4mm                     —
+  WA-MPJPE-100                              46.4mm               53.1 mm
+  W-MPJPE-100                               66.0mm               79.0 mm
+  GA-MPJPE                                  25.7mm                     —
+  PA-MPJPE                                  25.4mm                     —
+  RTE                                        0.89%                 1.4 %
+
+  --- Diagnostics (shared) ---
+  Cam rot err (°)                       0.71
+  Cam t_cos                           0.9999
+  Cam t_err pred-sc (cm)                40.5
+  Cam t_err GT-sc (cm)                   9.2
+  Pred scale                          7.3896
+  GT scale                            7.4596
+  Scale err (%)                        -0.8%
+
+  --- Per-modality diagnostics ---
+  Raw root err (cm)                          7.0cm
+  Root orient err (°)                         5.5°
+
+
+Done: Wed Aug  5 04:33:13 PM CEST 2026

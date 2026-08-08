@@ -11,6 +11,7 @@ bash_jobs/download_rich_train.sh
 CLAUDE.md
 .pytest_cache/
 *.out
+!paper_results/*.out
 wandb/
 fusion_outputs/
 manual_reids/

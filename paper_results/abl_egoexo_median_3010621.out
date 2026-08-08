@@ -1,0 +1,83 @@
+=== GPU STATUS ===
+Wed Aug  5 21:03:47 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 590.48.01              Driver Version: 590.48.01      CUDA Version: 13.1     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GH200 120GB             Off |   00000009:01:00.0 Off |                    0 |
+| N/A   24C    P0             87W /  900W |       9MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   1  NVIDIA GH200 120GB             Off |   00000019:01:00.0 Off |                    0 |
+| N/A   26C    P0             95W /  900W |      11MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   2  NVIDIA GH200 120GB             Off |   00000029:01:00.0 Off |                    0 |
+| N/A   25C    P0             92W /  900W |      17MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   3  NVIDIA GH200 120GB             Off |   00000039:01:00.0 Off |                    0 |
+| N/A   24C    P0             95W /  900W |      17MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+=========================
+Job ID: 3010621  |  Fusion: geodesic median (no checkpoint)  |  Start: Wed Aug  5 09:03:48 PM CEST 2026
+
+
+============================================================
+EgoExo4D ORACLE ABLATIONS — 179 body-GT scenes  [modalities=3]
+  Oracle numbers — NOT comparable to CHROMM/HSfM. Production number:
+  evaluation/evaluate_egoexo.py
+  Skipped (hand-only GT): 3
+  Skipped (missing files): 0
+------------------------------------------------------------
+  ALL evaluated scenes  (n=179)
+    M3: GT-cam   + GT-scale + pred-pose       (n=179)
+      W-MPJPE†  MEAN:    89.8 mm   (median   57.8)
+      PA-MPJPE  MEAN:    50.6 mm   (median   44.9)
+
+  EXCLUDING broken GT/calibration  (n=179)
+    M3: GT-cam   + GT-scale + pred-pose       (n=179)
+      W-MPJPE†  MEAN:    89.8 mm   (median   57.8)
+      PA-MPJPE  MEAN:    50.6 mm   (median   44.9)
+  (excluded takes not present in results: ['cmu_soccer16_2', 'uniandes_dance_002_2', 'uniandes_dance_002_11'])
+------------------------------------------------------------
+  PA-MPJPE per joint (mean over scenes, EXCLUDING broken GT/calibration, M3):
+    left-hip          115.1 mm  (n=168)
+    right-hip         113.5 mm  (n=172)
+    right-wrist        52.2 mm  (n=177)
+    left-wrist         48.2 mm  (n=174)
+    left-shoulder      45.7 mm  (n=178)
+    left-ear           41.9 mm  (n=139)
+    right-knee         41.7 mm  (n=153)
+    right-ear          41.7 mm  (n=166)
+    right-shoulder     41.5 mm  (n=177)
+    left-knee          40.6 mm  (n=157)
+    nose               40.4 mm  (n=170)
+    right-elbow        39.4 mm  (n=178)
+    left-ankle         39.0 mm  (n=148)
+    left-elbow         38.2 mm  (n=177)
+    right-ankle        38.0 mm  (n=149)
+    left-eye           37.3 mm  (n=162)
+    right-eye          37.1 mm  (n=171)
+============================================================
+
+Reading the ladder:
+  M2 - production  = metric-scale error (MapAnything)
+  M3 - M2          = camera-pose error (VGGT)
+  M3               = placement-given-perfect-cameras + pose error;
+                     the pose part is PA-MPJPE (placement-invariant)
+  Production (no oracle): evaluation/evaluate_egoexo.py
+
+Done: Wed Aug  5 09:08:24 PM CEST 2026

@@ -1,0 +1,26 @@
+Job 3019109  activity=05_volleyball  modalities=2  fusion=geodesic-median  start=Thu Aug  6 01:53:32 PM CEST 2026
+GPU 0: NVIDIA GH200 120GB (UUID: GPU-60579082-cfdc-8e2c-f855-0fbdfe864ee3)
+GPU 1: NVIDIA GH200 120GB (UUID: GPU-5ad56dc8-9034-a37e-b38e-53da4482aa24)
+GPU 2: NVIDIA GH200 120GB (UUID: GPU-f8c7af32-e20f-29f9-c47f-d0b69b3963f8)
+GPU 3: NVIDIA GH200 120GB (UUID: GPU-00c4b015-79b3-46bd-b9ef-8a86e5ea74c9)
+=== Stage B: aggregate ===
+  001_volleyball            M2: W†=  517.8 GA= 292.5 PA= 29.2 mm   | single-view PA: best=28.5 median=36.6
+  002_volleyball            M2: W†=  894.3 GA= 732.7 PA= 29.8 mm   | single-view PA: best=28.5 median=37.2
+  003_volleyball            M2: W†=  464.7 GA= 169.9 PA= 29.7 mm   | single-view PA: best=29.1 median=37.1
+  004_volleyball            M2: W†=  508.6 GA= 192.3 PA= 29.4 mm   | single-view PA: best=28.5 median=36.9
+  005_volleyball            M2: W†=  437.8 GA= 195.7 PA= 31.6 mm   | single-view PA: best=31.5 median=38.6
+  006_volleyball            M2: W†=  461.0 GA= 234.1 PA= 30.3 mm   | single-view PA: best=29.4 median=38.2
+  007_volleyball            M2: W†=  453.9 GA= 248.9 PA= 28.8 mm   | single-view PA: best=28.5 median=35.5
+  008_volleyball            M2: W†=  475.9 GA= 220.8 PA= 28.7 mm   | single-view PA: best=28.6 median=35.2
+  009_volleyball            M2: W†=  625.4 GA= 396.5 PA= 29.7 mm   | single-view PA: best=28.9 median=36.7
+  010_volleyball            M2: W†=  513.4 GA= 224.8 PA= 29.0 mm   | single-view PA: best=28.6 median=36.4
+  011_volleyball            M2: W†=  459.9 GA= 180.0 PA= 30.8 mm   | single-view PA: best=29.1 median=38.8
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        11      528.4      280.7       29.7
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+Done: Thu Aug  6 02:24:22 PM CEST 2026

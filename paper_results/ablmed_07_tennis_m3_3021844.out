@@ -1,0 +1,28 @@
+Job 3021844  activity=07_tennis  modalities=3  fusion=geodesic-median  start=Thu Aug  6 08:55:14 PM CEST 2026
+GPU 0: NVIDIA GH200 120GB (UUID: GPU-0afb2ac1-915c-74c9-c11c-9bcf9516f908)
+GPU 1: NVIDIA GH200 120GB (UUID: GPU-fb8a8976-57b9-92ec-f14c-23fec8c669fd)
+GPU 2: NVIDIA GH200 120GB (UUID: GPU-d3954260-624a-3c85-9d63-d9365d919620)
+GPU 3: NVIDIA GH200 120GB (UUID: GPU-ba886bdc-2039-4d12-1959-e3885e4187c6)
+=== Stage B: aggregate ===
+  001_tennis                M3: W†=  177.9 GA=  29.9 PA= 25.0 mm   | single-view PA: best=24.8 median=31.4
+  002_tennis                M3: W†=  185.7 GA=  35.3 PA= 27.0 mm   | single-view PA: best=26.4 median=33.8
+  003_tennis                M3: W†=  212.2 GA=  35.5 PA= 26.4 mm   | single-view PA: best=25.7 median=33.6
+  004_tennis                M3: W†=  190.4 GA=  34.7 PA= 27.5 mm   | single-view PA: best=26.9 median=34.9
+  005_tennis                M3: W†=  210.4 GA=  33.8 PA= 26.7 mm   | single-view PA: best=25.9 median=33.1
+  006_tennis                M3: W†=  235.4 GA=  45.2 PA= 26.6 mm   | single-view PA: best=25.9 median=32.1
+  007_tennis                M3: W†=  212.2 GA=  35.2 PA= 26.9 mm   | single-view PA: best=25.8 median=33.3
+  008_tennis                M3: W†=  210.9 GA=  33.4 PA= 26.1 mm   | single-view PA: best=25.5 median=32.3
+  009_tennis                M3: W†=  187.4 GA=  30.1 PA= 25.0 mm   | single-view PA: best=24.7 median=31.3
+  010_tennis                M3: W†=  157.0 GA=  34.4 PA= 26.7 mm   | single-view PA: best=25.8 median=33.3
+  011_tennis                M3: W†=  263.1 GA=  41.1 PA= 28.6 mm   | single-view PA: best=27.5 median=35.3
+  012_tennis                M3: W†=  129.4 GA=  33.2 PA= 26.7 mm   | single-view PA: best=25.7 median=32.9
+  013_tennis                M3: W†=  136.2 GA=  35.8 PA= 28.6 mm   | single-view PA: best=27.1 median=35.8
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M3: GT-cam   + GT-scale + pred-pose        13      193.0       35.2       26.7
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+Done: Thu Aug  6 09:53:55 PM CEST 2026

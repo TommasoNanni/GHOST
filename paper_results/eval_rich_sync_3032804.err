@@ -1,0 +1,473 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO __main__: Device: cuda
+INFO __main__: Found 52 trial(s) under /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync.
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_cooking1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_cooking1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_cooking1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_cooking1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.3801
+INFO __main__:   Cam rot err = 0.63°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 7.1cm  pred_scale = 8.3801  gt_scale = 8.3540  scale_err = +0.3%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_cooking1/crop_meta.json
+INFO __main__:   WA=  40.0mm  W=  78.5mm  WA100=  33.2mm  W100=  44.4mm  GA=  19.1mm  PA=  19.1mm  RTE= 0.72%  raw_root=7.3cm  orient=4.6°  n_valid=678
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_dips1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_dips1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_dips1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_dips1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.6715
+INFO __main__:   Cam rot err = 1.03°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 48.0cm  pred_scale = 8.6715  gt_scale = 8.2459  scale_err = +5.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_dips1/crop_meta.json
+INFO __main__:   WA=  55.1mm  W=  87.1mm  WA100=  47.4mm  W100=  66.5mm  GA=  31.3mm  PA=  31.3mm  RTE= 0.72%  raw_root=22.0cm  orient=5.6°  n_valid=472
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_dips2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_dips2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_dips2  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_dips2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.6817
+INFO __main__:   Cam rot err = 0.82°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 12.4cm  pred_scale = 8.6817  gt_scale = 8.5559  scale_err = +1.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_dips2/crop_meta.json
+INFO __main__:   WA=  73.0mm  W= 121.5mm  WA100=  49.2mm  W100=  70.2mm  GA=  29.8mm  PA=  29.8mm  RTE= 0.85%  raw_root=10.9cm  orient=5.9°  n_valid=503
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_lunge1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_lunge1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_lunge1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_lunge1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.4688
+INFO __main__:   Cam rot err = 0.94°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 9.0cm  pred_scale = 8.4688  gt_scale = 8.4595  scale_err = +0.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_lunge1/crop_meta.json
+INFO __main__:   WA=  43.6mm  W=  63.1mm  WA100=  37.1mm  W100=  49.2mm  GA=  21.5mm  PA=  21.5mm  RTE= 0.69%  raw_root=9.0cm  orient=5.3°  n_valid=272
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_lunge2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_lunge2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_lunge2  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_lunge2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=9.7456
+INFO __main__:   Cam rot err = 1.18°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 66.3cm  pred_scale = 9.7456  gt_scale = 8.9793  scale_err = +8.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_lunge2/crop_meta.json
+INFO __main__:   WA=  67.1mm  W=  91.5mm  WA100=  64.7mm  W100=  80.7mm  GA=  22.5mm  PA=  22.5mm  RTE= 1.36%  raw_root=41.8cm  orient=5.1°  n_valid=207
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_mountainclimber1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_mountainclimber1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_mountainclimber1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_mountainclimber1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.7149
+INFO __main__:   Cam rot err = 1.29°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 29.6cm  pred_scale = 6.7149  gt_scale = 6.9386  scale_err = -3.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_mountainclimber1/crop_meta.json
+INFO __main__:   WA=  52.3mm  W=  66.4mm  WA100=  44.5mm  W100=  50.3mm  GA=  32.3mm  PA=  32.3mm  RTE= 0.70%  raw_root=15.4cm  orient=5.6°  n_valid=450
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_mountainclimber2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_mountainclimber2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_mountainclimber2  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_mountainclimber2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.6000
+INFO __main__:   Cam rot err = 1.24°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 40.2cm  pred_scale = 6.6000  gt_scale = 6.9129  scale_err = -4.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_mountainclimber2/crop_meta.json
+INFO __main__:   WA=  46.6mm  W=  87.2mm  WA100=  42.7mm  W100=  54.1mm  GA=  35.2mm  PA=  35.2mm  RTE= 0.63%  raw_root=21.9cm  orient=6.9°  n_valid=364
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_pushup1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_pushup1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_pushup1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_pushup1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.9078
+INFO __main__:   Cam rot err = 1.22°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 16.5cm  pred_scale = 6.9078  gt_scale = 7.0050  scale_err = -1.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_pushup1/crop_meta.json
+INFO __main__:   WA=  40.3mm  W=  83.6mm  WA100=  31.7mm  W100=  46.7mm  GA=  21.2mm  PA=  21.2mm  RTE= 0.69%  raw_root=7.0cm  orient=3.9°  n_valid=373
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_010_pushup2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_pushup2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_010_pushup2  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.9249
+INFO __main__:   Cam rot err = 0.40°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 14.4cm  pred_scale = 8.9249  gt_scale = 8.8181  scale_err = +1.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_010_pushup2/crop_meta.json
+INFO __main__:   WA=  37.0mm  W=  61.6mm  WA100=  31.9mm  W100=  42.4mm  GA=  21.2mm  PA=  21.2mm  RTE= 1.13%  raw_root=13.3cm  orient=3.5°  n_valid=331
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_burpee2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_burpee2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_burpee2  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_burpee2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.4548
+INFO __main__:   Cam rot err = 0.35°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 34.9cm  pred_scale = 8.4548  gt_scale = 8.7869  scale_err = -3.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_burpee2/crop_meta.json
+INFO __main__:   WA=  58.4mm  W=  66.0mm  WA100=  54.0mm  W100=  82.4mm  GA=  27.9mm  PA=  27.9mm  RTE= 0.61%  raw_root=17.4cm  orient=5.1°  n_valid=383
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_cooking1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_cooking1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_cooking1  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/Gym_011_cooking1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=7.4499
+INFO __main__:   Cam rot err = 1.23°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 57.6cm  pred_scale = 7.4500  gt_scale = 7.9230  scale_err = -6.0%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/Gym_011_cooking1/crop_meta.json
+INFO __main__:   WA=  41.9mm  W= 118.0mm  WA100=  34.6mm  W100=  40.0mm  GA=  27.6mm  PA=  27.6mm  RTE= 0.60%  raw_root=16.2cm  orient=6.3°  n_valid=1050
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_cooking2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_cooking2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_cooking2  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/Gym_011_cooking2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=9.0067
+INFO __main__:   Cam rot err = 0.45°  cam_t_cos = 0.9998  cam_t_err(pred_sc) = 24.7cm  pred_scale = 9.0067  gt_scale = 9.1905  scale_err = -2.0%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/Gym_011_cooking2/crop_meta.json
+INFO __main__:   WA=  49.0mm  W=  95.4mm  WA100=  34.0mm  W100=  48.6mm  GA=  27.0mm  PA=  27.0mm  RTE= 0.71%  raw_root=5.1cm  orient=6.4°  n_valid=967
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_dips1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_dips1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_dips1  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_dips1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.2386
+INFO __main__:   Cam rot err = 0.69°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 24.8cm  pred_scale = 8.2386  gt_scale = 8.4891  scale_err = -3.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_dips1/crop_meta.json
+INFO __main__:   WA=  49.7mm  W= 100.3mm  WA100=  34.8mm  W100=  49.0mm  GA=  24.2mm  PA=  24.2mm  RTE= 1.48%  raw_root=14.1cm  orient=3.5°  n_valid=354
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_dips2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_dips2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_dips2  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_dips2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.2198
+INFO __main__:   Cam rot err = 0.65°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 17.6cm  pred_scale = 8.2198  gt_scale = 8.3546  scale_err = -1.6%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_dips2/crop_meta.json
+INFO __main__:   WA=  56.5mm  W= 145.7mm  WA100=  50.3mm  W100=  74.8mm  GA=  30.6mm  PA=  30.6mm  RTE= 1.15%  raw_root=9.4cm  orient=5.1°  n_valid=273
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_dips3  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_dips3/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_dips3  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_dips3/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.0723
+INFO __main__:   Cam rot err = 0.88°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 8.5cm  pred_scale = 8.0723  gt_scale = 8.0540  scale_err = +0.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_dips3/crop_meta.json
+INFO __main__:   WA=  51.8mm  W= 183.8mm  WA100=  44.2mm  W100=  86.3mm  GA=  31.6mm  PA=  31.6mm  RTE= 0.79%  raw_root=6.9cm  orient=5.4°  n_valid=235
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_dips4  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_dips4/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_dips4  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_dips4/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.6984
+INFO __main__:   Cam rot err = 1.10°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 13.3cm  pred_scale = 8.6984  gt_scale = 8.7402  scale_err = -0.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_dips4/crop_meta.json
+INFO __main__:   WA=  67.2mm  W= 153.2mm  WA100=  43.7mm  W100=  79.8mm  GA=  27.6mm  PA=  27.6mm  RTE= 0.82%  raw_root=8.8cm  orient=5.7°  n_valid=395
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_pushup1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_pushup1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_pushup1  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_pushup1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.5304
+INFO __main__:   Cam rot err = 0.31°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 32.4cm  pred_scale = 8.5304  gt_scale = 8.8386  scale_err = -3.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_pushup1/crop_meta.json
+INFO __main__:   WA=  51.5mm  W=  71.8mm  WA100=  47.2mm  W100=  65.5mm  GA=  28.2mm  PA=  28.2mm  RTE= 1.33%  raw_root=16.4cm  orient=8.9°  n_valid=232
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_011_pushup2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_011_pushup2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_011_pushup2  pid=11  gender=male  model=SMPLX_MALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.5555
+INFO __main__:   Cam rot err = 0.30°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 34.8cm  pred_scale = 8.5555  gt_scale = 8.8789  scale_err = -3.6%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_011_pushup2/crop_meta.json
+INFO __main__:   WA=  46.5mm  W=  50.6mm  WA100=  41.6mm  W100=  55.9mm  GA=  26.4mm  PA=  26.4mm  RTE= 1.18%  raw_root=18.5cm  orient=5.4°  n_valid=465
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_012_cooking2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_012_cooking2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_012_cooking2  pid=12  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/Gym_012_cooking2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.7962
+INFO __main__:   Cam rot err = 1.03°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 29.6cm  pred_scale = 6.7962  gt_scale = 7.0098  scale_err = -3.0%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/Gym_012_cooking2/crop_meta.json
+INFO __main__:   WA=  49.8mm  W= 188.0mm  WA100=  36.5mm  W100=  49.6mm  GA=  24.7mm  PA=  24.7mm  RTE= 0.82%  raw_root=25.1cm  orient=5.0°  n_valid=918
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_012_lunge1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_012_lunge1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_012_lunge1  pid=12  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_012_lunge1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.7897
+INFO __main__:   Cam rot err = 0.85°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 46.1cm  pred_scale = 8.7897  gt_scale = 8.3077  scale_err = +5.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_012_lunge1/crop_meta.json
+INFO __main__:   WA=  54.7mm  W=  70.2mm  WA100=  54.6mm  W100=  67.1mm  GA=  23.2mm  PA=  23.2mm  RTE= 1.26%  raw_root=29.4cm  orient=10.2°  n_valid=165
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_012_lunge2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_012_lunge2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_012_lunge2  pid=12  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_012_lunge2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.5714
+INFO __main__:   Cam rot err = 1.04°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 27.8cm  pred_scale = 8.5714  gt_scale = 8.3199  scale_err = +3.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_012_lunge2/crop_meta.json
+INFO __main__:   WA=  44.5mm  W=  62.3mm  WA100=  39.5mm  W100=  44.4mm  GA=  22.3mm  PA=  22.3mm  RTE= 0.74%  raw_root=16.5cm  orient=5.8°  n_valid=231
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_012_pushup2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_012_pushup2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_012_pushup2  pid=12  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_012_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.8627
+INFO __main__:   Cam rot err = 1.19°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 18.3cm  pred_scale = 6.8627  gt_scale = 6.9840  scale_err = -1.7%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_012_pushup2/crop_meta.json
+INFO __main__:   WA=  53.8mm  W= 138.5mm  WA100=  44.0mm  W100=  64.1mm  GA=  21.5mm  PA=  21.5mm  RTE= 1.51%  raw_root=11.6cm  orient=5.9°  n_valid=201
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_013_burpee4  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_013_burpee4/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_burpee4  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_burpee4/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.2661
+INFO __main__:   Cam rot err = 0.79°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 14.1cm  pred_scale = 8.2661  gt_scale = 8.2868  scale_err = -0.3%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_burpee4/crop_meta.json
+INFO __main__:   WA=  42.5mm  W=  45.2mm  WA100=  37.4mm  W100=  62.5mm  GA=  22.3mm  PA=  22.3mm  RTE= 1.25%  raw_root=6.4cm  orient=4.5°  n_valid=249
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_013_dips1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_013_dips1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_dips1  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_dips1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.4939
+INFO __main__:   Cam rot err = 0.75°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 50.0cm  pred_scale = 8.4939  gt_scale = 8.0236  scale_err = +5.9%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_dips1/crop_meta.json
+INFO __main__:   WA=  87.5mm  W= 133.7mm  WA100=  58.5mm  W100= 106.1mm  GA=  28.6mm  PA=  28.6mm  RTE= 1.66%  raw_root=26.0cm  orient=8.1°  n_valid=389
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_013_dips2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_013_dips2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_dips2  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_dips2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.8051
+INFO __main__:   Cam rot err = 0.82°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 10.3cm  pred_scale = 8.8051  gt_scale = 8.7770  scale_err = +0.3%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_dips2/crop_meta.json
+INFO __main__:   WA=  58.9mm  W=  87.9mm  WA100=  50.2mm  W100=  65.6mm  GA=  25.0mm  PA=  25.0mm  RTE= 1.56%  raw_root=7.2cm  orient=4.2°  n_valid=239
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_013_dips3  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_013_dips3/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_dips3  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_dips3/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.6738
+INFO __main__:   Cam rot err = 0.81°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 13.5cm  pred_scale = 8.6738  gt_scale = 8.7553  scale_err = -0.9%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_dips3/crop_meta.json
+INFO __main__:   WA=  56.6mm  W=  94.4mm  WA100=  43.6mm  W100=  64.7mm  GA=  26.3mm  PA=  26.3mm  RTE= 1.08%  raw_root=7.1cm  orient=4.8°  n_valid=447
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_013_lunge1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_013_lunge1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_lunge1  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_lunge1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.3076
+INFO __main__:   Cam rot err = 0.77°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 15.9cm  pred_scale = 8.3076  gt_scale = 8.4572  scale_err = -1.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_lunge1/crop_meta.json
+INFO __main__:   WA=  33.9mm  W=  57.0mm  WA100=  32.3mm  W100=  40.8mm  GA=  20.4mm  PA=  20.4mm  RTE= 0.28%  raw_root=2.4cm  orient=7.1°  n_valid=611
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_013_lunge2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_013_lunge2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_lunge2  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_lunge2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.2679
+INFO __main__:   Cam rot err = 0.74°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 17.8cm  pred_scale = 8.2679  gt_scale = 8.1875  scale_err = +1.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_lunge2/crop_meta.json
+INFO __main__:   WA=  38.9mm  W=  52.1mm  WA100=  33.4mm  W100=  49.8mm  GA=  20.8mm  PA=  20.8mm  RTE= 0.33%  raw_root=3.5cm  orient=5.7°  n_valid=724
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_013_pushup1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_013_pushup1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_pushup1  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_pushup1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.2006
+INFO __main__:   Cam rot err = 0.74°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 7.5cm  pred_scale = 8.2006  gt_scale = 8.1918  scale_err = +0.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_pushup1/crop_meta.json
+INFO __main__:   WA=  43.1mm  W=  58.7mm  WA100=  37.7mm  W100=  56.0mm  GA=  27.6mm  PA=  27.6mm  RTE= 0.55%  raw_root=5.6cm  orient=5.3°  n_valid=759
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: Gym_013_pushup2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_013_pushup2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=Gym_013_pushup2  pid=13  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=8.7324
+INFO __main__:   Cam rot err = 0.83°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 11.4cm  pred_scale = 8.7324  gt_scale = 8.7803  scale_err = -0.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/Gym_013_pushup2/crop_meta.json
+INFO __main__:   WA=  42.4mm  W=  57.7mm  WA100=  32.7mm  W100=  48.1mm  GA=  21.9mm  PA=  21.9mm  RTE= 1.13%  raw_root=5.4cm  orient=5.0°  n_valid=378
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: LectureHall_009_021_reparingprojector1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/LectureHall_009_021_reparingprojector1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_009_021_reparingprojector1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_009_021_reparingprojector1  pid=21  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_009_021_reparingprojector1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.5484
+INFO __main__:   Cam rot err = 0.52°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 89.6cm  pred_scale = 6.5484  gt_scale = 7.2586  scale_err = -9.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_009_021_reparingprojector1/crop_meta.json
+INFO __main__:   WA=  73.8mm  W=  82.4mm  WA100=  62.5mm  W100=  72.2mm  GA=  54.1mm  PA=  25.1mm  RTE= 2.37%  raw_root=46.4cm  orient=6.3°  n_valid=865
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: LectureHall_009_sidebalancerun1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/LectureHall_009_sidebalancerun1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_009_sidebalancerun1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_009_sidebalancerun1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.2815
+INFO __main__:   Cam rot err = 0.35°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 88.9cm  pred_scale = 6.2815  gt_scale = 7.0894  scale_err = -11.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_009_sidebalancerun1/crop_meta.json
+INFO __main__:   WA= 167.7mm  W= 177.1mm  WA100= 104.9mm  W100= 137.7mm  GA=  36.1mm  PA=  36.1mm  RTE= 3.03%  raw_root=69.9cm  orient=9.1°  n_valid=569
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: LectureHall_010_plankjack1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/LectureHall_010_plankjack1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_010_plankjack1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_010_plankjack1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.0743
+INFO __main__:   Cam rot err = 0.47°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 120.6cm  pred_scale = 6.0743  gt_scale = 7.0287  scale_err = -13.6%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_010_plankjack1/crop_meta.json
+INFO __main__:   WA=  54.6mm  W= 113.8mm  WA100=  44.5mm  W100=  63.0mm  GA=  28.4mm  PA=  28.4mm  RTE= 0.75%  raw_root=78.9cm  orient=6.1°  n_valid=483
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: LectureHall_010_sidebalancerun1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/LectureHall_010_sidebalancerun1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_010_sidebalancerun1  pid=10  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_010_sidebalancerun1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.2229
+INFO __main__:   Cam rot err = 0.43°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 78.6cm  pred_scale = 6.2229  gt_scale = 7.0193  scale_err = -11.3%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_010_sidebalancerun1/crop_meta.json
+INFO __main__:   WA=  99.1mm  W= 493.3mm  WA100=  69.4mm  W100=  91.2mm  GA=  32.7mm  PA=  32.7mm  RTE= 1.20%  raw_root=74.6cm  orient=7.0°  n_valid=812
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: LectureHall_019_wipingchairs1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/LectureHall_019_wipingchairs1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_019_wipingchairs1  pid=19  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_019_wipingchairs1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.7923
+INFO __main__:   Cam rot err = 0.30°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 60.5cm  pred_scale = 6.7923  gt_scale = 7.5573  scale_err = -10.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_019_wipingchairs1/crop_meta.json
+INFO __main__:   WA= 205.7mm  W= 248.0mm  WA100=  99.5mm  W100= 159.8mm  GA=  27.5mm  PA=  27.5mm  RTE= 2.41%  raw_root=61.0cm  orient=7.7°  n_valid=877
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: LectureHall_021_plankjack1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/LectureHall_021_plankjack1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_021_plankjack1  pid=21  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_021_plankjack1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=5.6384
+INFO __main__:   Cam rot err = 0.64°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 173.2cm  pred_scale = 5.6384  gt_scale = 7.0310  scale_err = -19.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_021_plankjack1/crop_meta.json
+INFO __main__:   WA=  55.0mm  W=  89.6mm  WA100=  42.8mm  W100=  62.5mm  GA=  29.1mm  PA=  29.1mm  RTE= 0.85%  raw_root=102.4cm  orient=6.4°  n_valid=432
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: LectureHall_021_sidebalancerun1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/LectureHall_021_sidebalancerun1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=LectureHall_021_sidebalancerun1  pid=21  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_021_sidebalancerun1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=5.9246
+INFO __main__:   Cam rot err = 0.53°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 150.2cm  pred_scale = 5.9246  gt_scale = 7.0571  scale_err = -16.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/LectureHall_021_sidebalancerun1/crop_meta.json
+INFO __main__:   WA=  45.6mm  W=  81.0mm  WA100=  41.2mm  W100=  55.7mm  GA=  34.5mm  PA=  34.5mm  RTE= 0.37%  raw_root=81.7cm  orient=6.9°  n_valid=760
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_009_burpeejump1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_burpeejump1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_burpeejump1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_burpeejump1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.5523
+INFO __main__:   Cam rot err = 0.73°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 58.7cm  pred_scale = 6.5523  gt_scale = 6.0217  scale_err = +8.8%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_burpeejump1/crop_meta.json
+INFO __main__:   WA=  56.5mm  W= 108.8mm  WA100=  49.6mm  W100=  69.9mm  GA=  24.8mm  PA=  24.8mm  RTE= 0.54%  raw_root=41.4cm  orient=5.4°  n_valid=645
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_009_burpeejump2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_burpeejump2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_burpeejump2  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_burpeejump2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.4552
+INFO __main__:   Cam rot err = 0.64°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 64.4cm  pred_scale = 6.4552  gt_scale = 5.8664  scale_err = +10.0%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_burpeejump2/crop_meta.json
+INFO __main__:   WA=  30.9mm  W=  68.3mm  WA100=  30.9mm  W100=  68.3mm  GA=  17.0mm  PA=  17.0mm  RTE= 5.74%  raw_root=45.7cm  orient=4.7°  n_valid=69
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_009_impro1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_impro1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_impro1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_impro1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.3939
+INFO __main__:   Cam rot err = 0.65°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 48.7cm  pred_scale = 6.3939  gt_scale = 5.9445  scale_err = +7.6%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_impro1/crop_meta.json
+INFO __main__:   WA=  55.3mm  W=  78.5mm  WA100=  50.3mm  W100=  79.1mm  GA=  25.0mm  PA=  25.0mm  RTE= 0.45%  raw_root=32.7cm  orient=4.4°  n_valid=748
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_009_impro2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_impro2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_impro2  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_impro2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.4064
+INFO __main__:   Cam rot err = 0.32°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 42.2cm  pred_scale = 6.4064  gt_scale = 6.0107  scale_err = +6.6%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_impro2/crop_meta.json
+INFO __main__:   WA=  52.2mm  W=  67.8mm  WA100=  46.1mm  W100=  88.1mm  GA=  22.6mm  PA=  22.6mm  RTE= 0.89%  raw_root=24.2cm  orient=4.1°  n_valid=400
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_009_impro5  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_impro5/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_impro5  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_impro5/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.1900
+INFO __main__:   Cam rot err = 0.51°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 22.0cm  pred_scale = 6.1900  gt_scale = 5.9780  scale_err = +3.5%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_impro5/crop_meta.json
+INFO __main__:   WA=  38.1mm  W=  50.2mm  WA100=  32.6mm  W100=  42.9mm  GA=  24.2mm  PA=  24.2mm  RTE= 0.55%  raw_root=18.2cm  orient=4.0°  n_valid=409
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_009_overfence1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_overfence1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_overfence1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_overfence1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.3462
+INFO __main__:   Cam rot err = 0.31°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 39.4cm  pred_scale = 6.3462  gt_scale = 5.9771  scale_err = +6.2%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_overfence1/crop_meta.json
+INFO __main__:   WA=  45.6mm  W=  66.6mm  WA100=  41.4mm  W100=  70.6mm  GA=  25.5mm  PA=  25.5mm  RTE= 0.93%  raw_root=29.1cm  orient=5.5°  n_valid=285
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_009_overfence2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_overfence2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_overfence2  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_overfence2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.1051
+INFO __main__:   Cam rot err = 0.61°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 10.2cm  pred_scale = 6.1051  gt_scale = 6.0816  scale_err = +0.4%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_overfence2/crop_meta.json
+INFO __main__:   WA=  39.8mm  W=  46.1mm  WA100=  36.5mm  W100=  42.5mm  GA=  25.1mm  PA=  25.1mm  RTE= 0.94%  raw_root=4.3cm  orient=6.5°  n_valid=225
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_009_spray1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_spray1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_009_spray1  pid=9  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_spray1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.3789
+INFO __main__:   Cam rot err = 0.62°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 46.4cm  pred_scale = 6.3789  gt_scale = 5.9565  scale_err = +7.1%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_009_spray1/crop_meta.json
+INFO __main__:   WA=  51.6mm  W= 100.1mm  WA100=  43.4mm  W100=  65.3mm  GA=  28.3mm  PA=  28.3mm  RTE= 0.69%  raw_root=28.2cm  orient=6.9°  n_valid=914
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_017_burpeejump1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_burpeejump1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_burpeejump1  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_burpeejump1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=5.9577
+INFO __main__:   Cam rot err = 0.40°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 41.9cm  pred_scale = 5.9577  gt_scale = 6.3452  scale_err = -6.1%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_burpeejump1/crop_meta.json
+INFO __main__:   WA=  58.8mm  W=  91.1mm  WA100=  46.3mm  W100=  71.5mm  GA=  29.1mm  PA=  29.1mm  RTE= 0.57%  raw_root=21.5cm  orient=5.4°  n_valid=689
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_017_burpeejump2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_burpeejump2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_burpeejump2  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_burpeejump2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.4655
+INFO __main__:   Cam rot err = 0.48°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 71.0cm  pred_scale = 6.4655  gt_scale = 5.7908  scale_err = +11.7%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_burpeejump2/crop_meta.json
+INFO __main__:   WA=  66.2mm  W=  87.8mm  WA100=  58.9mm  W100=  85.9mm  GA=  27.5mm  PA=  27.5mm  RTE= 1.17%  raw_root=53.7cm  orient=4.6°  n_valid=341
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_017_eating1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_eating1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_eating1  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_eating1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.2019
+INFO __main__:   Cam rot err = 0.91°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 42.3cm  pred_scale = 6.2019  gt_scale = 5.8114  scale_err = +6.7%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_eating1/crop_meta.json
+INFO __main__:   WA=  33.4mm  W=  73.4mm  WA100=  30.5mm  W100=  39.1mm  GA=  24.0mm  PA=  24.0mm  RTE= 0.74%  raw_root=32.6cm  orient=7.3°  n_valid=679
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_017_overfence1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_overfence1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_overfence1  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_overfence1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.1530
+INFO __main__:   Cam rot err = 0.54°  cam_t_cos = 1.0000  cam_t_err(pred_sc) = 43.7cm  pred_scale = 6.1530  gt_scale = 5.7897  scale_err = +6.3%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_overfence1/crop_meta.json
+INFO __main__:   WA= 155.6mm  W= 173.1mm  WA100= 119.4mm  W100= 271.4mm  GA=  26.2mm  PA=  26.2mm  RTE= 3.08%  raw_root=30.4cm  orient=5.2°  n_valid=407
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_017_overfence2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_overfence2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_overfence2  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_overfence2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=5.8405
+INFO __main__:   Cam rot err = 0.93°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 27.5cm  pred_scale = 5.8405  gt_scale = 6.0420  scale_err = -3.3%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_overfence2/crop_meta.json
+INFO __main__:   WA= 110.0mm  W= 274.0mm  WA100=  76.2mm  W100= 121.6mm  GA=  26.9mm  PA=  26.9mm  RTE= 1.13%  raw_root=10.9cm  orient=5.5°  n_valid=745
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_017_pushup1  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_pushup1/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_pushup1  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_017_pushup1/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=5.6789
+INFO __main__:   Cam rot err = 0.64°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 58.0cm  pred_scale = 5.6789  gt_scale = 6.1638  scale_err = -7.9%
+INFO fusion.placer: [placer] loaded crop offsets for 4 cameras from /tmp/centered_test_3032804/ParkingLot2_017_pushup1/crop_meta.json
+INFO __main__:   WA=  61.5mm  W= 207.9mm  WA100=  47.9mm  W100= 109.6mm  GA=  27.1mm  PA=  27.1mm  RTE= 1.08%  raw_root=30.4cm  orient=5.5°  n_valid=299
+INFO __main__: 
+------------------------------------------------------------
+INFO __main__: Scene: ParkingLot2_017_pushup2  dir=/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_pushup2/trial0
+INFO utilities.rich_gender_plugin:   [gender] scene=ParkingLot2_017_pushup2  pid=17  gender=female  model=SMPLX_FEMALE.pkl
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_pushup2/crop_meta.json
+INFO __main__:   [scale] using MapAnything (baseline, re-run on estimated alignment)  median=6.2076
+INFO __main__:   Cam rot err = 0.42°  cam_t_cos = 0.9999  cam_t_err(pred_sc) = 19.5cm  pred_scale = 6.2076  gt_scale = 6.0446  scale_err = +2.7%
+INFO fusion.placer: [placer] loaded crop offsets for 3 cameras from /tmp/centered_test_3032804/ParkingLot2_017_pushup2/crop_meta.json
+INFO __main__:   WA=  50.3mm  W=  77.0mm  WA100=  38.8mm  W100=  59.0mm  GA=  24.3mm  PA=  24.3mm  RTE= 0.64%  raw_root=15.5cm  orient=4.1°  n_valid=630

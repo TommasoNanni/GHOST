@@ -1,0 +1,1433 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO  Scenes root: /iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_new
+INFO  Device: cuda  |  trials per scene: 10  |  max_shift: 75
+INFO  Evaluating 14 scene(s): ['01_tagging/007_tagging', '01_tagging/011_tagging', '02_lego/001_legoassemble', '02_lego/003_legoassemble', '03_fencing/005_fencing', '03_fencing/006_fencing', '04_basketball/001_basketball', '04_basketball/011_basketball', '05_volleyball/004_volleyball', '05_volleyball/011_volleyball', '06_badminton/022_badminton', '06_badminton/031_badminton', '07_tennis/007_tennis', '07_tennis/012_tennis']
+INFO  
+============================================================
+INFO  Scene: 01_tagging/007_tagging
+INFO    cam01: 4 person(s), T=717
+INFO    cam04: 4 person(s), T=717
+INFO    cam06: 4 person(s), T=717
+INFO    cam08: 4 person(s), T=717
+INFO    Cameras: ['cam01', 'cam04', 'cam06', 'cam08']
+INFO    Persons: [1, 2, 3, 4]  (cameras observing each: {1: 4, 2: 4, 3: 4, 4: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam01': 0, 'cam04': -62, 'cam06': 41, 'cam08': 23}  end_cuts: {'cam01': 33, 'cam04': 32, 'cam06': 65, 'cam08': 6}
+INFO    shift_spread=103
+INFO       cam01: true=+62  estimated=+62.0  error=0.0
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+103  estimated=+103.0  error=0.0
+INFO       cam08: true=+85  estimated=+85.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 2/10  true shifts: {'cam01': 0, 'cam04': 30, 'cam06': -45, 'cam08': -61}  end_cuts: {'cam01': 40, 'cam04': 74, 'cam06': 55, 'cam08': 57}
+INFO    shift_spread=91
+INFO       cam01: true=+61  estimated=+61.0  error=0.0
+INFO       cam04: true=+91  estimated=+91.0  error=0.0
+INFO       cam06: true=+16  estimated=+16.0  error=0.0
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 3/10  true shifts: {'cam01': 0, 'cam04': 33, 'cam06': 43, 'cam08': 2}  end_cuts: {'cam01': 9, 'cam04': 63, 'cam06': 34, 'cam08': 38}
+INFO    shift_spread=43
+INFO       cam01: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+33  estimated=+33.0  error=0.0
+INFO       cam06: true=+43  estimated=+43.0  error=0.0
+INFO       cam08: true=+2  estimated=+2.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 4/10  true shifts: {'cam01': 0, 'cam04': -20, 'cam06': -48, 'cam08': 64}  end_cuts: {'cam01': 59, 'cam04': 48, 'cam06': 30, 'cam08': 62}
+INFO    shift_spread=112
+INFO       cam01: true=+48  estimated=+48.0  error=0.0
+INFO       cam04: true=+28  estimated=+28.0  error=0.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+112  estimated=+112.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 5/10  true shifts: {'cam01': 0, 'cam04': 7, 'cam06': -9, 'cam08': -7}  end_cuts: {'cam01': 17, 'cam04': 7, 'cam06': 42, 'cam08': 67}
+INFO    shift_spread=16
+INFO       cam01: true=+9  estimated=+9.0  error=0.0
+INFO       cam04: true=+16  estimated=+16.0  error=0.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+2  estimated=+2.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 6/10  true shifts: {'cam01': 0, 'cam04': -66, 'cam06': 54, 'cam08': 49}  end_cuts: {'cam01': 21, 'cam04': 48, 'cam06': 12, 'cam08': 57}
+INFO    shift_spread=120
+INFO       cam01: true=+66  estimated=+66.0  error=0.0
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+120  estimated=+120.0  error=0.0
+INFO       cam08: true=+115  estimated=+115.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 7/10  true shifts: {'cam01': 0, 'cam04': 30, 'cam06': -22, 'cam08': -65}  end_cuts: {'cam01': 73, 'cam04': 33, 'cam06': 67, 'cam08': 51}
+INFO    shift_spread=95
+INFO       cam01: true=+65  estimated=+65.0  error=0.0
+INFO       cam04: true=+95  estimated=+95.0  error=0.0
+INFO       cam06: true=+43  estimated=+43.0  error=0.0
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 8/10  true shifts: {'cam01': 0, 'cam04': 42, 'cam06': 39, 'cam08': -46}  end_cuts: {'cam01': 27, 'cam04': 35, 'cam06': 37, 'cam08': 3}
+INFO    shift_spread=88
+INFO       cam01: true=+46  estimated=+46.0  error=0.0
+INFO       cam04: true=+88  estimated=+88.0  error=0.0
+INFO       cam06: true=+85  estimated=+85.0  error=0.0
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 9/10  true shifts: {'cam01': 0, 'cam04': 7, 'cam06': -52, 'cam08': 37}  end_cuts: {'cam01': 51, 'cam04': 70, 'cam06': 56, 'cam08': 27}
+INFO    shift_spread=89
+INFO       cam01: true=+52  estimated=+52.0  error=0.0
+INFO       cam04: true=+59  estimated=+59.0  error=0.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+89  estimated=+89.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 10/10  true shifts: {'cam01': 0, 'cam04': 71, 'cam06': -13, 'cam08': -26}  end_cuts: {'cam01': 68, 'cam04': 28, 'cam06': 5, 'cam08': 35}
+INFO    shift_spread=97
+INFO       cam01: true=+26  estimated=+26.0  error=0.0
+INFO       cam04: true=+97  estimated=+97.0  error=0.0
+INFO       cam06: true=+13  estimated=+13.0  error=0.0
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  SUMMARY — 01_tagging/007_tagging  (solved 10/10 trials)
+INFO      Mean pairwise Δ 47.0  (median=50.9  max=68.2)
+INFO      MAE (frames)    0.00
+INFO      MedAE (frames)  0.00
+INFO      Within 0.5fr    100.0%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       100.0%
+INFO      AUC@500ms       100.0%
+INFO  
+============================================================
+INFO  Scene: 01_tagging/011_tagging
+INFO    cam01: 4 person(s), T=762
+INFO    cam04: 4 person(s), T=762
+INFO    cam06: 4 person(s), T=762
+INFO    cam08: 4 person(s), T=762
+INFO    Cameras: ['cam01', 'cam04', 'cam06', 'cam08']
+INFO    Persons: [1, 2, 3, 4]  (cameras observing each: {1: 4, 2: 4, 3: 4, 4: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam01': 0, 'cam04': 45, 'cam06': -47, 'cam08': -6}  end_cuts: {'cam01': 9, 'cam04': 52, 'cam06': 36, 'cam08': 25}
+INFO    shift_spread=92
+INFO       cam01: true=+47  estimated=+47.0  error=0.0
+INFO       cam04: true=+92  estimated=+92.0  error=0.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+41  estimated=+41.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 2/10  true shifts: {'cam01': 0, 'cam04': -41, 'cam06': 10, 'cam08': 26}  end_cuts: {'cam01': 71, 'cam04': 33, 'cam06': 12, 'cam08': 63}
+INFO    shift_spread=67
+INFO       cam01: true=+41  estimated=+41.0  error=0.0
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+51  estimated=+51.0  error=0.0
+INFO       cam08: true=+67  estimated=+67.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 3/10  true shifts: {'cam01': 0, 'cam04': 20, 'cam06': 30, 'cam08': -61}  end_cuts: {'cam01': 23, 'cam04': 58, 'cam06': 63, 'cam08': 33}
+INFO    shift_spread=91
+INFO       cam01: true=+61  estimated=+61.0  error=0.0
+INFO       cam04: true=+81  estimated=+81.0  error=0.0
+INFO       cam06: true=+91  estimated=+91.0  error=0.0
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 4/10  true shifts: {'cam01': 0, 'cam04': 46, 'cam06': 52, 'cam08': -17}  end_cuts: {'cam01': 68, 'cam04': 21, 'cam06': 18, 'cam08': 51}
+INFO    shift_spread=69
+INFO       cam01: true=+17  estimated=+17.0  error=0.0
+INFO       cam04: true=+63  estimated=+63.0  error=0.0
+INFO       cam06: true=+69  estimated=+69.0  error=0.0
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 5/10  true shifts: {'cam01': 0, 'cam04': 21, 'cam06': -54, 'cam08': 50}  end_cuts: {'cam01': 15, 'cam04': 61, 'cam06': 0, 'cam08': 60}
+INFO    shift_spread=104
+INFO       cam01: true=+54  estimated=+54.0  error=0.0
+INFO       cam04: true=+75  estimated=+75.0  error=0.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+104  estimated=+104.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 6/10  true shifts: {'cam01': 0, 'cam04': 43, 'cam06': 42, 'cam08': 25}  end_cuts: {'cam01': 35, 'cam04': 53, 'cam06': 21, 'cam08': 59}
+INFO    shift_spread=43
+INFO       cam01: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+43  estimated=+43.0  error=0.0
+INFO       cam06: true=+42  estimated=+42.0  error=0.0
+INFO       cam08: true=+25  estimated=+25.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 7/10  true shifts: {'cam01': 0, 'cam04': 8, 'cam06': -6, 'cam08': 1}  end_cuts: {'cam01': 43, 'cam04': 2, 'cam06': 10, 'cam08': 18}
+INFO    shift_spread=14
+INFO       cam01: true=+6  estimated=+6.0  error=0.0
+INFO       cam04: true=+14  estimated=+14.0  error=0.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+7  estimated=+7.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 8/10  true shifts: {'cam01': 0, 'cam04': -58, 'cam06': -9, 'cam08': 25}  end_cuts: {'cam01': 49, 'cam04': 35, 'cam06': 64, 'cam08': 42}
+INFO    shift_spread=83
+INFO       cam01: true=+58  estimated=+58.0  error=0.0
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+49  estimated=+49.0  error=0.0
+INFO       cam08: true=+83  estimated=+83.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 9/10  true shifts: {'cam01': 0, 'cam04': -64, 'cam06': 40, 'cam08': 11}  end_cuts: {'cam01': 48, 'cam04': 42, 'cam06': 42, 'cam08': 6}
+INFO    shift_spread=104
+INFO       cam01: true=+64  estimated=+64.0  error=0.0
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+104  estimated=+104.0  error=0.0
+INFO       cam08: true=+75  estimated=+75.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 10/10  true shifts: {'cam01': 0, 'cam04': 9, 'cam06': 45, 'cam08': -30}  end_cuts: {'cam01': 45, 'cam04': 2, 'cam06': 26, 'cam08': 33}
+INFO    shift_spread=75
+INFO       cam01: true=+30  estimated=+30.0  error=0.0
+INFO       cam04: true=+39  estimated=+39.0  error=0.0
+INFO       cam06: true=+75  estimated=+75.0  error=0.0
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  SUMMARY — 01_tagging/011_tagging  (solved 10/10 trials)
+INFO      Mean pairwise Δ 39.6  (median=42.6  max=55.5)
+INFO      MAE (frames)    0.00
+INFO      MedAE (frames)  0.00
+INFO      Within 0.5fr    100.0%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       100.0%
+INFO      AUC@500ms       100.0%
+INFO  
+============================================================
+INFO  Scene: 02_lego/001_legoassemble
+INFO    cam02: 3 person(s), T=602
+INFO    cam03: 3 person(s), T=602
+INFO    cam04: 3 person(s), T=602
+INFO    cam06: 3 person(s), T=602
+INFO    Cameras: ['cam02', 'cam03', 'cam04', 'cam06']
+INFO    Persons: [1, 2, 3]  (cameras observing each: {1: 4, 2: 4, 3: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam02': 0, 'cam03': 73, 'cam04': -43, 'cam06': -34}  end_cuts: {'cam02': 31, 'cam03': 75, 'cam04': 64, 'cam06': 2}
+INFO    shift_spread=116
+INFO       cam02: true=+43  estimated=+43.6  error=0.6
+INFO       cam03: true=+116  estimated=+116.8  error=0.8
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+9  estimated=+9.8  error=0.8
+INFO       MAE=0.54
+INFO  
+  ── Trial 2/10  true shifts: {'cam02': 0, 'cam03': -40, 'cam04': 49, 'cam06': -67}  end_cuts: {'cam02': 65, 'cam03': 21, 'cam04': 69, 'cam06': 22}
+INFO    shift_spread=116
+INFO       cam02: true=+67  estimated=+66.2  error=0.8
+INFO       cam03: true=+27  estimated=+26.4  error=0.6
+INFO       cam04: true=+116  estimated=+115.2  error=0.8
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.54
+INFO  
+  ── Trial 3/10  true shifts: {'cam02': 0, 'cam03': -10, 'cam04': 24, 'cam06': -56}  end_cuts: {'cam02': 42, 'cam03': 38, 'cam04': 59, 'cam06': 75}
+INFO    shift_spread=80
+INFO       cam02: true=+56  estimated=+55.0  error=1.0
+INFO       cam03: true=+46  estimated=+46.0  error=0.0
+INFO       cam04: true=+80  estimated=+79.0  error=1.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.50
+INFO  
+  ── Trial 4/10  true shifts: {'cam02': 0, 'cam03': 25, 'cam04': -14, 'cam06': -14}  end_cuts: {'cam02': 31, 'cam03': 61, 'cam04': 24, 'cam06': 12}
+INFO    shift_spread=39
+INFO       cam02: true=+14  estimated=+14.8  error=0.8
+INFO       cam03: true=+39  estimated=+40.2  error=1.2
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+0  estimated=+1.0  error=1.0
+INFO       MAE=0.75
+INFO  
+  ── Trial 5/10  true shifts: {'cam02': 0, 'cam03': -25, 'cam04': -72, 'cam06': -59}  end_cuts: {'cam02': 6, 'cam03': 58, 'cam04': 54, 'cam06': 52}
+INFO    shift_spread=72
+INFO       cam02: true=+72  estimated=+72.0  error=0.0
+INFO       cam03: true=+47  estimated=+47.5  error=0.5
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+13  estimated=+13.5  error=0.5
+INFO       MAE=0.25
+INFO  
+  ── Trial 6/10  true shifts: {'cam02': 0, 'cam03': -6, 'cam04': 33, 'cam06': -51}  end_cuts: {'cam02': 68, 'cam03': 38, 'cam04': 71, 'cam06': 11}
+INFO    shift_spread=84
+INFO       cam02: true=+51  estimated=+50.0  error=1.0
+INFO       cam03: true=+45  estimated=+45.0  error=0.0
+INFO       cam04: true=+84  estimated=+83.0  error=1.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.50
+INFO  
+  ── Trial 7/10  true shifts: {'cam02': 0, 'cam03': 0, 'cam04': 30, 'cam06': -1}  end_cuts: {'cam02': 33, 'cam03': 12, 'cam04': 28, 'cam06': 18}
+INFO    shift_spread=31
+INFO       cam02: true=+1  estimated=+0.4  error=0.6
+INFO       cam03: true=+1  estimated=+1.2  error=0.2
+INFO       cam04: true=+31  estimated=+30.2  error=0.8
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.39
+INFO  
+  ── Trial 8/10  true shifts: {'cam02': 0, 'cam03': -30, 'cam04': 28, 'cam06': 20}  end_cuts: {'cam02': 46, 'cam03': 27, 'cam04': 72, 'cam06': 6}
+INFO    shift_spread=58
+INFO       cam02: true=+30  estimated=+29.5  error=0.5
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+58  estimated=+57.5  error=0.5
+INFO       cam06: true=+50  estimated=+50.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 9/10  true shifts: {'cam02': 0, 'cam03': -24, 'cam04': -58, 'cam06': -24}  end_cuts: {'cam02': 73, 'cam03': 27, 'cam04': 69, 'cam06': 37}
+INFO    shift_spread=58
+INFO       cam02: true=+58  estimated=+58.2  error=0.2
+INFO       cam03: true=+34  estimated=+34.8  error=0.8
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+34  estimated=+35.0  error=1.0
+INFO       MAE=0.50
+INFO  
+  ── Trial 10/10  true shifts: {'cam02': 0, 'cam03': 30, 'cam04': -6, 'cam06': -35}  end_cuts: {'cam02': 58, 'cam03': 73, 'cam04': 20, 'cam06': 59}
+INFO    shift_spread=65
+INFO       cam02: true=+35  estimated=+34.0  error=1.0
+INFO       cam03: true=+65  estimated=+64.8  error=0.2
+INFO       cam04: true=+29  estimated=+28.2  error=0.8
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.50
+INFO  
+  SUMMARY — 02_lego/001_legoassemble  (solved 10/10 trials)
+INFO      Mean pairwise Δ 38.7  (median=37.6  max=64.7)
+INFO      MAE (frames)    0.47
+INFO      MedAE (frames)  0.50
+INFO      Within 0.5fr    50.0%
+INFO      Within 1fr      97.5%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       68.6%
+INFO      AUC@500ms       93.7%
+INFO  
+============================================================
+INFO  Scene: 02_lego/003_legoassemble
+INFO    cam02: 3 person(s), T=602
+INFO    cam03: 3 person(s), T=602
+INFO    cam04: 3 person(s), T=602
+INFO    cam06: 3 person(s), T=602
+INFO    Cameras: ['cam02', 'cam03', 'cam04', 'cam06']
+INFO    Persons: [1, 2, 3]  (cameras observing each: {1: 4, 2: 4, 3: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam02': 0, 'cam03': -36, 'cam04': 33, 'cam06': 44}  end_cuts: {'cam02': 34, 'cam03': 56, 'cam04': 20, 'cam06': 6}
+INFO    shift_spread=80
+INFO       cam02: true=+36  estimated=+35.4  error=0.6
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+69  estimated=+68.2  error=0.8
+INFO       cam06: true=+80  estimated=+80.2  error=0.2
+INFO       MAE=0.39
+INFO  
+  ── Trial 2/10  true shifts: {'cam02': 0, 'cam03': -61, 'cam04': -8, 'cam06': 61}  end_cuts: {'cam02': 9, 'cam03': 34, 'cam04': 53, 'cam06': 15}
+INFO    shift_spread=122
+INFO       cam02: true=+61  estimated=+60.8  error=0.2
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+53  estimated=+52.2  error=0.8
+INFO       cam06: true=+122  estimated=+122.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 3/10  true shifts: {'cam02': 0, 'cam03': 33, 'cam04': -29, 'cam06': 47}  end_cuts: {'cam02': 44, 'cam03': 41, 'cam04': 13, 'cam06': 35}
+INFO    shift_spread=76
+INFO       cam02: true=+29  estimated=+29.8  error=0.8
+INFO       cam03: true=+62  estimated=+63.0  error=1.0
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+76  estimated=+77.2  error=1.2
+INFO       MAE=0.75
+INFO  
+  ── Trial 4/10  true shifts: {'cam02': 0, 'cam03': 54, 'cam04': -73, 'cam06': 39}  end_cuts: {'cam02': 37, 'cam03': 54, 'cam04': 50, 'cam06': 32}
+INFO    shift_spread=127
+INFO       cam02: true=+73  estimated=+73.8  error=0.8
+INFO       cam03: true=+127  estimated=+128.0  error=1.0
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+112  estimated=+113.2  error=1.2
+INFO       MAE=0.75
+INFO  
+  ── Trial 5/10  true shifts: {'cam02': 0, 'cam03': -29, 'cam04': 19, 'cam06': -54}  end_cuts: {'cam02': 44, 'cam03': 7, 'cam04': 49, 'cam06': 47}
+INFO    shift_spread=73
+INFO       cam02: true=+54  estimated=+53.2  error=0.8
+INFO       cam03: true=+25  estimated=+24.8  error=0.2
+INFO       cam04: true=+73  estimated=+72.0  error=1.0
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.50
+INFO  
+  ── Trial 6/10  true shifts: {'cam02': 0, 'cam03': -63, 'cam04': 39, 'cam06': -13}  end_cuts: {'cam02': 59, 'cam03': 3, 'cam04': 13, 'cam06': 37}
+INFO    shift_spread=102
+INFO       cam02: true=+63  estimated=+62.4  error=0.6
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+102  estimated=+101.2  error=0.8
+INFO       cam06: true=+50  estimated=+50.2  error=0.2
+INFO       MAE=0.39
+INFO  
+  ── Trial 7/10  true shifts: {'cam02': 0, 'cam03': -47, 'cam04': -26, 'cam06': 24}  end_cuts: {'cam02': 10, 'cam03': 51, 'cam04': 7, 'cam06': 13}
+INFO    shift_spread=71
+INFO       cam02: true=+47  estimated=+46.4  error=0.6
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+21  estimated=+20.2  error=0.8
+INFO       cam06: true=+71  estimated=+71.2  error=0.2
+INFO       MAE=0.39
+INFO  
+  ── Trial 8/10  true shifts: {'cam02': 0, 'cam03': 13, 'cam04': 44, 'cam06': -50}  end_cuts: {'cam02': 22, 'cam03': 70, 'cam04': 75, 'cam06': 44}
+INFO    shift_spread=94
+INFO       cam02: true=+50  estimated=+49.8  error=0.2
+INFO       cam03: true=+63  estimated=+63.0  error=0.0
+INFO       cam04: true=+94  estimated=+93.2  error=0.8
+INFO       cam06: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 9/10  true shifts: {'cam02': 0, 'cam03': -8, 'cam04': -23, 'cam06': 17}  end_cuts: {'cam02': 44, 'cam03': 22, 'cam04': 1, 'cam06': 11}
+INFO    shift_spread=40
+INFO       cam02: true=+23  estimated=+23.2  error=0.2
+INFO       cam03: true=+15  estimated=+15.8  error=0.8
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+40  estimated=+41.0  error=1.0
+INFO       MAE=0.50
+INFO  
+  ── Trial 10/10  true shifts: {'cam02': 0, 'cam03': 69, 'cam04': -12, 'cam06': -3}  end_cuts: {'cam02': 35, 'cam03': 59, 'cam04': 4, 'cam06': 6}
+INFO    shift_spread=81
+INFO       cam02: true=+12  estimated=+13.0  error=1.0
+INFO       cam03: true=+81  estimated=+82.0  error=1.0
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam06: true=+9  estimated=+10.0  error=1.0
+INFO       MAE=0.75
+INFO  
+  SUMMARY — 02_lego/003_legoassemble  (solved 10/10 trials)
+INFO      Mean pairwise Δ 46.7  (median=44.5  max=70.0)
+INFO      MAE (frames)    0.49
+INFO      MedAE (frames)  0.57
+INFO      Within 0.5fr    47.5%
+INFO      Within 1fr      90.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       67.1%
+INFO      AUC@500ms       93.4%
+INFO  
+============================================================
+INFO  Scene: 03_fencing/005_fencing
+INFO    cam04: 2 person(s), T=602
+INFO    cam05: 3 person(s), T=602
+INFO    cam10: 2 person(s), T=602
+INFO    cam13: 3 person(s), T=602
+INFO    Cameras: ['cam04', 'cam05', 'cam10', 'cam13']
+INFO    Persons: [1, 2, 3]  (cameras observing each: {1: 4, 2: 4, 3: 2} of 4)
+INFO    Person(s) [3] zero-padded where unobserved — they score only the pairs whose two cameras both see them
+INFO  
+  ── Trial 1/10  true shifts: {'cam04': 0, 'cam05': -34, 'cam10': -2, 'cam13': 26}  end_cuts: {'cam04': 37, 'cam05': 33, 'cam10': 71, 'cam13': 12}
+INFO    shift_spread=60
+INFO       cam04: true=+34  estimated=+34.8  error=0.8
+INFO       cam05: true=+0  estimated=+0.0  error=0.0
+INFO       cam10: true=+32  estimated=+32.0  error=0.0
+INFO       cam13: true=+60  estimated=+60.2  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 2/10  true shifts: {'cam04': 0, 'cam05': 11, 'cam10': 6, 'cam13': -4}  end_cuts: {'cam04': 61, 'cam05': 20, 'cam10': 72, 'cam13': 25}
+INFO    shift_spread=15
+INFO       cam04: true=+4  estimated=+4.6  error=0.6
+INFO       cam05: true=+15  estimated=+14.8  error=0.2
+INFO       cam10: true=+10  estimated=+9.8  error=0.2
+INFO       cam13: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 3/10  true shifts: {'cam04': 0, 'cam05': 7, 'cam10': 3, 'cam13': 53}  end_cuts: {'cam04': 33, 'cam05': 21, 'cam10': 1, 'cam13': 27}
+INFO    shift_spread=53
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam05: true=+7  estimated=+6.2  error=0.8
+INFO       cam10: true=+3  estimated=+2.2  error=0.8
+INFO       cam13: true=+53  estimated=+52.4  error=0.6
+INFO       MAE=0.54
+INFO  
+  ── Trial 4/10  true shifts: {'cam04': 0, 'cam05': 49, 'cam10': -74, 'cam13': 60}  end_cuts: {'cam04': 41, 'cam05': 10, 'cam10': 22, 'cam13': 42}
+INFO    shift_spread=134
+INFO       cam04: true=+74  estimated=+74.8  error=0.8
+INFO       cam05: true=+123  estimated=+123.0  error=0.0
+INFO       cam10: true=+0  estimated=+0.0  error=0.0
+INFO       cam13: true=+134  estimated=+134.2  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 5/10  true shifts: {'cam04': 0, 'cam05': -28, 'cam10': -59, 'cam13': 25}  end_cuts: {'cam04': 51, 'cam05': 9, 'cam10': 21, 'cam13': 18}
+INFO    shift_spread=84
+INFO       cam04: true=+59  estimated=+59.8  error=0.8
+INFO       cam05: true=+31  estimated=+31.0  error=0.0
+INFO       cam10: true=+0  estimated=+0.0  error=0.0
+INFO       cam13: true=+84  estimated=+84.2  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 6/10  true shifts: {'cam04': 0, 'cam05': 24, 'cam10': 35, 'cam13': 34}  end_cuts: {'cam04': 71, 'cam05': 58, 'cam10': 24, 'cam13': 8}
+INFO    shift_spread=35
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam05: true=+24  estimated=+23.2  error=0.8
+INFO       cam10: true=+35  estimated=+34.2  error=0.8
+INFO       cam13: true=+34  estimated=+33.4  error=0.6
+INFO       MAE=0.54
+INFO  
+  ── Trial 7/10  true shifts: {'cam04': 0, 'cam05': 17, 'cam10': 63, 'cam13': 72}  end_cuts: {'cam04': 17, 'cam05': 17, 'cam10': 2, 'cam13': 10}
+INFO    shift_spread=72
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam05: true=+17  estimated=+16.2  error=0.8
+INFO       cam10: true=+63  estimated=+62.2  error=0.8
+INFO       cam13: true=+72  estimated=+71.4  error=0.6
+INFO       MAE=0.54
+INFO  
+  ── Trial 8/10  true shifts: {'cam04': 0, 'cam05': 8, 'cam10': 7, 'cam13': -19}  end_cuts: {'cam04': 23, 'cam05': 63, 'cam10': 34, 'cam13': 61}
+INFO    shift_spread=27
+INFO       cam04: true=+19  estimated=+19.6  error=0.6
+INFO       cam05: true=+27  estimated=+26.8  error=0.2
+INFO       cam10: true=+26  estimated=+25.8  error=0.2
+INFO       cam13: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 9/10  true shifts: {'cam04': 0, 'cam05': 70, 'cam10': -28, 'cam13': -45}  end_cuts: {'cam04': 72, 'cam05': 48, 'cam10': 22, 'cam13': 47}
+INFO    shift_spread=115
+INFO       cam04: true=+45  estimated=+45.6  error=0.6
+INFO       cam05: true=+115  estimated=+114.8  error=0.2
+INFO       cam10: true=+17  estimated=+16.8  error=0.2
+INFO       cam13: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 10/10  true shifts: {'cam04': 0, 'cam05': 2, 'cam10': 61, 'cam13': -37}  end_cuts: {'cam04': 75, 'cam05': 71, 'cam10': 13, 'cam13': 12}
+INFO    shift_spread=98
+INFO       cam04: true=+37  estimated=+37.6  error=0.6
+INFO       cam05: true=+39  estimated=+38.8  error=0.2
+INFO       cam10: true=+98  estimated=+97.8  error=0.2
+INFO       cam13: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  SUMMARY — 03_fencing/005_fencing  (solved 10/10 trials)
+INFO      Mean pairwise Δ 37.7  (median=37.0  max=75.2)
+INFO      MAE (frames)    0.34
+INFO      MedAE (frames)  0.21
+INFO      Within 0.5fr    60.0%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       77.6%
+INFO      AUC@500ms       95.5%
+INFO  
+============================================================
+INFO  Scene: 03_fencing/006_fencing
+INFO    cam04: 2 person(s), T=602
+INFO    cam05: 3 person(s), T=602
+INFO    cam10: 2 person(s), T=602
+INFO    cam13: 3 person(s), T=602
+INFO    Cameras: ['cam04', 'cam05', 'cam10', 'cam13']
+INFO    Persons: [1, 2, 3]  (cameras observing each: {1: 4, 2: 4, 3: 2} of 4)
+INFO    Person(s) [3] zero-padded where unobserved — they score only the pairs whose two cameras both see them
+INFO  
+  ── Trial 1/10  true shifts: {'cam04': 0, 'cam05': 5, 'cam10': -69, 'cam13': -30}  end_cuts: {'cam04': 33, 'cam05': 73, 'cam10': 75, 'cam13': 11}
+INFO    shift_spread=74
+INFO       cam04: true=+69  estimated=+69.8  error=0.8
+INFO       cam05: true=+74  estimated=+73.8  error=0.2
+INFO       cam10: true=+0  estimated=+0.0  error=0.0
+INFO       cam13: true=+39  estimated=+39.6  error=0.6
+INFO       MAE=0.39
+INFO  
+  ── Trial 2/10  true shifts: {'cam04': 0, 'cam05': 59, 'cam10': -62, 'cam13': 38}  end_cuts: {'cam04': 64, 'cam05': 67, 'cam10': 16, 'cam13': 67}
+INFO    shift_spread=121
+INFO       cam04: true=+62  estimated=+62.8  error=0.8
+INFO       cam05: true=+121  estimated=+120.8  error=0.2
+INFO       cam10: true=+0  estimated=+0.0  error=0.0
+INFO       cam13: true=+100  estimated=+100.6  error=0.6
+INFO       MAE=0.39
+INFO  
+  ── Trial 3/10  true shifts: {'cam04': 0, 'cam05': -58, 'cam10': 3, 'cam13': -5}  end_cuts: {'cam04': 24, 'cam05': 1, 'cam10': 58, 'cam13': 25}
+INFO    shift_spread=61
+INFO       cam04: true=+58  estimated=+58.8  error=0.8
+INFO       cam05: true=+0  estimated=+0.0  error=0.0
+INFO       cam10: true=+61  estimated=+61.0  error=0.0
+INFO       cam13: true=+53  estimated=+53.2  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 4/10  true shifts: {'cam04': 0, 'cam05': 24, 'cam10': -14, 'cam13': -19}  end_cuts: {'cam04': 67, 'cam05': 7, 'cam10': 55, 'cam13': 56}
+INFO    shift_spread=43
+INFO       cam04: true=+19  estimated=+19.6  error=0.6
+INFO       cam05: true=+43  estimated=+42.8  error=0.2
+INFO       cam10: true=+5  estimated=+4.8  error=0.2
+INFO       cam13: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 5/10  true shifts: {'cam04': 0, 'cam05': -18, 'cam10': -36, 'cam13': -75}  end_cuts: {'cam04': 71, 'cam05': 72, 'cam10': 18, 'cam13': 2}
+INFO    shift_spread=75
+INFO       cam04: true=+75  estimated=+75.2  error=0.2
+INFO       cam05: true=+57  estimated=+56.2  error=0.8
+INFO       cam10: true=+39  estimated=+38.4  error=0.6
+INFO       cam13: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.39
+INFO  
+  ── Trial 6/10  true shifts: {'cam04': 0, 'cam05': -57, 'cam10': -65, 'cam13': 50}  end_cuts: {'cam04': 67, 'cam05': 11, 'cam10': 56, 'cam13': 13}
+INFO    shift_spread=115
+INFO       cam04: true=+65  estimated=+65.8  error=0.8
+INFO       cam05: true=+8  estimated=+8.0  error=0.0
+INFO       cam10: true=+0  estimated=+0.0  error=0.0
+INFO       cam13: true=+115  estimated=+115.2  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 7/10  true shifts: {'cam04': 0, 'cam05': -20, 'cam10': 15, 'cam13': 33}  end_cuts: {'cam04': 66, 'cam05': 3, 'cam10': 14, 'cam13': 21}
+INFO    shift_spread=53
+INFO       cam04: true=+20  estimated=+20.8  error=0.8
+INFO       cam05: true=+0  estimated=+0.0  error=0.0
+INFO       cam10: true=+35  estimated=+35.0  error=0.0
+INFO       cam13: true=+53  estimated=+53.2  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 8/10  true shifts: {'cam04': 0, 'cam05': -29, 'cam10': 75, 'cam13': 42}  end_cuts: {'cam04': 24, 'cam05': 73, 'cam10': 37, 'cam13': 38}
+INFO    shift_spread=104
+INFO       cam04: true=+29  estimated=+30.0  error=1.0
+INFO       cam05: true=+0  estimated=+0.0  error=0.0
+INFO       cam10: true=+104  estimated=+104.2  error=0.2
+INFO       cam13: true=+71  estimated=+71.8  error=0.8
+INFO       MAE=0.50
+INFO  
+  ── Trial 9/10  true shifts: {'cam04': 0, 'cam05': -10, 'cam10': -54, 'cam13': 66}  end_cuts: {'cam04': 1, 'cam05': 13, 'cam10': 17, 'cam13': 21}
+INFO    shift_spread=120
+INFO       cam04: true=+54  estimated=+54.8  error=0.8
+INFO       cam05: true=+44  estimated=+44.0  error=0.0
+INFO       cam10: true=+0  estimated=+0.0  error=0.0
+INFO       cam13: true=+120  estimated=+120.2  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 10/10  true shifts: {'cam04': 0, 'cam05': -56, 'cam10': -73, 'cam13': 27}  end_cuts: {'cam04': 73, 'cam05': 9, 'cam10': 22, 'cam13': 38}
+INFO    shift_spread=100
+INFO       cam04: true=+73  estimated=+73.8  error=0.8
+INFO       cam05: true=+17  estimated=+17.0  error=0.0
+INFO       cam10: true=+0  estimated=+0.0  error=0.0
+INFO       cam13: true=+100  estimated=+100.2  error=0.2
+INFO       MAE=0.25
+INFO  
+  SUMMARY — 03_fencing/006_fencing  (solved 10/10 trials)
+INFO      Mean pairwise Δ 48.0  (median=50.5  max=67.0)
+INFO      MAE (frames)    0.32
+INFO      MedAE (frames)  0.21
+INFO      Within 0.5fr    65.0%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       78.8%
+INFO      AUC@500ms       95.8%
+INFO  
+============================================================
+INFO  Scene: 04_basketball/001_basketball
+INFO    cam01: 4 person(s), T=602
+INFO    cam03: 4 person(s), T=602
+INFO    cam04: 4 person(s), T=602
+INFO    cam08: 4 person(s), T=602
+INFO    Cameras: ['cam01', 'cam03', 'cam04', 'cam08']
+INFO    Persons: [1, 2, 3, 4]  (cameras observing each: {1: 4, 2: 4, 3: 4, 4: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam01': 0, 'cam03': 65, 'cam04': 29, 'cam08': 40}  end_cuts: {'cam01': 44, 'cam03': 31, 'cam04': 15, 'cam08': 65}
+INFO    shift_spread=65
+INFO       cam01: true=+0  estimated=+0.0  error=0.0
+INFO       cam03: true=+65  estimated=+65.8  error=0.8
+INFO       cam04: true=+29  estimated=+29.2  error=0.2
+INFO       cam08: true=+40  estimated=+40.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 2/10  true shifts: {'cam01': 0, 'cam03': 46, 'cam04': -72, 'cam08': 33}  end_cuts: {'cam01': 6, 'cam03': 56, 'cam04': 62, 'cam08': 9}
+INFO    shift_spread=118
+INFO       cam01: true=+72  estimated=+71.8  error=0.2
+INFO       cam03: true=+118  estimated=+118.6  error=0.6
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+105  estimated=+104.8  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 3/10  true shifts: {'cam01': 0, 'cam03': -10, 'cam04': -57, 'cam08': 10}  end_cuts: {'cam01': 70, 'cam03': 6, 'cam04': 30, 'cam08': 73}
+INFO    shift_spread=67
+INFO       cam01: true=+57  estimated=+56.8  error=0.2
+INFO       cam03: true=+47  estimated=+47.6  error=0.6
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+67  estimated=+66.8  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 4/10  true shifts: {'cam01': 0, 'cam03': -30, 'cam04': -56, 'cam08': -2}  end_cuts: {'cam01': 38, 'cam03': 50, 'cam04': 23, 'cam08': 72}
+INFO    shift_spread=56
+INFO       cam01: true=+56  estimated=+55.8  error=0.2
+INFO       cam03: true=+26  estimated=+26.6  error=0.6
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+54  estimated=+53.8  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 5/10  true shifts: {'cam01': 0, 'cam03': 3, 'cam04': -32, 'cam08': 70}  end_cuts: {'cam01': 70, 'cam03': 37, 'cam04': 1, 'cam08': 45}
+INFO    shift_spread=102
+INFO       cam01: true=+32  estimated=+31.8  error=0.2
+INFO       cam03: true=+35  estimated=+35.6  error=0.6
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+102  estimated=+101.8  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 6/10  true shifts: {'cam01': 0, 'cam03': 8, 'cam04': -53, 'cam08': 20}  end_cuts: {'cam01': 63, 'cam03': 8, 'cam04': 54, 'cam08': 10}
+INFO    shift_spread=73
+INFO       cam01: true=+53  estimated=+52.8  error=0.2
+INFO       cam03: true=+61  estimated=+61.6  error=0.6
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+73  estimated=+72.8  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 7/10  true shifts: {'cam01': 0, 'cam03': 38, 'cam04': -12, 'cam08': -75}  end_cuts: {'cam01': 73, 'cam03': 12, 'cam04': 45, 'cam08': 13}
+INFO    shift_spread=113
+INFO       cam01: true=+75  estimated=+75.0  error=0.0
+INFO       cam03: true=+113  estimated=+113.8  error=0.8
+INFO       cam04: true=+63  estimated=+63.2  error=0.2
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 8/10  true shifts: {'cam01': 0, 'cam03': 65, 'cam04': 36, 'cam08': 46}  end_cuts: {'cam01': 32, 'cam03': 35, 'cam04': 48, 'cam08': 59}
+INFO    shift_spread=65
+INFO       cam01: true=+0  estimated=+0.0  error=0.0
+INFO       cam03: true=+65  estimated=+65.8  error=0.8
+INFO       cam04: true=+36  estimated=+36.2  error=0.2
+INFO       cam08: true=+46  estimated=+46.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 9/10  true shifts: {'cam01': 0, 'cam03': 52, 'cam04': -73, 'cam08': 25}  end_cuts: {'cam01': 8, 'cam03': 21, 'cam04': 63, 'cam08': 19}
+INFO    shift_spread=125
+INFO       cam01: true=+73  estimated=+72.8  error=0.2
+INFO       cam03: true=+125  estimated=+125.6  error=0.6
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+98  estimated=+97.8  error=0.2
+INFO       MAE=0.25
+INFO  
+  ── Trial 10/10  true shifts: {'cam01': 0, 'cam03': 45, 'cam04': -6, 'cam08': -40}  end_cuts: {'cam01': 25, 'cam03': 40, 'cam04': 58, 'cam08': 46}
+INFO    shift_spread=85
+INFO       cam01: true=+40  estimated=+40.0  error=0.0
+INFO       cam03: true=+85  estimated=+85.8  error=0.8
+INFO       cam04: true=+34  estimated=+34.2  error=0.2
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  SUMMARY — 04_basketball/001_basketball  (solved 10/10 trials)
+INFO      Mean pairwise Δ 45.9  (median=40.7  max=66.7)
+INFO      MAE (frames)    0.25
+INFO      MedAE (frames)  0.21
+INFO      Within 0.5fr    75.0%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       83.3%
+INFO      AUC@500ms       96.7%
+INFO  
+============================================================
+INFO  Scene: 04_basketball/011_basketball
+INFO    cam01: 4 person(s), T=602
+INFO    cam03: 4 person(s), T=602
+INFO    cam04: 4 person(s), T=602
+INFO    cam08: 4 person(s), T=602
+INFO    Cameras: ['cam01', 'cam03', 'cam04', 'cam08']
+INFO    Persons: [1, 2, 3, 4]  (cameras observing each: {1: 4, 2: 4, 3: 4, 4: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam01': 0, 'cam03': 65, 'cam04': 56, 'cam08': 38}  end_cuts: {'cam01': 45, 'cam03': 22, 'cam04': 31, 'cam08': 9}
+INFO    shift_spread=65
+INFO       cam01: true=+0  estimated=+0.0  error=0.0
+INFO       cam03: true=+65  estimated=+65.4  error=0.4
+INFO       cam04: true=+56  estimated=+56.2  error=0.2
+INFO       cam08: true=+38  estimated=+38.2  error=0.2
+INFO       MAE=0.21
+INFO  
+  ── Trial 2/10  true shifts: {'cam01': 0, 'cam03': -19, 'cam04': 64, 'cam08': -11}  end_cuts: {'cam01': 8, 'cam03': 49, 'cam04': 73, 'cam08': 65}
+INFO    shift_spread=83
+INFO       cam01: true=+19  estimated=+18.2  error=0.8
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+83  estimated=+82.4  error=0.6
+INFO       cam08: true=+8  estimated=+7.2  error=0.8
+INFO       MAE=0.54
+INFO  
+  ── Trial 3/10  true shifts: {'cam01': 0, 'cam03': -34, 'cam04': -7, 'cam08': 5}  end_cuts: {'cam01': 18, 'cam03': 20, 'cam04': 17, 'cam08': 75}
+INFO    shift_spread=39
+INFO       cam01: true=+34  estimated=+33.6  error=0.4
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+27  estimated=+26.8  error=0.2
+INFO       cam08: true=+39  estimated=+38.8  error=0.2
+INFO       MAE=0.21
+INFO  
+  ── Trial 4/10  true shifts: {'cam01': 0, 'cam03': 37, 'cam04': 51, 'cam08': 48}  end_cuts: {'cam01': 72, 'cam03': 8, 'cam04': 67, 'cam08': 5}
+INFO    shift_spread=51
+INFO       cam01: true=+0  estimated=+0.0  error=0.0
+INFO       cam03: true=+37  estimated=+37.4  error=0.4
+INFO       cam04: true=+51  estimated=+51.2  error=0.2
+INFO       cam08: true=+48  estimated=+48.2  error=0.2
+INFO       MAE=0.21
+INFO  
+  ── Trial 5/10  true shifts: {'cam01': 0, 'cam03': -4, 'cam04': 14, 'cam08': -21}  end_cuts: {'cam01': 11, 'cam03': 14, 'cam04': 62, 'cam08': 24}
+INFO    shift_spread=35
+INFO       cam01: true=+21  estimated=+20.8  error=0.2
+INFO       cam03: true=+17  estimated=+17.2  error=0.2
+INFO       cam04: true=+35  estimated=+35.0  error=0.0
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.11
+INFO  
+  ── Trial 6/10  true shifts: {'cam01': 0, 'cam03': -29, 'cam04': 64, 'cam08': -54}  end_cuts: {'cam01': 69, 'cam03': 69, 'cam04': 45, 'cam08': 12}
+INFO    shift_spread=118
+INFO       cam01: true=+54  estimated=+54.0  error=0.0
+INFO       cam03: true=+25  estimated=+25.8  error=0.8
+INFO       cam04: true=+118  estimated=+118.2  error=0.2
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 7/10  true shifts: {'cam01': 0, 'cam03': -52, 'cam04': -33, 'cam08': 12}  end_cuts: {'cam01': 11, 'cam03': 34, 'cam04': 8, 'cam08': 41}
+INFO    shift_spread=64
+INFO       cam01: true=+52  estimated=+51.2  error=0.8
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+19  estimated=+18.4  error=0.6
+INFO       cam08: true=+64  estimated=+63.2  error=0.8
+INFO       MAE=0.54
+INFO  
+  ── Trial 8/10  true shifts: {'cam01': 0, 'cam03': -72, 'cam04': 32, 'cam08': -67}  end_cuts: {'cam01': 14, 'cam03': 13, 'cam04': 63, 'cam08': 4}
+INFO    shift_spread=104
+INFO       cam01: true=+72  estimated=+71.2  error=0.8
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+104  estimated=+103.4  error=0.6
+INFO       cam08: true=+5  estimated=+4.2  error=0.8
+INFO       MAE=0.54
+INFO  
+  ── Trial 9/10  true shifts: {'cam01': 0, 'cam03': -11, 'cam04': 14, 'cam08': 2}  end_cuts: {'cam01': 51, 'cam03': 61, 'cam04': 29, 'cam08': 62}
+INFO    shift_spread=25
+INFO       cam01: true=+11  estimated=+10.6  error=0.4
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+25  estimated=+24.8  error=0.2
+INFO       cam08: true=+13  estimated=+12.8  error=0.2
+INFO       MAE=0.21
+INFO  
+  ── Trial 10/10  true shifts: {'cam01': 0, 'cam03': -27, 'cam04': 73, 'cam08': 1}  end_cuts: {'cam01': 55, 'cam03': 66, 'cam04': 60, 'cam08': 64}
+INFO    shift_spread=100
+INFO       cam01: true=+27  estimated=+26.2  error=0.8
+INFO       cam03: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+100  estimated=+99.4  error=0.6
+INFO       cam08: true=+28  estimated=+27.2  error=0.8
+INFO       MAE=0.54
+INFO  
+  SUMMARY — 04_basketball/011_basketball  (solved 10/10 trials)
+INFO      Mean pairwise Δ 37.2  (median=36.5  max=63.8)
+INFO      MAE (frames)    0.34
+INFO      MedAE (frames)  0.21
+INFO      Within 0.5fr    67.5%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       77.6%
+INFO      AUC@500ms       95.5%
+INFO  
+============================================================
+INFO  Scene: 05_volleyball/004_volleyball
+INFO    cam02: 4 person(s), T=602
+INFO    cam04: 4 person(s), T=602
+INFO    cam08: 4 person(s), T=602
+INFO    cam11: 4 person(s), T=602
+INFO    Cameras: ['cam02', 'cam04', 'cam08', 'cam11']
+INFO    Persons: [1, 2, 3, 4]  (cameras observing each: {1: 4, 2: 4, 3: 4, 4: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam02': 0, 'cam04': 6, 'cam08': -69, 'cam11': -1}  end_cuts: {'cam02': 13, 'cam04': 67, 'cam08': 17, 'cam11': 17}
+INFO    shift_spread=75
+INFO       cam02: true=+69  estimated=+68.0  error=1.0
+INFO       cam04: true=+75  estimated=+74.2  error=0.8
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       cam11: true=+68  estimated=+67.8  error=0.2
+INFO       MAE=0.50
+INFO  
+  ── Trial 2/10  true shifts: {'cam02': 0, 'cam04': -38, 'cam08': 22, 'cam11': 11}  end_cuts: {'cam02': 72, 'cam04': 31, 'cam08': 21, 'cam11': 3}
+INFO    shift_spread=60
+INFO       cam02: true=+38  estimated=+37.8  error=0.2
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+60  estimated=+60.8  error=0.8
+INFO       cam11: true=+49  estimated=+49.6  error=0.6
+INFO       MAE=0.39
+INFO  
+  ── Trial 3/10  true shifts: {'cam02': 0, 'cam04': -74, 'cam08': -19, 'cam11': 64}  end_cuts: {'cam02': 39, 'cam04': 67, 'cam08': 7, 'cam11': 7}
+INFO    shift_spread=138
+INFO       cam02: true=+74  estimated=+73.8  error=0.2
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+55  estimated=+55.8  error=0.8
+INFO       cam11: true=+138  estimated=+138.6  error=0.6
+INFO       MAE=0.39
+INFO  
+  ── Trial 4/10  true shifts: {'cam02': 0, 'cam04': 50, 'cam08': -59, 'cam11': -68}  end_cuts: {'cam02': 30, 'cam04': 70, 'cam08': 52, 'cam11': 7}
+INFO    shift_spread=118
+INFO       cam02: true=+68  estimated=+67.2  error=0.8
+INFO       cam04: true=+118  estimated=+117.4  error=0.6
+INFO       cam08: true=+9  estimated=+9.2  error=0.2
+INFO       cam11: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.39
+INFO  
+  ── Trial 5/10  true shifts: {'cam02': 0, 'cam04': 51, 'cam08': 52, 'cam11': 45}  end_cuts: {'cam02': 68, 'cam04': 18, 'cam08': 74, 'cam11': 24}
+INFO    shift_spread=52
+INFO       cam02: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+51  estimated=+51.2  error=0.2
+INFO       cam08: true=+52  estimated=+53.0  error=1.0
+INFO       cam11: true=+45  estimated=+45.8  error=0.8
+INFO       MAE=0.50
+INFO  
+  ── Trial 6/10  true shifts: {'cam02': 0, 'cam04': 46, 'cam08': 12, 'cam11': 42}  end_cuts: {'cam02': 47, 'cam04': 48, 'cam08': 46, 'cam11': 59}
+INFO    shift_spread=46
+INFO       cam02: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+46  estimated=+46.2  error=0.2
+INFO       cam08: true=+12  estimated=+13.0  error=1.0
+INFO       cam11: true=+42  estimated=+42.8  error=0.8
+INFO       MAE=0.50
+INFO  
+  ── Trial 7/10  true shifts: {'cam02': 0, 'cam04': 36, 'cam08': -55, 'cam11': 49}  end_cuts: {'cam02': 40, 'cam04': 24, 'cam08': 39, 'cam11': 73}
+INFO    shift_spread=104
+INFO       cam02: true=+55  estimated=+54.0  error=1.0
+INFO       cam04: true=+91  estimated=+90.2  error=0.8
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       cam11: true=+104  estimated=+103.8  error=0.2
+INFO       MAE=0.50
+INFO  
+  ── Trial 8/10  true shifts: {'cam02': 0, 'cam04': 54, 'cam08': 50, 'cam11': -6}  end_cuts: {'cam02': 59, 'cam04': 29, 'cam08': 52, 'cam11': 48}
+INFO    shift_spread=60
+INFO       cam02: true=+6  estimated=+5.2  error=0.8
+INFO       cam04: true=+60  estimated=+59.4  error=0.6
+INFO       cam08: true=+56  estimated=+56.2  error=0.2
+INFO       cam11: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.39
+INFO  
+  ── Trial 9/10  true shifts: {'cam02': 0, 'cam04': -38, 'cam08': -35, 'cam11': -66}  end_cuts: {'cam02': 10, 'cam04': 32, 'cam08': 36, 'cam11': 12}
+INFO    shift_spread=66
+INFO       cam02: true=+66  estimated=+65.2  error=0.8
+INFO       cam04: true=+28  estimated=+27.4  error=0.6
+INFO       cam08: true=+31  estimated=+31.2  error=0.2
+INFO       cam11: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.39
+INFO  
+  ── Trial 10/10  true shifts: {'cam02': 0, 'cam04': -13, 'cam08': 16, 'cam11': -40}  end_cuts: {'cam02': 25, 'cam04': 27, 'cam08': 38, 'cam11': 27}
+INFO    shift_spread=56
+INFO       cam02: true=+40  estimated=+39.2  error=0.8
+INFO       cam04: true=+27  estimated=+26.4  error=0.6
+INFO       cam08: true=+56  estimated=+56.2  error=0.2
+INFO       cam11: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.39
+INFO  
+  SUMMARY — 05_volleyball/004_volleyball  (solved 10/10 trials)
+INFO      Mean pairwise Δ 42.6  (median=35.6  max=72.2)
+INFO      MAE (frames)    0.44
+INFO      MedAE (frames)  0.39
+INFO      Within 0.5fr    50.0%
+INFO      Within 1fr      95.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       71.0%
+INFO      AUC@500ms       94.2%
+INFO  
+============================================================
+INFO  Scene: 05_volleyball/011_volleyball
+INFO    cam02: 4 person(s), T=602
+INFO    cam04: 3 person(s), T=602
+INFO    cam08: 4 person(s), T=602
+INFO    cam11: 4 person(s), T=602
+INFO    Cameras: ['cam02', 'cam04', 'cam08', 'cam11']
+INFO    Persons: [1, 2, 3, 4]  (cameras observing each: {1: 3, 2: 4, 3: 4, 4: 4} of 4)
+INFO    Person(s) [1] zero-padded where unobserved — they score only the pairs whose two cameras both see them
+INFO  
+  ── Trial 1/10  true shifts: {'cam02': 0, 'cam04': 36, 'cam08': -26, 'cam11': -10}  end_cuts: {'cam02': 28, 'cam04': 13, 'cam08': 52, 'cam11': 17}
+INFO    shift_spread=62
+INFO       cam02: true=+26  estimated=+24.8  error=1.2
+INFO       cam04: true=+62  estimated=+61.6  error=0.4
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       cam11: true=+16  estimated=+15.8  error=0.2
+INFO       MAE=0.46
+INFO  
+  ── Trial 2/10  true shifts: {'cam02': 0, 'cam04': -31, 'cam08': 44, 'cam11': 68}  end_cuts: {'cam02': 50, 'cam04': 69, 'cam08': 64, 'cam11': 36}
+INFO    shift_spread=99
+INFO       cam02: true=+31  estimated=+30.2  error=0.8
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+75  estimated=+75.4  error=0.4
+INFO       cam11: true=+99  estimated=+99.2  error=0.2
+INFO       MAE=0.36
+INFO  
+  ── Trial 3/10  true shifts: {'cam02': 0, 'cam04': 41, 'cam08': -26, 'cam11': -6}  end_cuts: {'cam02': 40, 'cam04': 72, 'cam08': 64, 'cam11': 37}
+INFO    shift_spread=67
+INFO       cam02: true=+26  estimated=+24.8  error=1.2
+INFO       cam04: true=+67  estimated=+66.6  error=0.4
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       cam11: true=+20  estimated=+19.8  error=0.2
+INFO       MAE=0.46
+INFO  
+  ── Trial 4/10  true shifts: {'cam02': 0, 'cam04': 23, 'cam08': -45, 'cam11': 46}  end_cuts: {'cam02': 42, 'cam04': 40, 'cam08': 58, 'cam11': 48}
+INFO    shift_spread=91
+INFO       cam02: true=+45  estimated=+43.8  error=1.2
+INFO       cam04: true=+68  estimated=+67.6  error=0.4
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       cam11: true=+91  estimated=+90.8  error=0.2
+INFO       MAE=0.46
+INFO  
+  ── Trial 5/10  true shifts: {'cam02': 0, 'cam04': -65, 'cam08': -32, 'cam11': -49}  end_cuts: {'cam02': 55, 'cam04': 2, 'cam08': 15, 'cam11': 45}
+INFO    shift_spread=65
+INFO       cam02: true=+65  estimated=+64.2  error=0.8
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+33  estimated=+33.4  error=0.4
+INFO       cam11: true=+16  estimated=+16.2  error=0.2
+INFO       MAE=0.36
+INFO  
+  ── Trial 6/10  true shifts: {'cam02': 0, 'cam04': 29, 'cam08': 0, 'cam11': 54}  end_cuts: {'cam02': 69, 'cam04': 10, 'cam08': 72, 'cam11': 46}
+INFO    shift_spread=54
+INFO       cam02: true=+0  estimated=+0.0  error=0.0
+INFO       cam04: true=+29  estimated=+29.8  error=0.8
+INFO       cam08: true=+0  estimated=+1.2  error=1.2
+INFO       cam11: true=+54  estimated=+55.0  error=1.0
+INFO       MAE=0.75
+INFO  
+  ── Trial 7/10  true shifts: {'cam02': 0, 'cam04': 21, 'cam08': -61, 'cam11': 18}  end_cuts: {'cam02': 55, 'cam04': 44, 'cam08': 6, 'cam11': 39}
+INFO    shift_spread=82
+INFO       cam02: true=+61  estimated=+59.8  error=1.2
+INFO       cam04: true=+82  estimated=+81.6  error=0.4
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       cam11: true=+79  estimated=+78.8  error=0.2
+INFO       MAE=0.46
+INFO  
+  ── Trial 8/10  true shifts: {'cam02': 0, 'cam04': 66, 'cam08': 34, 'cam11': -55}  end_cuts: {'cam02': 72, 'cam04': 72, 'cam08': 12, 'cam11': 60}
+INFO    shift_spread=121
+INFO       cam02: true=+55  estimated=+54.0  error=1.0
+INFO       cam04: true=+121  estimated=+120.8  error=0.2
+INFO       cam08: true=+89  estimated=+89.2  error=0.2
+INFO       cam11: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.36
+INFO  
+  ── Trial 9/10  true shifts: {'cam02': 0, 'cam04': -14, 'cam08': 14, 'cam11': -8}  end_cuts: {'cam02': 59, 'cam04': 75, 'cam08': 60, 'cam11': 70}
+INFO    shift_spread=28
+INFO       cam02: true=+14  estimated=+13.2  error=0.8
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam08: true=+28  estimated=+28.4  error=0.4
+INFO       cam11: true=+6  estimated=+6.2  error=0.2
+INFO       MAE=0.36
+INFO  
+  ── Trial 10/10  true shifts: {'cam02': 0, 'cam04': 67, 'cam08': -62, 'cam11': -37}  end_cuts: {'cam02': 54, 'cam04': 44, 'cam08': 3, 'cam11': 7}
+INFO    shift_spread=129
+INFO       cam02: true=+62  estimated=+60.8  error=1.2
+INFO       cam04: true=+129  estimated=+128.6  error=0.4
+INFO       cam08: true=+0  estimated=+0.0  error=0.0
+INFO       cam11: true=+25  estimated=+24.8  error=0.2
+INFO       MAE=0.46
+INFO  
+  SUMMARY — 05_volleyball/011_volleyball  (solved 10/10 trials)
+INFO      Mean pairwise Δ 43.7  (median=39.7  max=70.7)
+INFO      MAE (frames)    0.45
+INFO      MedAE (frames)  0.32
+INFO      Within 0.5fr    70.0%
+INFO      Within 1fr      82.5%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       70.0%
+INFO      AUC@500ms       94.0%
+INFO  
+============================================================
+INFO  Scene: 06_badminton/022_badminton
+INFO    cam01: 4 person(s), T=692
+INFO    cam02: 4 person(s), T=702
+INFO    cam05: 4 person(s), T=702
+INFO    cam07: 4 person(s), T=702
+INFO    Cameras: ['cam01', 'cam02', 'cam05', 'cam07']
+INFO    Persons: [1, 2, 3, 4]  (cameras observing each: {1: 4, 2: 4, 3: 4, 4: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam01': 0, 'cam02': 3, 'cam05': 18, 'cam07': -50}  end_cuts: {'cam01': 13, 'cam02': 9, 'cam05': 42, 'cam07': 0}
+INFO    shift_spread=68
+INFO       cam01: true=+50  estimated=+50.0  error=0.0
+INFO       cam02: true=+53  estimated=+53.2  error=0.2
+INFO       cam05: true=+68  estimated=+67.8  error=0.2
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.11
+INFO  
+  ── Trial 2/10  true shifts: {'cam01': 0, 'cam02': 11, 'cam05': -4, 'cam07': -5}  end_cuts: {'cam01': 51, 'cam02': 39, 'cam05': 55, 'cam07': 58}
+INFO    shift_spread=16
+INFO       cam01: true=+5  estimated=+5.0  error=0.0
+INFO       cam02: true=+16  estimated=+16.2  error=0.2
+INFO       cam05: true=+1  estimated=+0.8  error=0.2
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.11
+INFO  
+  ── Trial 3/10  true shifts: {'cam01': 0, 'cam02': 63, 'cam05': 45, 'cam07': 3}  end_cuts: {'cam01': 37, 'cam02': 17, 'cam05': 45, 'cam07': 10}
+INFO    shift_spread=63
+INFO       cam01: true=+0  estimated=+0.0  error=0.0
+INFO       cam02: true=+63  estimated=+63.2  error=0.2
+INFO       cam05: true=+45  estimated=+44.8  error=0.2
+INFO       cam07: true=+3  estimated=+3.0  error=0.0
+INFO       MAE=0.11
+INFO  
+  ── Trial 4/10  true shifts: {'cam01': 0, 'cam02': 65, 'cam05': 52, 'cam07': -57}  end_cuts: {'cam01': 59, 'cam02': 8, 'cam05': 54, 'cam07': 6}
+INFO    shift_spread=122
+INFO       cam01: true=+57  estimated=+57.0  error=0.0
+INFO       cam02: true=+122  estimated=+122.2  error=0.2
+INFO       cam05: true=+109  estimated=+108.8  error=0.2
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.11
+INFO  
+  ── Trial 5/10  true shifts: {'cam01': 0, 'cam02': -2, 'cam05': 24, 'cam07': 35}  end_cuts: {'cam01': 31, 'cam02': 70, 'cam05': 58, 'cam07': 15}
+INFO    shift_spread=37
+INFO       cam01: true=+2  estimated=+1.8  error=0.2
+INFO       cam02: true=+0  estimated=+0.0  error=0.0
+INFO       cam05: true=+26  estimated=+25.6  error=0.4
+INFO       cam07: true=+37  estimated=+36.8  error=0.2
+INFO       MAE=0.21
+INFO  
+  ── Trial 6/10  true shifts: {'cam01': 0, 'cam02': 26, 'cam05': 35, 'cam07': -25}  end_cuts: {'cam01': 56, 'cam02': 68, 'cam05': 62, 'cam07': 57}
+INFO    shift_spread=60
+INFO       cam01: true=+25  estimated=+25.0  error=0.0
+INFO       cam02: true=+51  estimated=+51.2  error=0.2
+INFO       cam05: true=+60  estimated=+59.8  error=0.2
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.11
+INFO  
+  ── Trial 7/10  true shifts: {'cam01': 0, 'cam02': 20, 'cam05': -35, 'cam07': 45}  end_cuts: {'cam01': 27, 'cam02': 40, 'cam05': 23, 'cam07': 23}
+INFO    shift_spread=80
+INFO       cam01: true=+35  estimated=+35.2  error=0.2
+INFO       cam02: true=+55  estimated=+55.4  error=0.4
+INFO       cam05: true=+0  estimated=+0.0  error=0.0
+INFO       cam07: true=+80  estimated=+80.2  error=0.2
+INFO       MAE=0.21
+INFO  
+  ── Trial 8/10  true shifts: {'cam01': 0, 'cam02': -52, 'cam05': 70, 'cam07': -53}  end_cuts: {'cam01': 6, 'cam02': 71, 'cam05': 42, 'cam07': 33}
+INFO    shift_spread=123
+INFO       cam01: true=+53  estimated=+53.0  error=0.0
+INFO       cam02: true=+1  estimated=+1.2  error=0.2
+INFO       cam05: true=+123  estimated=+122.8  error=0.2
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.11
+INFO  
+  ── Trial 9/10  true shifts: {'cam01': 0, 'cam02': 36, 'cam05': -18, 'cam07': -56}  end_cuts: {'cam01': 55, 'cam02': 13, 'cam05': 42, 'cam07': 72}
+INFO    shift_spread=92
+INFO       cam01: true=+56  estimated=+56.0  error=0.0
+INFO       cam02: true=+92  estimated=+92.2  error=0.2
+INFO       cam05: true=+38  estimated=+37.8  error=0.2
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.11
+INFO  
+  ── Trial 10/10  true shifts: {'cam01': 0, 'cam02': 66, 'cam05': -21, 'cam07': 42}  end_cuts: {'cam01': 46, 'cam02': 36, 'cam05': 10, 'cam07': 28}
+INFO    shift_spread=87
+INFO       cam01: true=+21  estimated=+21.2  error=0.2
+INFO       cam02: true=+87  estimated=+87.4  error=0.4
+INFO       cam05: true=+0  estimated=+0.0  error=0.0
+INFO       cam07: true=+63  estimated=+63.2  error=0.2
+INFO       MAE=0.21
+INFO  
+  SUMMARY — 06_badminton/022_badminton  (solved 10/10 trials)
+INFO      Mean pairwise Δ 42.1  (median=40.9  max=70.2)
+INFO      MAE (frames)    0.14
+INFO      MedAE (frames)  0.21
+INFO      Within 0.5fr    100.0%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       90.7%
+INFO      AUC@500ms       98.1%
+INFO  
+============================================================
+INFO  Scene: 06_badminton/031_badminton
+INFO    cam01: 4 person(s), T=802
+INFO    cam02: 4 person(s), T=802
+INFO    cam05: 4 person(s), T=802
+INFO    cam07: 4 person(s), T=802
+INFO    Cameras: ['cam01', 'cam02', 'cam05', 'cam07']
+INFO    Persons: [1, 2, 3, 4]  (cameras observing each: {1: 4, 2: 4, 3: 4, 4: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam01': 0, 'cam02': 23, 'cam05': 73, 'cam07': -75}  end_cuts: {'cam01': 54, 'cam02': 64, 'cam05': 72, 'cam07': 32}
+INFO    shift_spread=148
+INFO       cam01: true=+75  estimated=+75.0  error=0.0
+INFO       cam02: true=+98  estimated=+99.0  error=1.0
+INFO       cam05: true=+148  estimated=+148.0  error=0.0
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 2/10  true shifts: {'cam01': 0, 'cam02': -58, 'cam05': -35, 'cam07': 53}  end_cuts: {'cam01': 66, 'cam02': 48, 'cam05': 9, 'cam07': 9}
+INFO    shift_spread=111
+INFO       cam01: true=+58  estimated=+57.0  error=1.0
+INFO       cam02: true=+0  estimated=+0.0  error=0.0
+INFO       cam05: true=+23  estimated=+22.0  error=1.0
+INFO       cam07: true=+111  estimated=+110.0  error=1.0
+INFO       MAE=0.75
+INFO  
+  ── Trial 3/10  true shifts: {'cam01': 0, 'cam02': -3, 'cam05': 13, 'cam07': -71}  end_cuts: {'cam01': 52, 'cam02': 41, 'cam05': 0, 'cam07': 7}
+INFO    shift_spread=84
+INFO       cam01: true=+71  estimated=+71.0  error=0.0
+INFO       cam02: true=+68  estimated=+69.0  error=1.0
+INFO       cam05: true=+84  estimated=+84.0  error=0.0
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 4/10  true shifts: {'cam01': 0, 'cam02': -7, 'cam05': 34, 'cam07': 49}  end_cuts: {'cam01': 32, 'cam02': 22, 'cam05': 73, 'cam07': 34}
+INFO    shift_spread=56
+INFO       cam01: true=+7  estimated=+6.0  error=1.0
+INFO       cam02: true=+0  estimated=+0.0  error=0.0
+INFO       cam05: true=+41  estimated=+40.0  error=1.0
+INFO       cam07: true=+56  estimated=+55.0  error=1.0
+INFO       MAE=0.75
+INFO  
+  ── Trial 5/10  true shifts: {'cam01': 0, 'cam02': -28, 'cam05': -9, 'cam07': -74}  end_cuts: {'cam01': 22, 'cam02': 39, 'cam05': 69, 'cam07': 56}
+INFO    shift_spread=74
+INFO       cam01: true=+74  estimated=+74.0  error=0.0
+INFO       cam02: true=+46  estimated=+47.0  error=1.0
+INFO       cam05: true=+65  estimated=+65.0  error=0.0
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 6/10  true shifts: {'cam01': 0, 'cam02': 42, 'cam05': 7, 'cam07': -59}  end_cuts: {'cam01': 29, 'cam02': 75, 'cam05': 3, 'cam07': 66}
+INFO    shift_spread=101
+INFO       cam01: true=+59  estimated=+59.0  error=0.0
+INFO       cam02: true=+101  estimated=+102.0  error=1.0
+INFO       cam05: true=+66  estimated=+66.0  error=0.0
+INFO       cam07: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 7/10  true shifts: {'cam01': 0, 'cam02': 28, 'cam05': -33, 'cam07': 42}  end_cuts: {'cam01': 63, 'cam02': 3, 'cam05': 8, 'cam07': 50}
+INFO    shift_spread=75
+INFO       cam01: true=+33  estimated=+33.0  error=0.0
+INFO       cam02: true=+61  estimated=+62.0  error=1.0
+INFO       cam05: true=+0  estimated=+0.0  error=0.0
+INFO       cam07: true=+75  estimated=+75.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 8/10  true shifts: {'cam01': 0, 'cam02': 75, 'cam05': -72, 'cam07': 25}  end_cuts: {'cam01': 10, 'cam02': 49, 'cam05': 47, 'cam07': 6}
+INFO    shift_spread=147
+INFO       cam01: true=+72  estimated=+72.0  error=0.0
+INFO       cam02: true=+147  estimated=+148.0  error=1.0
+INFO       cam05: true=+0  estimated=+0.0  error=0.0
+INFO       cam07: true=+97  estimated=+97.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 9/10  true shifts: {'cam01': 0, 'cam02': 27, 'cam05': 60, 'cam07': 55}  end_cuts: {'cam01': 2, 'cam02': 18, 'cam05': 18, 'cam07': 34}
+INFO    shift_spread=60
+INFO       cam01: true=+0  estimated=+0.0  error=0.0
+INFO       cam02: true=+27  estimated=+28.0  error=1.0
+INFO       cam05: true=+60  estimated=+60.0  error=0.0
+INFO       cam07: true=+55  estimated=+55.0  error=0.0
+INFO       MAE=0.25
+INFO  
+  ── Trial 10/10  true shifts: {'cam01': 0, 'cam02': -54, 'cam05': 54, 'cam07': 42}  end_cuts: {'cam01': 61, 'cam02': 15, 'cam05': 1, 'cam07': 69}
+INFO    shift_spread=108
+INFO       cam01: true=+54  estimated=+53.0  error=1.0
+INFO       cam02: true=+0  estimated=+0.0  error=0.0
+INFO       cam05: true=+108  estimated=+107.0  error=1.0
+INFO       cam07: true=+96  estimated=+95.0  error=1.0
+INFO       MAE=0.75
+INFO  
+  SUMMARY — 06_badminton/031_badminton  (solved 10/10 trials)
+INFO      Mean pairwise Δ 52.3  (median=47.1  max=77.8)
+INFO      MAE (frames)    0.40
+INFO      MedAE (frames)  0.00
+INFO      Within 0.5fr    60.0%
+INFO      Within 1fr      92.5%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       73.3%
+INFO      AUC@500ms       94.7%
+INFO  
+============================================================
+INFO  Scene: 07_tennis/007_tennis
+INFO    cam04: 2 person(s), T=1552
+INFO    cam09: 2 person(s), T=1552
+INFO    cam12: 2 person(s), T=1552
+INFO    cam20: 2 person(s), T=1552
+INFO    Cameras: ['cam04', 'cam09', 'cam12', 'cam20']
+INFO    Persons: [1, 2]  (cameras observing each: {1: 4, 2: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam04': 0, 'cam09': -32, 'cam12': 24, 'cam20': 62}  end_cuts: {'cam04': 2, 'cam09': 0, 'cam12': 0, 'cam20': 11}
+INFO    shift_spread=94
+INFO       cam04: true=+32  estimated=+32.0  error=0.0
+INFO       cam09: true=+0  estimated=+0.0  error=0.0
+INFO       cam12: true=+56  estimated=+56.0  error=0.0
+INFO       cam20: true=+94  estimated=+94.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 2/10  true shifts: {'cam04': 0, 'cam09': -68, 'cam12': 48, 'cam20': 16}  end_cuts: {'cam04': 74, 'cam09': 60, 'cam12': 73, 'cam20': 18}
+INFO    shift_spread=116
+INFO       cam04: true=+68  estimated=+68.0  error=0.0
+INFO       cam09: true=+0  estimated=+0.0  error=0.0
+INFO       cam12: true=+116  estimated=+116.0  error=0.0
+INFO       cam20: true=+84  estimated=+84.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 3/10  true shifts: {'cam04': 0, 'cam09': -32, 'cam12': 53, 'cam20': -39}  end_cuts: {'cam04': 4, 'cam09': 50, 'cam12': 60, 'cam20': 73}
+INFO    shift_spread=92
+INFO       cam04: true=+39  estimated=+39.0  error=0.0
+INFO       cam09: true=+7  estimated=+7.0  error=0.0
+INFO       cam12: true=+92  estimated=+92.0  error=0.0
+INFO       cam20: true=+0  estimated=+0.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 4/10  true shifts: {'cam04': 0, 'cam09': 65, 'cam12': -57, 'cam20': 41}  end_cuts: {'cam04': 64, 'cam09': 53, 'cam12': 62, 'cam20': 63}
+INFO    shift_spread=122
+INFO       cam04: true=+57  estimated=+57.0  error=0.0
+INFO       cam09: true=+122  estimated=+122.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+98  estimated=+98.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 5/10  true shifts: {'cam04': 0, 'cam09': -8, 'cam12': -69, 'cam20': -7}  end_cuts: {'cam04': 15, 'cam09': 8, 'cam12': 9, 'cam20': 53}
+INFO    shift_spread=69
+INFO       cam04: true=+69  estimated=+69.0  error=0.0
+INFO       cam09: true=+61  estimated=+61.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+62  estimated=+62.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 6/10  true shifts: {'cam04': 0, 'cam09': 1, 'cam12': 6, 'cam20': 37}  end_cuts: {'cam04': 41, 'cam09': 47, 'cam12': 6, 'cam20': 64}
+INFO    shift_spread=37
+INFO       cam04: true=+0  estimated=+0.0  error=0.0
+INFO       cam09: true=+1  estimated=+1.0  error=0.0
+INFO       cam12: true=+6  estimated=+6.0  error=0.0
+INFO       cam20: true=+37  estimated=+37.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 7/10  true shifts: {'cam04': 0, 'cam09': -8, 'cam12': -52, 'cam20': 47}  end_cuts: {'cam04': 55, 'cam09': 4, 'cam12': 14, 'cam20': 1}
+INFO    shift_spread=99
+INFO       cam04: true=+52  estimated=+52.0  error=0.0
+INFO       cam09: true=+44  estimated=+44.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+99  estimated=+99.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 8/10  true shifts: {'cam04': 0, 'cam09': -35, 'cam12': -60, 'cam20': 32}  end_cuts: {'cam04': 39, 'cam09': 74, 'cam12': 56, 'cam20': 46}
+INFO    shift_spread=92
+INFO       cam04: true=+60  estimated=+60.0  error=0.0
+INFO       cam09: true=+25  estimated=+25.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+92  estimated=+92.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 9/10  true shifts: {'cam04': 0, 'cam09': 1, 'cam12': -67, 'cam20': -65}  end_cuts: {'cam04': 46, 'cam09': 0, 'cam12': 3, 'cam20': 16}
+INFO    shift_spread=68
+INFO       cam04: true=+67  estimated=+67.0  error=0.0
+INFO       cam09: true=+68  estimated=+68.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+2  estimated=+2.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 10/10  true shifts: {'cam04': 0, 'cam09': 58, 'cam12': -6, 'cam20': 32}  end_cuts: {'cam04': 31, 'cam09': 13, 'cam12': 28, 'cam20': 6}
+INFO    shift_spread=64
+INFO       cam04: true=+6  estimated=+6.0  error=0.0
+INFO       cam09: true=+64  estimated=+64.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+38  estimated=+38.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  SUMMARY — 07_tennis/007_tennis  (solved 10/10 trials)
+INFO      Mean pairwise Δ 47.0  (median=50.9  max=67.8)
+INFO      MAE (frames)    0.00
+INFO      MedAE (frames)  0.00
+INFO      Within 0.5fr    100.0%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       100.0%
+INFO      AUC@500ms       100.0%
+INFO  
+============================================================
+INFO  Scene: 07_tennis/012_tennis
+INFO    cam04: 2 person(s), T=1302
+INFO    cam09: 2 person(s), T=1302
+INFO    cam12: 2 person(s), T=1302
+INFO    cam20: 2 person(s), T=1302
+INFO    Cameras: ['cam04', 'cam09', 'cam12', 'cam20']
+INFO    Persons: [1, 2]  (cameras observing each: {1: 4, 2: 4} of 4)
+INFO  
+  ── Trial 1/10  true shifts: {'cam04': 0, 'cam09': 41, 'cam12': -48, 'cam20': -19}  end_cuts: {'cam04': 74, 'cam09': 44, 'cam12': 34, 'cam20': 41}
+INFO    shift_spread=89
+INFO       cam04: true=+48  estimated=+48.0  error=0.0
+INFO       cam09: true=+89  estimated=+89.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+29  estimated=+29.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 2/10  true shifts: {'cam04': 0, 'cam09': 43, 'cam12': -37, 'cam20': 21}  end_cuts: {'cam04': 66, 'cam09': 43, 'cam12': 33, 'cam20': 11}
+INFO    shift_spread=80
+INFO       cam04: true=+37  estimated=+37.0  error=0.0
+INFO       cam09: true=+80  estimated=+80.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+58  estimated=+58.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 3/10  true shifts: {'cam04': 0, 'cam09': -38, 'cam12': 67, 'cam20': 6}  end_cuts: {'cam04': 22, 'cam09': 31, 'cam12': 43, 'cam20': 40}
+INFO    shift_spread=105
+INFO       cam04: true=+38  estimated=+38.0  error=0.0
+INFO       cam09: true=+0  estimated=+0.0  error=0.0
+INFO       cam12: true=+105  estimated=+105.0  error=0.0
+INFO       cam20: true=+44  estimated=+44.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 4/10  true shifts: {'cam04': 0, 'cam09': 30, 'cam12': -37, 'cam20': 23}  end_cuts: {'cam04': 33, 'cam09': 71, 'cam12': 12, 'cam20': 11}
+INFO    shift_spread=67
+INFO       cam04: true=+37  estimated=+37.0  error=0.0
+INFO       cam09: true=+67  estimated=+67.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+60  estimated=+60.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 5/10  true shifts: {'cam04': 0, 'cam09': -6, 'cam12': 1, 'cam20': 29}  end_cuts: {'cam04': 30, 'cam09': 69, 'cam12': 36, 'cam20': 9}
+INFO    shift_spread=35
+INFO       cam04: true=+6  estimated=+6.0  error=0.0
+INFO       cam09: true=+0  estimated=+0.0  error=0.0
+INFO       cam12: true=+7  estimated=+7.0  error=0.0
+INFO       cam20: true=+35  estimated=+35.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 6/10  true shifts: {'cam04': 0, 'cam09': -57, 'cam12': 71, 'cam20': -55}  end_cuts: {'cam04': 72, 'cam09': 21, 'cam12': 7, 'cam20': 23}
+INFO    shift_spread=128
+INFO       cam04: true=+57  estimated=+57.0  error=0.0
+INFO       cam09: true=+0  estimated=+0.0  error=0.0
+INFO       cam12: true=+128  estimated=+128.0  error=0.0
+INFO       cam20: true=+2  estimated=+2.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 7/10  true shifts: {'cam04': 0, 'cam09': 17, 'cam12': -11, 'cam20': 43}  end_cuts: {'cam04': 46, 'cam09': 30, 'cam12': 48, 'cam20': 73}
+INFO    shift_spread=54
+INFO       cam04: true=+11  estimated=+11.0  error=0.0
+INFO       cam09: true=+28  estimated=+28.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+54  estimated=+54.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 8/10  true shifts: {'cam04': 0, 'cam09': -13, 'cam12': -52, 'cam20': -14}  end_cuts: {'cam04': 63, 'cam09': 16, 'cam12': 72, 'cam20': 44}
+INFO    shift_spread=52
+INFO       cam04: true=+52  estimated=+52.0  error=0.0
+INFO       cam09: true=+39  estimated=+39.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+38  estimated=+38.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 9/10  true shifts: {'cam04': 0, 'cam09': 15, 'cam12': -28, 'cam20': 63}  end_cuts: {'cam04': 2, 'cam09': 22, 'cam12': 31, 'cam20': 36}
+INFO    shift_spread=91
+INFO       cam04: true=+28  estimated=+28.0  error=0.0
+INFO       cam09: true=+43  estimated=+43.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+91  estimated=+91.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  ── Trial 10/10  true shifts: {'cam04': 0, 'cam09': -4, 'cam12': -53, 'cam20': -41}  end_cuts: {'cam04': 7, 'cam09': 43, 'cam12': 26, 'cam20': 42}
+INFO    shift_spread=53
+INFO       cam04: true=+53  estimated=+53.0  error=0.0
+INFO       cam09: true=+49  estimated=+49.0  error=0.0
+INFO       cam12: true=+0  estimated=+0.0  error=0.0
+INFO       cam20: true=+12  estimated=+12.0  error=0.0
+INFO       MAE=0.00
+INFO  
+  SUMMARY — 07_tennis/012_tennis  (solved 10/10 trials)
+INFO      Mean pairwise Δ 41.0  (median=40.4  max=73.2)
+INFO      MAE (frames)    0.00
+INFO      MedAE (frames)  0.00
+INFO      Within 0.5fr    100.0%
+INFO      Within 1fr      100.0%
+INFO      Within 2fr      100.0%
+INFO      AUC@100ms       100.0%
+INFO      AUC@500ms       100.0%
+INFO  
+============================================================
+INFO  AGGREGATE SUMMARY  (14 scene(s)  ×  10 trials each)
+INFO    metrics pooled over per-camera errors of solved trials
+INFO  
+INFO    All values in frames; AUC thresholds at 15 fps (100ms=1.5fr, 500ms=7.5fr)
+INFO    Scene                             Cams  Pers   Solved    MeanΔ     MAE   MedAE    W-0.5      W-1      W-2   AUC@100   AUC@500
+INFO    --------------------------------  ----  ----  -------  -------  ------  ------  -------  -------  -------  --------  --------
+INFO    01_tagging/007_tagging               4     4    10/10     47.0    0.00    0.00   100.0%   100.0%   100.0%    100.0%    100.0%
+INFO    01_tagging/011_tagging               4     4    10/10     39.6    0.00    0.00   100.0%   100.0%   100.0%    100.0%    100.0%
+INFO    02_lego/001_legoassemble             4     3    10/10     38.7    0.47    0.50    50.0%    97.5%   100.0%     68.6%     93.7%
+INFO    02_lego/003_legoassemble             4     3    10/10     46.7    0.49    0.57    47.5%    90.0%   100.0%     67.1%     93.4%
+INFO    03_fencing/005_fencing               4     3    10/10     37.7    0.34    0.21    60.0%   100.0%   100.0%     77.6%     95.5%
+INFO    03_fencing/006_fencing               4     3    10/10     48.0    0.32    0.21    65.0%   100.0%   100.0%     78.8%     95.8%
+INFO    04_basketball/001_basketball         4     4    10/10     45.9    0.25    0.21    75.0%   100.0%   100.0%     83.3%     96.7%
+INFO    04_basketball/011_basketball         4     4    10/10     37.2    0.34    0.21    67.5%   100.0%   100.0%     77.6%     95.5%
+INFO    05_volleyball/004_volleyball         4     4    10/10     42.6    0.44    0.39    50.0%    95.0%   100.0%     71.0%     94.2%
+INFO    05_volleyball/011_volleyball         4     4    10/10     43.7    0.45    0.32    70.0%    82.5%   100.0%     70.0%     94.0%
+INFO    06_badminton/022_badminton           4     4    10/10     42.1    0.14    0.21   100.0%   100.0%   100.0%     90.7%     98.1%
+INFO    06_badminton/031_badminton           4     4    10/10     52.3    0.40    0.00    60.0%    92.5%   100.0%     73.3%     94.7%
+INFO    07_tennis/007_tennis                 4     2    10/10     47.0    0.00    0.00   100.0%   100.0%   100.0%    100.0%    100.0%
+INFO    07_tennis/012_tennis                 4     2    10/10     41.0    0.00    0.00   100.0%   100.0%   100.0%    100.0%    100.0%
+INFO    --------------------------------  ----  ----  -------  -------  ------  ------  -------  -------  -------  --------  --------
+INFO    TOTAL                                         140/140     43.5    0.26    0.00    74.6%    97.0%   100.0%     82.7%     96.5%
+INFO    Coverage: 100.0%  (560 pooled per-camera errors)
+INFO  
+INFO    ── Assuming 15 fps  (1 frame = 66.7 ms) ──
+INFO      MAE               17.3 ms
+INFO      MedAE              0.0 ms
+INFO      Within 33 ms     74.6%   (≤0.5 fr)
+INFO      Within 67 ms      97.0%   (≤1 fr)
+INFO      Within 133 ms     100.0%   (≤2 fr)
+INFO  
+INFO    ── Assuming 30 fps  (1 frame = 33.3 ms) ──
+INFO      MAE                8.6 ms
+INFO      MedAE              0.0 ms
+INFO      Within 17 ms     74.6%   (≤0.5 fr)
+INFO      Within 33 ms      97.0%   (≤1 fr)
+INFO      Within 67 ms     100.0%   (≤2 fr)

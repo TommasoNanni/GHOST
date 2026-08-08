@@ -1,0 +1,5 @@
+Job 3021625  activity=06_badminton  modalities=3  fusion=geodesic-median  start=Thu Aug  6 07:24:42 PM CEST 2026
+GPU 0: NVIDIA GH200 120GB (UUID: GPU-acf816b8-4bbd-8ece-bf58-ef15c773fc85)
+GPU 1: NVIDIA GH200 120GB (UUID: GPU-6f6d97a7-655f-ce09-bdc4-c113046f071a)
+GPU 2: NVIDIA GH200 120GB (UUID: GPU-4fee3f5f-829b-9e64-b9cc-a9c6c93ab270)
+GPU 3: NVIDIA GH200 120GB (UUID: GPU-9d58d89b-8aca-d50b-b64d-164feb2a3142)

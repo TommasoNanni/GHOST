@@ -1,0 +1,70 @@
+=== GPU STATUS ===
+Fri Aug  7 22:07:39 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 590.48.01              Driver Version: 590.48.01      CUDA Version: 13.1     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GH200 120GB             Off |   00000009:01:00.0 Off |                    0 |
+| N/A   24C    P0             76W /  900W |      48MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   1  NVIDIA GH200 120GB             Off |   00000019:01:00.0 Off |                    0 |
+| N/A   25C    P0             99W /  900W |      28MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   2  NVIDIA GH200 120GB             Off |   00000029:01:00.0 Off |                    0 |
+| N/A   26C    P0             96W /  900W |      25MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   3  NVIDIA GH200 120GB             Off |   00000039:01:00.0 Off |                    0 |
+| N/A   23C    P0             89W /  900W |      22MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+=========================
+Job ID: 3032804  |  Start: Fri Aug  7 10:07:40 PM CEST 2026
+
+[sqsh] mounted /capstor/scratch/cscs/tnanni/datasets/rich/centered_test.sqsh -> /tmp/centered_test_3032804
+[sqsh] scenes with crop_meta.json: 52
+
+
+=================================================================
+AGGREGATE  (52 trial(s) evaluated)  --  through-sync, median fusion
+=================================================================
+  WA-MPJPE                            60.4mm
+  W-MPJPE                            108.2mm
+  WA-MPJPE-100                        47.7mm
+  W-MPJPE-100                         71.8mm
+  GA-MPJPE                            26.7mm
+  PA-MPJPE                            26.2mm
+  RTE                                  1.12%
+
+  --- Camera / scale diagnostics ---
+  Cam rot err (°)                       0.71
+  Cam t_cos                           0.9999
+  Cam t_err pred-sc (cm)                41.4
+  Pred scale                          7.3828
+  GT scale                            7.4514
+  Scale err (%)                        -0.8%
+  Raw root err (cm)                    25.8cm
+  Root orient err (°)                   5.7°
+
+  --- Sync diagnostics ---
+  Trials found                            52
+  Trials scored                           52
+  Sync MAE (frames)                     0.11
+  Sync MedAE (frames)                   0.00
+  Scenes skipped (no sync)                 0
+
+
+Done: Fri Aug  7 11:01:14 PM CEST 2026

@@ -1,0 +1,62 @@
+Mounted /capstor/scratch/cscs/tnanni/datasets/rich/centered_test.sqsh -> /tmp/centered_test_median (52 scenes)
+=== GPU STATUS ===
+Sun Aug  2 16:01:13 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 590.48.01              Driver Version: 590.48.01      CUDA Version: 13.1     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GH200 120GB             Off |   00000009:01:00.0 Off |                    0 |
+| N/A   25C    P0             85W /  900W |       3MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   1  NVIDIA GH200 120GB             Off |   00000019:01:00.0 Off |                    0 |
+| N/A   26C    P0             93W /  900W |       3MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   2  NVIDIA GH200 120GB             Off |   00000029:01:00.0 Off |                    0 |
+| N/A   25C    P0             92W /  900W |       3MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+|   3  NVIDIA GH200 120GB             Off |   00000039:01:00.0 Off |                    0 |
+| N/A   26C    P0             97W /  900W |       3MiB /  97871MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+=========================
+Job ID: 2984077  |  Start: Sun Aug  2 04:01:13 PM CEST 2026
+Fusion: geodesic median over cameras, L1/Weiszfeld (no checkpoint)
+
+
+=================================================================
+AGGREGATE  (52 scenes evaluated)  —  GEODESIC-MEDIAN FUSION (M10 neutral-pred vs gendered-GT)
+=================================================================
+  WA-MPJPE                            60.7mm
+  W-MPJPE                            101.2mm
+  WA-MPJPE-100                        46.8mm   (CHROMM multi: 53.1 mm)
+  W-MPJPE-100                         66.9mm   (CHROMM multi: 79.0 mm)
+  GA-MPJPE                            26.1mm
+  PA-MPJPE                            25.4mm
+  RTE                                  0.98%   (CHROMM multi: 1.4 %)
+
+  --- Diagnostics ---
+  Cam rot err (°)                       0.71
+  Cam t_cos                           0.9999
+  Cam t_err pred-sc (cm)                40.5
+  Pred scale                          7.3896
+  GT scale                            7.4596
+  Scale err (%)                        -0.8%
+  Raw root err (cm)                    25.1cm
+  Root orient err (°)                   5.5°
+
+
+Done: Sun Aug  2 05:03:06 PM CEST 2026

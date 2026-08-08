@@ -1,0 +1,29 @@
+Job 3018631  activity=01_tagging  modalities=2  fusion=geodesic-median  start=Thu Aug  6 10:54:15 AM CEST 2026
+GPU 0: NVIDIA GH200 120GB (UUID: GPU-0afb2ac1-915c-74c9-c11c-9bcf9516f908)
+GPU 1: NVIDIA GH200 120GB (UUID: GPU-fb8a8976-57b9-92ec-f14c-23fec8c669fd)
+GPU 2: NVIDIA GH200 120GB (UUID: GPU-d3954260-624a-3c85-9d63-d9365d919620)
+GPU 3: NVIDIA GH200 120GB (UUID: GPU-ba886bdc-2039-4d12-1959-e3885e4187c6)
+=== Stage B: aggregate ===
+  001_tagging               M2: W†=  128.5 GA=  73.3 PA= 43.7 mm   | single-view PA: best=40.8 median=48.4
+  002_tagging               M2: W†=  101.6 GA=  54.4 PA= 38.8 mm   | single-view PA: best=37.7 median=44.0
+  003_tagging               M2: W†=  152.9 GA=  65.3 PA= 44.1 mm   | single-view PA: best=41.7 median=49.4
+  004_tagging               M2: W†=  130.7 GA=  64.2 PA= 46.8 mm   | single-view PA: best=43.9 median=52.4
+  005_tagging               M2: W†=  137.3 GA=  64.6 PA= 43.3 mm   | single-view PA: best=42.0 median=47.7
+  006_tagging               M2: W†=  121.4 GA=  56.6 PA= 43.9 mm   | single-view PA: best=42.5 median=47.5
+  007_tagging               M2: W†=  173.5 GA=  92.6 PA= 44.2 mm   | single-view PA: best=42.3 median=48.4
+  008_tagging               M2: W†=  150.2 GA=  69.2 PA= 47.7 mm   | single-view PA: best=46.0 median=52.4
+  009_tagging               M2: W†=  112.8 GA=  54.8 PA= 44.6 mm   | single-view PA: best=43.0 median=47.6
+  010_tagging               M2: W†=  122.9 GA=  58.9 PA= 46.4 mm   | single-view PA: best=44.8 median=50.3
+  011_tagging               M2: W†=  108.6 GA=  53.9 PA= 42.8 mm   | single-view PA: best=41.5 median=46.2
+  012_tagging               M2: W†=  155.5 GA=  86.5 PA= 48.5 mm   | single-view PA: best=47.7 median=56.8
+  013_tagging               M2: W†=  113.2 GA=  71.4 PA= 49.6 mm   | single-view PA: best=48.1 median=57.2
+  014_tagging               M2: W†=  172.8 GA=  91.3 PA= 48.3 mm   | single-view PA: best=45.2 median=53.5
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M2: pred-cam + GT-scale + pred-pose        14      134.4       68.3       45.2
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+Done: Thu Aug  6 11:18:38 AM CEST 2026

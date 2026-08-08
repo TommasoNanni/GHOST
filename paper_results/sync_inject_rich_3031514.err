@@ -1,0 +1,145 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO __main__: VGGT weights: checkpoints/vggt_omega/vggt_omega_1b_512.pt  devices: ['cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO __main__: MapAnything: device=cuda:0  batch_size=8
+INFO __main__: Reading images from /tmp/centered_test_3031514 (centered-crop tree)
+INFO __main__: Found 1 scene(s).
+INFO __main__: 
+============================================================
+Scene: Gym_010_cooking1  cameras=['cam_01', 'cam_03', 'cam_04', 'cam_05']  sync persons=[1, 3]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_01': 0, 'cam_03': -37, 'cam_04': 25, 'cam_05': 14}  end_cuts: {'cam_01': 20, 'cam_03': 19, 'cam_04': 39, 'cam_05': 3}
+INFO __main__:   shift_hat:   {'cam_01': 0, 'cam_03': -37, 'cam_04': 25, 'cam_05': 14}  |err|={'cam_01': 0, 'cam_03': 0, 'cam_04': 0, 'cam_05': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+INFO preprocessing.run_vggt:   [cuda:0] 20/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 20/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 20/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 120/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 120/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 120/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 120/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 140/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 140/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 140/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 140/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 160/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 160/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 160/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 160/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 170/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 169/169 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 170/170 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 169/169 frames done.
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmprii1oh67/chunk_03.npz
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmprii1oh67/chunk_00.npz
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmprii1oh67/chunk_02.npz
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmprii1oh67/chunk_01.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_cooking1/trial0/vggt_cameras_centered.npz  extrinsics shape=(678, 4, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=678/678  nonzero_pixels=738705408  raw depth: min=0.0880 max=9.1094 mean=0.8583
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_cooking1/trial0/vggt_depth_centered.npz  depth shape=(678, 4, 448, 608) dtype=uint16
+INFO preprocessing.run_mapanything: Loading MapAnything from 'facebook/map-anything' on cuda:0 …
+INFO httpx: HTTP Request: HEAD https://huggingface.co/facebook/map-anything/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+INFO httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/facebook/map-anything/a1d87e9086706fb9974f3be5a3e3a0ca5401c5aa/config.json "HTTP/1.1 200 OK"
+Using cache found in /users/tnanni/.cache/torch/hub/facebookresearch_dinov2_main
+INFO httpx: HTTP Request: HEAD https://huggingface.co/facebook/map-anything/resolve/main/model.safetensors "HTTP/1.1 302 Found"
+INFO preprocessing.run_mapanything: MapAnything ready.
+INFO preprocessing.run_mapanything: trial0: T=678  K=4  MA=448×602
+INFO preprocessing.run_mapanything: trial0: scale mean=8.4007  std=0.1201  nan_filled=0  time=88.1s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/Gym_010_cooking1/trial0  (sync_mae=0.00 frames)
+INFO __main__: 
+============================================================
+Done. 1 trial(s) built (1 sync attempts this run) under /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync  (0 scene(s) fully skipped)

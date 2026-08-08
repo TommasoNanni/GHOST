@@ -1,0 +1,21 @@
+Job 3022816  activity=02_lego  modalities=4  fusion=geodesic-median  start=Fri Aug  7 12:07:21 AM CEST 2026
+GPU 0: NVIDIA GH200 120GB (UUID: GPU-3182e875-b9f6-92a4-9b8d-11e1abdc3443)
+GPU 1: NVIDIA GH200 120GB (UUID: GPU-8211bf1c-13a7-4d7a-6416-2d335bd0418d)
+GPU 2: NVIDIA GH200 120GB (UUID: GPU-7436cb48-de39-6fe9-a138-b03cc28cab36)
+GPU 3: NVIDIA GH200 120GB (UUID: GPU-594c0c99-69b9-bc68-76ff-77528593db8e)
+=== Stage B: aggregate ===
+  001_legoassemble          M4: W†=   57.3 GA=  51.0 PA= 27.8 mm   | single-view PA: best=43.4 median=50.3
+  002_legoassemble          M4: W†=   60.5 GA=  54.1 PA= 27.7 mm   | single-view PA: best=43.8 median=51.4
+  003_legoassemble          M4: W†=   59.0 GA=  52.3 PA= 27.9 mm   | single-view PA: best=41.6 median=47.1
+  004_legoassemble          M4: W†=   56.0 GA=  49.0 PA= 27.2 mm   | single-view PA: best=42.4 median=49.0
+  005_legoassemble          M4: W†=   57.4 GA=  46.8 PA= 27.2 mm   | single-view PA: best=40.4 median=48.5
+  006_legoassemble          M4: W†=   61.2 GA=  50.8 PA= 27.1 mm   | single-view PA: best=44.4 median=51.4
+
+=== AGGREGATE — EgoHumans ORACLE ABLATIONS (mm) ===
+  Oracle numbers — NOT comparable to CHROMM (W†510 GA150 PA50).
+  Production number: evaluation/evaluate_egohumans.py
+  rung                                        n   W-MPJPE†   GA-MPJPE   PA-MPJPE
+  M4: GT-cam   + GT-scale + GT-pose  (oracle)    6       58.6       50.7       27.5
+
+  Reading the ladder:  M2 - production = scale error;  M3 - M2 = camera error;  M4 - M3 = pose/fusion error.
+Done: Fri Aug  7 12:23:32 AM CEST 2026

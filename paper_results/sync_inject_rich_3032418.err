@@ -1,0 +1,970 @@
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+ WARN The package `fsspec==2026.4.0` does not have an extra named `http`
+INFO __main__: VGGT weights: checkpoints/vggt_omega/vggt_omega_1b_512.pt  devices: ['cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO __main__: MapAnything: device=cuda:0  batch_size=8
+INFO __main__: Reading images from /tmp/centered_test_3032418 (centered-crop tree)
+INFO __main__: Found 52 scene(s).
+INFO __main__: Gym_010_cooking1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_010_dips1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_010_dips2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_010_lunge1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_010_lunge2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_010_mountainclimber1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_010_mountainclimber2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_010_pushup1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_010_pushup2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_burpee2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_cooking1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_cooking2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_dips1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_dips2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_dips3: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_dips4: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_pushup1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_011_pushup2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_012_cooking2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_012_lunge1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_012_lunge2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_012_pushup2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_013_burpee4: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_013_dips1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_013_dips2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_013_dips3: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_013_lunge1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_013_lunge2: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_013_pushup1: all 1 trial(s) already built -- skipping
+INFO __main__: Gym_013_pushup2: all 1 trial(s) already built -- skipping
+INFO __main__: LectureHall_009_021_reparingprojector1: all 1 trial(s) already built -- skipping
+INFO __main__: LectureHall_009_sidebalancerun1: all 1 trial(s) already built -- skipping
+INFO __main__: LectureHall_010_plankjack1: all 1 trial(s) already built -- skipping
+INFO __main__: LectureHall_010_sidebalancerun1: all 1 trial(s) already built -- skipping
+INFO __main__: LectureHall_019_wipingchairs1: all 1 trial(s) already built -- skipping
+INFO __main__: LectureHall_021_plankjack1: all 1 trial(s) already built -- skipping
+INFO __main__: LectureHall_021_sidebalancerun1: all 1 trial(s) already built -- skipping
+INFO __main__: ParkingLot2_009_burpeejump1: all 1 trial(s) already built -- skipping
+INFO __main__: ParkingLot2_009_burpeejump2: all 1 trial(s) already built -- skipping
+INFO __main__: ParkingLot2_009_impro1: all 1 trial(s) already built -- skipping
+INFO __main__: ParkingLot2_009_impro2: all 1 trial(s) already built -- skipping
+INFO __main__: ParkingLot2_009_impro5: all 1 trial(s) already built -- skipping
+INFO __main__: ParkingLot2_009_overfence1: all 1 trial(s) already built -- skipping
+INFO __main__: ParkingLot2_009_overfence2: all 1 trial(s) already built -- skipping
+INFO __main__: 
+============================================================
+Scene: ParkingLot2_009_spray1  cameras=['cam_00', 'cam_01', 'cam_02', 'cam_03']  sync persons=[1]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_00': 0, 'cam_01': -37, 'cam_02': 25, 'cam_03': 14}  end_cuts: {'cam_00': 20, 'cam_01': 19, 'cam_02': 39, 'cam_03': 3}
+INFO __main__:   shift_hat:   {'cam_00': 0, 'cam_01': -37, 'cam_02': 25, 'cam_03': 14}  |err|={'cam_00': 0, 'cam_01': 0, 'cam_02': 0, 'cam_03': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+INFO preprocessing.run_vggt:   [cuda:0] 20/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 20/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 20/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 120/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 120/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 120/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 120/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 140/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 140/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 140/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 140/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 160/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 160/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 160/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 160/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 180/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 180/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 180/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 180/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 200/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 200/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 200/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 200/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 220/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 220/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 220/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 220/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 240/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 240/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 240/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 240/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 249/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 249/249 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 250/250 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 249/249 frames done.
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmplq4ydsrr/chunk_03.npz
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmplq4ydsrr/chunk_02.npz
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmplq4ydsrr/chunk_00.npz
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmplq4ydsrr/chunk_01.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_spray1/trial0/vggt_cameras_centered.npz  extrinsics shape=(997, 4, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=997/997  nonzero_pixels=1057681408  raw depth: min=0.1992 max=11.1250 mean=1.1316
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_spray1/trial0/vggt_depth_centered.npz  depth shape=(997, 4, 448, 592) dtype=uint16
+INFO preprocessing.run_mapanything: Loading MapAnything from 'facebook/map-anything' on cuda:0 …
+INFO httpx: HTTP Request: HEAD https://huggingface.co/facebook/map-anything/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+INFO httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/facebook/map-anything/a1d87e9086706fb9974f3be5a3e3a0ca5401c5aa/config.json "HTTP/1.1 200 OK"
+Using cache found in /users/tnanni/.cache/torch/hub/facebookresearch_dinov2_main
+INFO httpx: HTTP Request: HEAD https://huggingface.co/facebook/map-anything/resolve/main/model.safetensors "HTTP/1.1 302 Found"
+INFO preprocessing.run_mapanything: MapAnything ready.
+INFO preprocessing.run_mapanything: trial0: T=997  K=4  MA=448×588
+INFO preprocessing.run_mapanything: trial0: scale mean=6.3742  std=0.1163  nan_filled=0  time=120.4s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_009_spray1/trial0  (sync_mae=0.00 frames)
+WARNING __main__: ParkingLot2_017_burpeejump1: dropping camera(s) with no centered-crop images (no calibration): ['cam_10']
+INFO __main__: 
+============================================================
+Scene: ParkingLot2_017_burpeejump1  cameras=['cam_00', 'cam_01', 'cam_05']  sync persons=[1]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_00': 0, 'cam_01': 18, 'cam_05': -27}  end_cuts: {'cam_00': 4, 'cam_01': 24, 'cam_05': 44}
+INFO __main__:   shift_hat:   {'cam_00': 0, 'cam_01': 18, 'cam_05': -27}  |err|={'cam_00': 0, 'cam_01': 0, 'cam_05': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+INFO preprocessing.run_vggt:   [cuda:0] 20/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 20/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 20/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 120/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 120/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 120/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 120/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 140/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 140/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 140/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 140/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 160/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 160/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 160/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 160/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 172/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 173/173 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 172/172 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 172/172 frames done.
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmpcs1qy3ia/chunk_01.npz
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmpcs1qy3ia/chunk_00.npz
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmpcs1qy3ia/chunk_02.npz
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmpcs1qy3ia/chunk_03.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_burpeejump1/trial0/vggt_cameras_centered.npz  extrinsics shape=(689, 3, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=689/689  nonzero_pixels=563017728  raw depth: min=0.2072 max=12.4609 mean=1.1906
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_burpeejump1/trial0/vggt_depth_centered.npz  depth shape=(689, 3, 448, 608) dtype=uint16
+INFO preprocessing.run_mapanything: trial0: T=689  K=3  MA=448×602
+INFO preprocessing.run_mapanything: trial0: scale mean=5.9658  std=0.1516  nan_filled=0  time=61.5s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_burpeejump1/trial0  (sync_mae=0.00 frames)
+WARNING __main__: ParkingLot2_017_burpeejump2: dropping camera(s) with no centered-crop images (no calibration): ['cam_10']
+INFO __main__: 
+============================================================
+Scene: ParkingLot2_017_burpeejump2  cameras=['cam_00', 'cam_02', 'cam_03']  sync persons=[1]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_00': 0, 'cam_02': 21, 'cam_03': 24}  end_cuts: {'cam_00': 33, 'cam_02': 36, 'cam_03': 23}
+INFO __main__:   shift_hat:   {'cam_00': 0, 'cam_02': 21, 'cam_03': 24}  |err|={'cam_00': 0, 'cam_02': 0, 'cam_03': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+INFO preprocessing.run_vggt:   [cuda:2] 20/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 20/108 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 20/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/108 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/108 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/108 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/108 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 109/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 108/108 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 109/109 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 109/109 frames done.
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmpwjs0wyh9/chunk_03.npz
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmpwjs0wyh9/chunk_02.npz
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmpwjs0wyh9/chunk_00.npz
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmpwjs0wyh9/chunk_01.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_burpeejump2/trial0/vggt_cameras_centered.npz  extrinsics shape=(435, 3, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=435/435  nonzero_pixels=346106880  raw depth: min=0.2134 max=8.3516 mean=1.0941
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_burpeejump2/trial0/vggt_depth_centered.npz  depth shape=(435, 3, 448, 592) dtype=uint16
+INFO preprocessing.run_mapanything: trial0: T=435  K=3  MA=448×588
+INFO preprocessing.run_mapanything: trial0: scale mean=6.4271  std=0.2105  nan_filled=0  time=38.3s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_burpeejump2/trial0  (sync_mae=0.00 frames)
+WARNING __main__: ParkingLot2_017_eating1: dropping camera(s) with no centered-crop images (no calibration): ['cam_10']
+INFO __main__: 
+============================================================
+Scene: ParkingLot2_017_eating1  cameras=['cam_00', 'cam_02', 'cam_04']  sync persons=[1]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_00': 0, 'cam_02': -34, 'cam_04': 31}  end_cuts: {'cam_00': 20, 'cam_02': 23, 'cam_04': 17}
+INFO __main__:   shift_hat:   {'cam_00': 0, 'cam_02': -34, 'cam_04': 31}  |err|={'cam_00': 0, 'cam_02': 0, 'cam_04': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   [cuda:3] 20/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 20/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 20/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 120/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 120/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 120/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 120/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 140/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 140/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 140/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 140/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 160/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 160/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 160/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 160/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 177/177 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 178/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 178/178 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 178/178 frames done.
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmp8wlcvf2p/chunk_03.npz
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmp8wlcvf2p/chunk_00.npz
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmp8wlcvf2p/chunk_01.npz
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmp8wlcvf2p/chunk_02.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_eating1/trial0/vggt_cameras_centered.npz  extrinsics shape=(711, 3, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=711/711  nonzero_pixels=565705728  raw depth: min=0.2288 max=8.7578 mean=0.9730
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_eating1/trial0/vggt_depth_centered.npz  depth shape=(711, 3, 448, 592) dtype=uint16
+INFO preprocessing.run_mapanything: trial0: T=711  K=3  MA=448×588
+INFO preprocessing.run_mapanything: trial0: scale mean=6.1671  std=0.1159  nan_filled=0  time=63.5s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_eating1/trial0  (sync_mae=0.00 frames)
+WARNING __main__: ParkingLot2_017_overfence1: dropping camera(s) with no centered-crop images (no calibration): ['cam_10']
+INFO __main__: 
+============================================================
+Scene: ParkingLot2_017_overfence1  cameras=['cam_00', 'cam_03', 'cam_04']  sync persons=[1]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_00': 0, 'cam_03': -29, 'cam_04': 39}  end_cuts: {'cam_00': 35, 'cam_03': 29, 'cam_04': 18}
+INFO __main__:   shift_hat:   {'cam_00': 0, 'cam_03': -29, 'cam_04': 39}  |err|={'cam_00': 0, 'cam_03': 0, 'cam_04': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 592)}; padding to a common size.
+  images = load_and_preprocess_images(
+INFO preprocessing.run_vggt:   [cuda:0] 20/113 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 20/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 20/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/113 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/113 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/113 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/113 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 113/113 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 112/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 112/112 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 112/112 frames done.
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmp3jhfbnrj/chunk_00.npz
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmp3jhfbnrj/chunk_02.npz
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmp3jhfbnrj/chunk_03.npz
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmp3jhfbnrj/chunk_01.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_overfence1/trial0/vggt_cameras_centered.npz  extrinsics shape=(449, 3, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=449/449  nonzero_pixels=357245952  raw depth: min=0.1943 max=9.5391 mean=1.0880
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_overfence1/trial0/vggt_depth_centered.npz  depth shape=(449, 3, 448, 592) dtype=uint16
+INFO preprocessing.run_mapanything: trial0: T=449  K=3  MA=448×588
+INFO preprocessing.run_mapanything: trial0: scale mean=6.0646  std=0.3635  nan_filled=0  time=39.6s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_overfence1/trial0  (sync_mae=0.00 frames)
+WARNING __main__: ParkingLot2_017_overfence2: dropping camera(s) with no centered-crop images (no calibration): ['cam_10']
+INFO __main__: 
+============================================================
+Scene: ParkingLot2_017_overfence2  cameras=['cam_00', 'cam_01', 'cam_04']  sync persons=[1]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_00': 0, 'cam_01': 29, 'cam_04': 4}  end_cuts: {'cam_00': 20, 'cam_01': 20, 'cam_04': 10}
+INFO __main__:   shift_hat:   {'cam_00': 0, 'cam_01': 29, 'cam_04': 4}  |err|={'cam_00': 0, 'cam_01': 0, 'cam_04': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×592
+INFO preprocessing.run_vggt:   [cuda:3] 20/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 20/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 20/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 120/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 120/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 120/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 120/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 140/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 140/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 140/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 140/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 160/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 160/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 160/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 160/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 180/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 180/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 180/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 180/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 200/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 200/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 201/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 200/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 200/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 202/202 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 201/201 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 202/202 frames done.
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmphvo1zbt9/chunk_02.npz
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmphvo1zbt9/chunk_00.npz
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmphvo1zbt9/chunk_03.npz
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmphvo1zbt9/chunk_01.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_overfence2/trial0/vggt_cameras_centered.npz  extrinsics shape=(806, 3, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=806/806  nonzero_pixels=641292288  raw depth: min=0.2191 max=8.8594 mean=1.0622
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_overfence2/trial0/vggt_depth_centered.npz  depth shape=(806, 3, 448, 592) dtype=uint16
+INFO preprocessing.run_mapanything: trial0: T=806  K=3  MA=448×588
+INFO preprocessing.run_mapanything: trial0: scale mean=5.8278  std=0.2799  nan_filled=0  time=71.6s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_overfence2/trial0  (sync_mae=0.00 frames)
+INFO __main__: 
+============================================================
+Scene: ParkingLot2_017_pushup1  cameras=['cam_00', 'cam_01', 'cam_04', 'cam_05']  sync persons=[1]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_00': 0, 'cam_01': -37, 'cam_04': 5, 'cam_05': 35}  end_cuts: {'cam_00': 2, 'cam_01': 39, 'cam_04': 38, 'cam_05': 12}
+INFO __main__:   shift_hat:   {'cam_00': 0, 'cam_01': -37, 'cam_04': 5, 'cam_05': 35}  |err|={'cam_00': 0, 'cam_01': 0, 'cam_04': 0, 'cam_05': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+INFO preprocessing.run_vggt:   [cuda:0] 20/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 20/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 20/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 105/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 104/104 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 105/105 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 104/104 frames done.
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmpa7pa07as/chunk_03.npz
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmpa7pa07as/chunk_00.npz
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmpa7pa07as/chunk_02.npz
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmpa7pa07as/chunk_01.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_pushup1/trial0/vggt_cameras_centered.npz  extrinsics shape=(418, 4, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=418/418  nonzero_pixels=455426048  raw depth: min=0.2178 max=13.5156 mean=1.1106
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_pushup1/trial0/vggt_depth_centered.npz  depth shape=(418, 4, 448, 608) dtype=uint16
+INFO preprocessing.run_mapanything: trial0: T=418  K=4  MA=448×602
+INFO preprocessing.run_mapanything: trial0: scale mean=5.7257  std=0.2127  nan_filled=0  time=50.7s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_pushup1/trial0  (sync_mae=0.00 frames)
+WARNING __main__: ParkingLot2_017_pushup2: dropping camera(s) with no centered-crop images (no calibration): ['cam_10']
+INFO __main__: 
+============================================================
+Scene: ParkingLot2_017_pushup2  cameras=['cam_00', 'cam_04', 'cam_05']  sync persons=[1]
+INFO __main__: 
+-- Trial 1/1 --
+INFO __main__:   true shifts: {'cam_00': 0, 'cam_04': 12, 'cam_05': -30}  end_cuts: {'cam_00': 34, 'cam_04': 32, 'cam_05': 16}
+INFO __main__:   shift_hat:   {'cam_00': 0, 'cam_04': 12, 'cam_05': -30}  |err|={'cam_00': 0, 'cam_04': 0, 'cam_05': 0}
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:1 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:0 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:2 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO preprocessing.run_vggt: Loading VGGT-Omega on cuda:3 from 'checkpoints/vggt_omega/vggt_omega_1b_512.pt' …
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using base=100 for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using min_period=None for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using max_period=None for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using normalize_coords=max for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using shift_coords=None for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using rescale_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using jitter_coords=None for rope new
+INFO dinov3: using dtype=fp32 for rope new
+INFO dinov3: using mlp layer as FFN
+INFO dinov3: using mlp layer as FFN
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+INFO preprocessing.run_vggt: VGGT-Omega ready.
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:224: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  sample = load_and_preprocess_images(present, image_resolution=self.resolution)
+INFO preprocessing.run_vggt:   VGGT-Omega output resolution: 448×608
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+/users/tnanni/ghost/preprocessing/run_vggt.py:172: UserWarning: Found images with different shapes: {(448, 592), (432, 608)}; padding to a common size.
+  images = load_and_preprocess_images(
+INFO preprocessing.run_vggt:   [cuda:2] 20/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 20/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 20/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 20/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 40/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 40/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 40/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 40/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 60/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 60/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 60/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 60/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 80/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 80/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 80/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 80/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 100/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 100/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 100/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 100/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 120/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 120/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 120/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 120/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 140/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 140/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 140/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 140/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 160/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 160/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:2] 165/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 160/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 160/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:1] 166/166 frames done.
+INFO preprocessing.run_vggt:   [cuda:3] 165/165 frames done.
+INFO preprocessing.run_vggt:   [cuda:0] 166/166 frames done.
+INFO preprocessing.run_vggt: [rank 2] chunk saved → /tmp/tmp9qkhk_qy/chunk_02.npz
+INFO preprocessing.run_vggt: [rank 1] chunk saved → /tmp/tmp9qkhk_qy/chunk_01.npz
+INFO preprocessing.run_vggt: [rank 3] chunk saved → /tmp/tmp9qkhk_qy/chunk_03.npz
+INFO preprocessing.run_vggt: [rank 0] chunk saved → /tmp/tmp9qkhk_qy/chunk_00.npz
+INFO preprocessing.run_vggt: Saved cameras → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_pushup2/trial0/vggt_cameras_centered.npz  extrinsics shape=(662, 3, 3, 4)
+INFO preprocessing.run_vggt: Depth stats → valid_frames=662/662  nonzero_pixels=540954624  raw depth: min=0.2209 max=11.9609 mean=1.1333
+INFO preprocessing.run_vggt: Saved depth   → /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_pushup2/trial0/vggt_depth_centered.npz  depth shape=(662, 3, 448, 608) dtype=uint16
+INFO preprocessing.run_mapanything: trial0: T=662  K=3  MA=448×602
+INFO preprocessing.run_mapanything: trial0: scale mean=6.1993  std=0.1202  nan_filled=0  time=58.7s
+INFO __main__:   Built /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync/ParkingLot2_017_pushup2/trial0  (sync_mae=0.00 frames)
+INFO __main__: 
+============================================================
+Done. 52 trial(s) built (8 sync attempts this run) under /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync  (0 scene(s) fully skipped)
