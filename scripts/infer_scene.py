@@ -5,15 +5,14 @@ Usage
     pixi run python scripts/infer_scene.py --scene BBQ_001_guitar
     pixi run python scripts/infer_scene.py --scene BBQ_001_guitar --no_visualize
     pixi run python scripts/infer_scene.py --scene BBQ_001_guitar \\
-        --scenes_root test_outputs/rich10_segmentation_test \\
-        --checkpoint checkpoints/fusion_module/best.pt
+        --scenes_root test_outputs/rich10_segmentation_test
 
 The script:
   1. Loads the RICHFusionDatapoint for the requested scene.
-  2. Loads the SSTNetwork from a checkpoint.
-  3. Runs a forward pass over the full sequence.
+  2. Fuses the per-camera SAM3D poses by the geodesic median (no checkpoint).
+  3. Places each body with the Procrustes-DLT BodyPlacer.
   4. Saves predictions to fusion_outputs/<scene_name>.npz  (visualizer-ready format).
-  5. Launches visualize/visualize_fusion.py unless --no_visualize is set.
+  5. Launches the viewer unless --no_visualize is set.
 """
 from __future__ import annotations
 
@@ -31,7 +30,6 @@ import tyro
 
 from configuration import CONFIG
 from data.fusion_dataset import RICHFusionDatapoint, RICHFusionDataset
-from fusion.fusion_module_v2 import PoseFusionModule
 from fusion.placer import BodyPlacer
 
 # Import PnP placement helpers from inference.py (same scripts/ dir)
@@ -47,6 +45,79 @@ logger = logging.getLogger(__name__)
 def _R_to_6d(R: np.ndarray) -> np.ndarray:
     """Convert (..., 3, 3) rotation matrices to 6D (first two rows)."""
     return np.concatenate([R[..., 0, :], R[..., 1, :]], axis=-1)
+
+
+# ── Fusion: geodesic median over cameras ─────────────────────────────────────
+# Copied verbatim from evaluation/evaluate_rich_median.py so this script stands
+# alone.  No learned module, no checkpoint.
+
+def _sixd_to_matrix(sixd: torch.Tensor) -> torch.Tensor:
+    """(..., 6) 6D rotation → (..., 3, 3) rotation matrix (Gram-Schmidt)."""
+    r0, r1 = sixd[..., :3], sixd[..., 3:]
+    b1 = r0 / (r0.norm(dim=-1, keepdim=True) + 1e-8)
+    b2 = r1 - (b1 * r1).sum(dim=-1, keepdim=True) * b1
+    b2 = b2 / (b2.norm(dim=-1, keepdim=True) + 1e-8)
+    b3 = torch.cross(b1, b2, dim=-1)
+    return torch.stack([b1, b2, b3], dim=-2)
+
+
+def median_fuse(pose_t: torch.Tensor, mask_t: torch.Tensor,
+                iters: int = 5, eps: float = 1e-3) -> torch.Tensor:
+    """Fuse per-camera poses by the GEODESIC MEDIAN over the visible cameras.
+
+    The chordal mean minimises sum_k ||R - R_k||_F^2 (an L2 criterion), so a
+    single badly-wrong camera drags the estimate. The geodesic median minimises
+    the L1 criterion on SO(3) instead:
+
+        R_bar = argmin_R  sum_k  w_k * d_geo(R, R_k),    d_geo = angle of R^T R_k
+
+    solved by Weiszfeld/IRLS: seed with the chordal mean, then repeatedly re-take
+    a chordal mean with weights w_k / (theta_k + eps). Each step is the same
+    closed-form SVD projection, so this costs `iters` extra 3x3 batched SVDs and
+    nothing else — no training, no parameters.
+
+    Args:
+        pose_t: (B, T, K, P, J, 6) per-camera SAM3D poses in 6D rotation form.
+        mask_t: (B, T, K, P) 1.0 where camera k has a detection for person p at t.
+        iters:  IRLS steps. 3-5 is converged; 5 used for every reported number.
+        eps:    radians, guards 1/theta when a camera sits on the current estimate.
+
+    Returns:
+        (B, T, P, J, 6) — rows 0 and 1 of R_bar. R_bar is already orthonormal, so
+        a downstream Gram-Schmidt is a no-op on it.
+    """
+    R = _sixd_to_matrix(pose_t)                             # (B,T,K,P,J,3,3)
+    J = R.shape[4]
+    eye = torch.eye(3, dtype=R.dtype, device=R.device)
+
+    # No camera saw this (t, p): the mean matrix is all-zero and its SVD is
+    # arbitrary. Seed the identity so the decomposition stays well-conditioned;
+    # these slots are dropped by the visibility mask before any metric sees them.
+    empty = (mask_t.sum(dim=2) == 0)[..., None]             # (B,T,P,1) -> over J
+
+    def _chordal(w: torch.Tensor) -> torch.Tensor:
+        """Weighted chordal mean. w: (B,T,K,P,J) -> (B,T,P,J,3,3)."""
+        ww = w[..., None, None]
+        M = (R * ww).sum(dim=2) / ww.sum(dim=2).clamp_min(1e-8)
+        if bool(empty.any()):
+            M = torch.where(empty[..., None, None], eye.expand_as(M), M)
+        # Nearest rotation to M in Frobenius norm; the det correction blocks
+        # reflections when M is near-degenerate.
+        U, _, Vh = torch.linalg.svd(M)
+        d = torch.linalg.det(U @ Vh)                        # (B,T,P,J)  ±1
+        D = eye.expand(*d.shape, 3, 3).clone()
+        D[..., 2, 2] = d
+        return U @ D @ Vh
+
+    w0 = mask_t[..., None].expand(*mask_t.shape, J)         # (B,T,K,P,J)
+    R_bar = _chordal(w0)                                    # chordal-mean seed
+    for _ in range(iters):
+        rel = R @ R_bar[:, :, None].transpose(-1, -2)       # (B,T,K,P,J,3,3)
+        cos = ((rel.diagonal(dim1=-2, dim2=-1).sum(-1) - 1.0) * 0.5)
+        theta = torch.arccos(cos.clamp(-1 + 1e-7, 1 - 1e-7))  # (B,T,K,P,J) rad
+        R_bar = _chordal(w0 / (theta + eps))
+
+    return torch.cat([R_bar[..., 0, :], R_bar[..., 1, :]], dim=-1)
 
 
 def _clean_scene_view(ghost_scene: Path, cam_names: list[str]) -> Path:
@@ -129,12 +200,11 @@ def _egohumans_load_tracks(scene_dir: Path, cam_names: list[str]):
 
 
 def _egohumans_forward(
-    model:  PoseFusionModule,
     scene_dir: Path,
     cam_names: list[str],
     device: torch.device,
 ) -> tuple[dict[str, np.ndarray], dict]:
-    """Pack pose/mask from body_data_clean, run temporal fusion, return the same
+    """Pack pose/mask from body_data_clean, fuse over cameras, return the same
     raw_arrays contract as _run_forward with GT set to zeros (no GT overlay)."""
     per_cam, pids = _egohumans_load_tracks(scene_dir, cam_names)
     if not pids:
@@ -163,18 +233,13 @@ def _egohumans_forward(
         for p in pids
     ]).astype(np.float32)                                   # (P, 10)
 
-    model.eval(); model.to(device)
-    fused_chunks = []
+    # Geodesic median over the visible cameras.  Pose is already root-excluded
+    # (54 joints); no autocast — the IRLS runs batched 3x3 SVDs in fp32.
     with torch.no_grad():
-        seq = pose[None]                                    # (1, T, K, P, 54, 6)
-        msq = mask[None]                                    # (1, T, K, P)
-        for t0 in range(0, T, 512):
-            pt = torch.from_numpy(seq[:, t0:t0 + 512]).to(device)
-            mt = torch.from_numpy(msq[:, t0:t0 + 512]).to(device)
-            with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
-                out = model(pt, mt)                          # (1, t, P, 54, 6)
-            fused_chunks.append(out[0].float().cpu().numpy())
-    pred_pose_54 = np.concatenate(fused_chunks, 0).astype(np.float32)   # (T, P, 54, 6)
+        pt = torch.from_numpy(pose[None]).to(device)        # (1, T, K, P, 54, 6)
+        mt = torch.from_numpy(mask[None]).to(device)        # (1, T, K, P)
+        fused = median_fuse(pt, mt)                          # (1, T, P, 54, 6)
+    pred_pose_54 = fused[0].float().cpu().numpy().astype(np.float32)   # (T, P, 54, 6)
 
     raw_arrays = {
         "pred_pose_54":         pred_pose_54,
@@ -188,41 +253,17 @@ def _egohumans_forward(
     return raw_arrays, {"pids": pids, "frame_start": fmin, "T": T}
 
 
-def _build_model() -> PoseFusionModule:
-    arch = CONFIG.fusion.architecture
-    return PoseFusionModule(
-        embedding_dim    = arch.embedding_dimension,
-        num_heads        = arch.num_heads,
-        num_layers       = arch.num_layers,
-        max_temporal_len = arch.max_temporal_len,
-        dropout          = arch.dropout,
-        temporal_window  = arch.temporal_window,
-    )
-
-
-def _load_checkpoint(model: PoseFusionModule, checkpoint: Path) -> None:
-    logger.info(f"Loading checkpoint: {checkpoint}")
-    state = torch.load(str(checkpoint), map_location="cpu")
-    model.load_state_dict(state["model"])
-    epoch = state.get("epoch", "?")
-    logger.info(f"  Loaded (epoch {epoch})")
-
-
 def _run_forward(
-    model:   PoseFusionModule,
     dp:      RICHFusionDatapoint,
     device:  torch.device,
 ) -> dict[str, np.ndarray]:
-    """Run a full-sequence forward pass and return model predictions + GT arrays.
+    """Fuse the full sequence over cameras and return predictions + GT arrays.
 
     Returns pred_pose_54 (root excluded) so that main() can prepend the
     PnP-estimated global_orient to build the full 55-joint pose.
     """
     ds     = RICHFusionDataset([dp])
     loader = torch.utils.data.DataLoader(ds, batch_size=1, shuffle=False)
-
-    model.eval()
-    model.to(device)
 
     def _s(t: torch.Tensor) -> np.ndarray:
         return t.squeeze(0).float().cpu().numpy().astype(np.float32)
@@ -234,14 +275,15 @@ def _run_forward(
             inp = {k: v.to(device) if isinstance(v, torch.Tensor) else v
                    for k, v in inputs.items()}
 
-            with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
-                pose_aggr = model(
-                    pose        = inp["pose"],          # (B, T, K, P, 55, 6)
-                    person_mask = inp["person_mask"],   # (B, T, K, P)
-                    joint_mask  = inp.get("joint_mask"),  # absent unless fusion.use_joint_confidence
-                )
+            # Geodesic median over the visible cameras.  Joint 0 of inp["pose"] is
+            # each camera's own root orient — dropped here, the placer re-estimates
+            # it by Procrustes DLT.  Per-joint SAM3D confidence is deliberately
+            # unused: the IRLS weights are the 0/1 visibility mask only.
+            pose_aggr = median_fuse(
+                inp["pose"][..., 1:, :],           # (B, T, K, P, 54, 6)
+                inp["person_mask"],                # (B, T, K, P)
+            )                                       # (B, T, P, 54, 6)
 
-            # pose_aggr: (B, T, P, 54, 6) — root excluded by model
             pred_pose_54 = _s(pose_aggr)   # (T, P, 54, 6)
             # Mean SAM3D betas: visibility-weighted mean over T and K.
             mask = inp["person_mask"].float()                               # (B, T, K, P)
@@ -278,7 +320,6 @@ def _run_forward(
 def main(
     scene:        str,
     scenes_root:  Path = Path(CONFIG.data.output_directory),
-    checkpoint:   Path | None = None,
     out_dir:      Path = Path(CONFIG.data.fusion_output_dir),
     port:         int  = 9090,
     no_visualize: bool = False,
@@ -299,7 +340,6 @@ def main(
     ----------
     scene          : scene directory name, e.g. "BBQ_001_guitar"
     scenes_root    : root that contains the scene directory (default: config output_directory)
-    checkpoint     : path to a .pt checkpoint; defaults to best.pt in config checkpoint_dir
     out_dir        : directory where the predictions .npz is written
     port           : viser WebSocket port
     no_visualize   : save predictions only — do not launch the viewer
@@ -320,22 +360,10 @@ def main(
     if not scene_dir.exists():
         raise FileNotFoundError(f"Scene directory not found: {scene_dir}")
 
-    # ── resolve checkpoint ────────────────────────────────────────────────────
-    if checkpoint is None:
-        checkpoint = Path(CONFIG.fusion.checkpoint_dir) / "best.pt"
-    if not checkpoint.exists():
-        raise FileNotFoundError(
-            f"Checkpoint not found: {checkpoint}\n"
-            f"Train first with:  pixi run python scripts/train_rich.py"
-        )
-
     # ── load scene ────────────────────────────────────────────────────────────
     logger.info(f"Loading scene: {scene_dir}  (dataset={dataset})")
     _rich_data_root = str(images_root) if images_root is not None else CONFIG.data.rich_data_root
 
-    # ── build and load model ──────────────────────────────────────────────────
-    model = _build_model()
-    _load_checkpoint(model, checkpoint)
     dev = torch.device(device)
 
     # work_dir = scene root the placer reads body_data from.  egohumans keeps
@@ -355,8 +383,8 @@ def main(
         show_gt = False   # Route B has no calibrated GT overlay
         work_dir = _clean_scene_view(scene_dir, cam_names)   # for the placer
         cleanup_view = work_dir
-        logger.info(f"Running forward pass on {dev} … (egohumans, {len(cam_names)} cams)")
-        raw_arrays, ego_meta = _egohumans_forward(model, scene_dir, cam_names, dev)
+        logger.info(f"Fusing (geodesic median) on {dev} … (egohumans, {len(cam_names)} cams)")
+        raw_arrays, ego_meta = _egohumans_forward(scene_dir, cam_names, dev)
         frame_start_val  = ego_meta["frame_start"]
         all_pids_ordered = ego_meta["pids"]
         logger.info(
@@ -375,8 +403,8 @@ def main(
         )
         T = dp._frame_end - dp._frame_start
         logger.info(f"  {T} frames, {dp.num_cameras} cameras, {dp.max_persons} persons")
-        logger.info(f"Running forward pass on {dev} …")
-        raw_arrays = _run_forward(model, dp, dev)
+        logger.info(f"Fusing (geodesic median) on {dev} …")
+        raw_arrays = _run_forward(dp, dev)
         frame_start_val  = dp._frame_start
         all_pids_ordered = sorted(set(pid for pids_k in dp._pid_order for pid in pids_k))
 

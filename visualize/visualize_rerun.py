@@ -804,6 +804,8 @@ def run_fusion(
     server_memory_limit: str = "8GiB",
     save:            Optional[Path] = None,
     frames_dir:      Optional[Path] = None,
+    clip_start:      int = 0,
+    clip_frames:     Optional[int] = None,
 ) -> None:
     """Lag-free Rerun viewer for ghost fusion predictions.
 
@@ -825,6 +827,33 @@ def run_fusion(
     shape             = d["shape"]              # (P, 10)
     camera            = d["camera"]             # (T, K, 8)
     body_transl_world = d["body_transl_world"]  # (T, P, 3)
+
+    # ── optional frame window ────────────────────────────────────────────────
+    # Slice every per-frame array to [clip_start, clip_start + clip_frames) and
+    # shift `frame_start` by the same amount so image lookup (frame_start + t)
+    # still resolves.  The depth context is windowed with the same offset below.
+    # clip_start=0 / clip_frames=None reproduces the unclipped recording exactly.
+    if clip_start or clip_frames is not None:
+        _a = max(0, int(clip_start))
+        _b = pose.shape[0] if clip_frames is None else min(pose.shape[0], _a + int(clip_frames))
+        if _b <= _a:
+            raise ValueError(
+                f"empty clip: clip_start={clip_start}, clip_frames={clip_frames}, "
+                f"T={pose.shape[0]}"
+            )
+        pose              = pose[_a:_b]
+        camera            = camera[_a:_b]
+        body_transl_world = body_transl_world[_a:_b]
+        for _key in ("gt_body_pose", "gt_camera", "gt_body_transl_world", "gt_valid"):
+            if d.get(_key) is not None and d[_key].shape[0] > 1:
+                d[_key] = d[_key][_a:_b]
+        frame_start += _a
+        print(f"  clip: frames [{_a}, {_b}) of the prediction sequence "
+              f"→ images {frame_start}…{frame_start + (_b - _a) - 1}")
+        clip_start = _a
+    else:
+        clip_start = 0
+
     T, P, J, _ = pose.shape
     K = camera.shape[1]
     # Real camera names (slot order) — needed to locate each camera's frames,
@@ -872,7 +901,7 @@ def run_fusion(
     # ── optional VGGT depth ───────────────────────────────────────────────────
     depth_ctx = None
     if show_depth:
-        depth_ctx = _load_depth_context(scene_dir, camera, T, K)
+        depth_ctx = _load_depth_context(scene_dir, camera, T, K, clip_start=clip_start)
         if depth_ctx is None:
             show_depth = False
 
@@ -909,7 +938,7 @@ def run_fusion(
                 frame_start, T, W, H, fps, depth_ctx if show_depth else None,
                 depth_stride, depth_conf_thr, scene_dir, depth_voxel,
                 depth_time_stride, depth_mode, point_radius,
-                person_verts=pred_verts,
+                person_verts=pred_verts, person_faces=faces,
             )
 
         # GT cameras (static frustums) — suppressed together with GT meshes.
@@ -983,8 +1012,13 @@ def _print_serve_help(port: int, grpc_port: int) -> None:
     print("=" * 70 + "\nPress Ctrl+C to stop.\n")
 
 
-def _load_depth_context(scene_dir: Path, camera: np.ndarray, T: int, K: int):
-    """Load VGGT depth + camera npz and compute per-frame metric scale, or None."""
+def _load_depth_context(scene_dir: Path, camera: np.ndarray, T: int, K: int,
+                        clip_start: int = 0):
+    """Load VGGT depth + camera npz and compute per-frame metric scale, or None.
+
+    ``clip_start`` windows every per-frame array to ``[clip_start, clip_start+T)``
+    so the caller's clipped frame index ``t`` addresses the same instant here.
+    """
     depth_path = scene_dir / "vggt_depth_centered.npz"
     cam_path   = scene_dir / "vggt_cameras_centered.npz"
     if not (depth_path.exists() and cam_path.exists()):
@@ -994,8 +1028,14 @@ def _load_depth_context(scene_dir: Path, camera: np.ndarray, T: int, K: int):
 
     depth_npz = np.load(depth_path, mmap_mode="r")
     cam_npz   = np.load(cam_path)
-    extr = cam_npz["extrinsics"]       # (T, K, 3, 4) cam-from-world
-    cam_valid = cam_npz["valid"]       # (T, K) bool
+
+    def _win(a):
+        """Window a per-frame array to the caller's clip; basic slicing keeps
+        the mmap view lazy."""
+        return a[clip_start:clip_start + T] if clip_start else a
+
+    extr = _win(cam_npz["extrinsics"])  # (T, K, 3, 4) cam-from-world
+    cam_valid = _win(cam_npz["valid"])  # (T, K) bool
     if not cam_valid.any():
         cam_valid = ~np.isnan(extr[:, :, 0, 0])
     names = [n.decode() if isinstance(n, bytes) else n for n in cam_npz["camera_names"]]
@@ -1018,11 +1058,11 @@ def _load_depth_context(scene_dir: Path, camera: np.ndarray, T: int, K: int):
     print(f"Depth point clouds enabled (median scale = {np.median(scale):.4f} m/unit)")
 
     return {
-        "depth_mm":   depth_npz["depth"],        # (T, K, h, w) uint16
-        "depth_conf": depth_npz["depth_conf"],   # (T, K, h, w) float16
-        "depth_valid": depth_npz["depth_valid"], # (T, K) bool
-        "extr": extr, "intr": cam_npz["intrinsics"],
-        "oc": cam_npz["original_coords"],        # (T, K, 4)
+        "depth_mm":   _win(depth_npz["depth"]),        # (T, K, h, w) uint16
+        "depth_conf": _win(depth_npz["depth_conf"]),   # (T, K, h, w) float16
+        "depth_valid": _win(depth_npz["depth_valid"]), # (T, K) bool
+        "extr": extr, "intr": _win(cam_npz["intrinsics"]),
+        "oc": _win(cam_npz["original_coords"]),        # (T, K, 4)
         "cam_valid": cam_valid, "names": names, "scale": scale,
     }
 
@@ -1031,7 +1071,7 @@ def _send_camera_media(
     entity, k, cam_name, scene_name, rich_data_root, frames_dir, frame_start,
     T, W, H, fps, depth_ctx, depth_stride, depth_conf_thr, scene_dir,
     depth_voxel=0.0, depth_time_stride=1, depth_mode="image", point_radius=0.01,
-    person_verts=None,
+    person_verts=None, person_faces=None,
 ) -> None:
     """Single pass over a camera's frames: ship the JPEG video column and,
     when depth is enabled, the depth cloud.
@@ -1077,6 +1117,7 @@ def _send_camera_media(
                 depth_ctx, k, cam_name, scene_name, rich_data_root, frames_dir,
                 frame_start, T, W, H, fps, depth_stride, depth_conf_thr,
                 scene_dir, depth_time_stride, person_verts=person_verts,
+                person_faces=person_faces,
             )
     want_depth = depth_ctx is not None and depth_mode not in _MESH_MODES
 
@@ -1325,21 +1366,46 @@ def _load_person_boxes(scene_dir: Path, cam_name: str) -> dict[int, list]:
 
 
 def _mesh_silhouette(verts_t, R_w2c, t_w2c, intr, stride, h_d, w_d,
-                     dilate: int = 2) -> np.ndarray:
+                     faces=None, dilate: int = 0) -> np.ndarray:
     """Project the posed body meshes into this camera → (h_d, w_d) bool silhouette.
 
     Carving the depth surface with this removes exactly the pixels the bodies
     occupy — far tighter than a bounding box, which also eats the background
-    around each person.  Vertices are splatted and then dilated to close the gaps
-    between them (SMPL-X is dense enough that a 2-cell dilation fills the body).
+    around each person.
+
+    With ``faces`` the mesh triangles are rasterised and filled, so the silhouette
+    is the true projected body area and needs no dilation.  Without them we fall
+    back to splatting the bare vertices, which leaves gaps between them and so
+    needs ``dilate`` to close up — that dilation is what bleeds into the
+    background, hence ``faces`` is much preferred.
     """
     mask = np.zeros((h_d, w_d), dtype=np.uint8)
     fx, fy = float(intr[0, 0]), float(intr[1, 1])
     cx, cy = float(intr[0, 2]), float(intr[1, 2])
+    tris = None if faces is None else np.asarray(faces, dtype=np.int64)
     for v in verts_t:                                   # (V, 3) per person
+        v = np.asarray(v)
         finite = np.isfinite(v).all(axis=1)
         if not finite.any():
             continue
+
+        if tris is not None:
+            # Project every vertex, then fill the triangles whose three corners
+            # are all finite and in front of the camera.  Back-facing triangles
+            # fill too, which is what we want: the union is the silhouette.
+            pc = v @ np.asarray(R_w2c).T + np.asarray(t_w2c)
+            z = pc[:, 2]
+            valid_v = finite & (z > 1e-6)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                col = (fx * pc[:, 0] / z + cx) / stride
+                row = (fy * pc[:, 1] / z + cy) / stride
+            keep = valid_v[tris].all(axis=1)
+            if not keep.any():
+                continue
+            poly = np.stack([col[tris[keep]], row[tris[keep]]], axis=-1)
+            cv2.fillPoly(mask, np.round(poly).astype(np.int32), 1)
+            continue
+
         pc = v[finite] @ np.asarray(R_w2c).T + np.asarray(t_w2c)
         z = pc[:, 2]
         ok = z > 1e-6
@@ -1381,7 +1447,7 @@ def _send_depth_mesh_frames(
     ctx, k, cam_name, scene_name, rich_data_root, frames_dir, frame_start,
     T, W, H, fps, stride, conf_thr, scene_dir, time_stride: int = 1,
     disc_rel: float = 0.06, fg_abs: float = 0.15, fg_rel: float = 0.03,
-    person_verts=None,
+    person_verts=None, person_faces=None,
 ) -> None:
     """Per-frame RGB-coloured depth mesh for camera k.
 
@@ -1429,7 +1495,8 @@ def _send_depth_mesh_frames(
             d = np.where(
                 _mesh_silhouette(person_verts[t], ctx["extr"][t, k, :3, :3],
                                  ctx["extr"][t, k, :3, 3] * s,
-                                 ctx["intr"][t, k], stride, h_d, w_d),
+                                 ctx["intr"][t, k], stride, h_d, w_d,
+                                 faces=person_faces),
                 np.nan, d)
         elif bg is None and boxes:
             # bbox tier: carve each person's box, mapping frame pixels into the
