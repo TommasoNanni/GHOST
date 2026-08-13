@@ -14,6 +14,10 @@ The world origin is defined as camera 0 (cam0) of each frame.
 Depth maps live in each camera's own frame (z-axis = depth), so re-rooting the
 world frame does not affect depth values.
 
+Frames where camera 0 has no image are anchored on the first camera that does;
+_regauge_to_cam0 converts them back into the camera-0 frame before saving, so
+every frame of a scene shares one world origin.
+
 Querying depth at a body keypoint
 ----------------------------------
 VGGT-Omega resizes images with aspect ratio preserved (no square padding).
@@ -130,6 +134,97 @@ class VGGTPreprocessor:
             out[k, :3, :3] = Rk @ R0T
             out[k, :3,  3] = tk - Rk @ R0T @ t0
         return out
+
+    @staticmethod
+    def _regauge_to_cam0(
+        extrinsics: np.ndarray,
+        valid:      np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Put every frame in the camera-0 world frame, including those without camera 0.
+
+        _reroot_to_cam0 anchors on the first *present* camera, which is camera 0
+        only when camera 0 has an image at that timestep. If it is absent — a late
+        start, a dropped frame — the frame is silently expressed relative to a
+        different camera, so its extrinsics live in a different world frame than
+        every other frame's.
+
+        Anchoring is only a gauge choice, so such a frame can be converted rather
+        than discarded. With E_k the world-to-camera-k extrinsic and E^a_k the
+        gauge anchored at camera a::
+
+            E^0_k = E_k E_0^-1 = (E_k E_a^-1)(E_a E_0^-1) = E^a_k E^0_a
+
+        E^0_a is camera a's pose in the camera-0 gauge, which is constant for a
+        static rig and can be read off any frame where camera 0 and camera a are
+        both present. In [R|t] form::
+
+            R^0_k = R^a_k R^0_a          t^0_k = R^a_k t^0_a + t^a_k
+
+        This is exact for static rigs only. A moving camera 0 makes E^0_a
+        time-varying and the composition wrong — but a moving camera 0 already
+        makes the per-frame world origin follow it, which is a deeper problem.
+
+        Frames whose anchor camera never co-occurs with camera 0 have no such
+        transform and are marked invalid: nothing observed both, so no relative
+        pose exists.
+
+        Parameters
+        ----------
+        extrinsics : (T, K, 3, 4) camera-from-world, as produced by _reroot_to_cam0.
+        valid      : (T, K) bool; valid[t, k] is True when camera k was solved at t.
+
+        Returns
+        -------
+        (extrinsics, valid) — the same arrays when no frame needs re-gauging.
+        """
+        if valid.ndim != 2 or not valid.any():
+            return extrinsics, valid
+
+        anchor = np.argmax(valid, axis=1)          # first present camera per frame
+        solved = valid.any(axis=1)                 # frames VGGT actually solved
+        off    = solved & (anchor != 0)            # ... but not anchored on camera 0
+        if not off.any():
+            return extrinsics, valid               # nothing to do: leave input untouched
+
+        extrinsics = extrinsics.copy()
+        valid      = valid.copy()
+
+        for a in np.unique(anchor[off]):
+            sel = off & (anchor == a)
+            # Frames already in the camera-0 gauge that also saw camera a.
+            ref = solved & (anchor == 0) & valid[:, a]
+            if not ref.any():
+                logger.warning(
+                    f"Camera {a} never co-occurs with camera 0 — cannot re-gauge "
+                    f"{int(sel.sum())} frame(s) anchored on it; marking them invalid."
+                )
+                extrinsics[sel] = np.nan
+                valid[sel]      = False
+                continue
+
+            # Chordal mean of camera a's rotation over the reference frames,
+            # projected back onto SO(3); averaging also damps VGGT's per-frame jitter.
+            M       = extrinsics[ref, a, :3, :3].mean(axis=0)
+            U, _, Vh = np.linalg.svd(M)
+            D       = np.diag([1.0, 1.0, float(np.sign(np.linalg.det(U @ Vh)))])
+            R0a     = (U @ D @ Vh).astype(np.float32)
+            t0a     = extrinsics[ref, a, :3, 3].mean(axis=0).astype(np.float32)
+
+            block = extrinsics[sel]                       # (n, K, 3, 4)
+            # Copies, not views: writing into block below would otherwise feed the
+            # already-updated rotation into the translation.
+            Rka   = block[:, :, :3, :3].copy()            # (n, K, 3, 3)
+            tka   = block[:, :, :3,  3].copy()            # (n, K, 3)
+            block[:, :, :3, :3] = Rka @ R0a               # NaN entries stay NaN
+            block[:, :, :3,  3] = Rka @ t0a + tka
+            extrinsics[sel] = block
+
+            logger.info(
+                f"Re-gauged {int(sel.sum())} frame(s) anchored on camera {a} "
+                f"into the camera-0 frame ({int(ref.sum())} reference frame(s))."
+            )
+
+        return extrinsics, valid
 
     # ── Single-frame inference ────────────────────────────────────────────────
 
@@ -442,6 +537,10 @@ class VGGTPreprocessor:
         """Write vggt_cameras.npz and vggt_depth.npz to output_dir."""
         cam_path   = output_dir / "vggt_cameras_centered.npz"
         depth_path = output_dir / "vggt_depth_centered.npz"
+
+        # Frames where camera 0 was absent were anchored on another camera; move
+        # them into the camera-0 world frame. No-op when camera 0 is always present.
+        extrinsics, valid = VGGTPreprocessor._regauge_to_cam0(extrinsics, valid)
 
         np.savez_compressed(
             str(cam_path),
