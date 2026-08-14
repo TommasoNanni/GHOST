@@ -2,7 +2,7 @@
 # Login-node driver: Sapiens 2D keypoints on the TRAIN split.
 #
 # Phase 1 — wait until MapAnything-train is fully done (all 62 train scenes
-#           have mapanything_scale_centered.npy), so we don't fight MapAnything
+#           have mapanything_scale_baseline.npy), so we don't fight MapAnything
 #           for the debug partition.
 # Phase 2 — resubmit the 1.5h Sapiens train job (ONE at a time) until every
 #           train scene is fully done, then exit.
@@ -25,7 +25,7 @@ POLL=120
 map_ready() {
   local miss=0 d
   for d in "$OUT"/*/; do
-    [[ -f "$d/mapanything_scale_centered.npy" ]] || miss=$((miss + 1))
+    [[ -f "$d/mapanything_scale_baseline.npy" ]] || miss=$((miss + 1))
   done
   (( miss == 0 ))
 }

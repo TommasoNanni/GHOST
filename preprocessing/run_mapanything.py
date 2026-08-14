@@ -1,24 +1,28 @@
 """
 preprocessing/run_mapanything.py
 
-Estimates a per-frame metric scale for VGGT depth maps using MapAnything.
+Estimates a per-frame metric scale for VGGT reconstructions using MapAnything.
 
-For each frame t in a scene, passes all valid cameras' images + VGGT depth maps
-+ VGGT camera poses to MapAnything (is_metric_scale=False) and computes:
+For each frame t in a scene, MapAnything runs IMAGES-ONLY (its in-distribution
+mode) over all valid cameras and reconstructs the rig metrically; VGGT gives the
+same rig up to scale.  The two differ by one similarity, whose scale is:
 
-    scale[t] = median over valid cameras of  median(pred_depth / vggt_depth)
+    scale[t] = median over camera pairs of
+               (MapAnything baseline / VGGT baseline)
 
-The result is a float32 (T,) array saved as {scene_dir}/mapanything_scale.npy.
+No focal length, depth map or pose is fed to MapAnything, so the estimate is
+convention-free.  The result is a float32 (T,) array saved as
+{scene_dir}/mapanything_scale_baseline.npy.
 
 Standalone usage (all scenes):
     pixi run python preprocessing/run_mapanything.py \
         --ghost_output_root /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train \
-        --rich_root         /tmp/rich_train
+        --img_root          /tmp/rich_train
 
 Standalone usage (single scene):
     pixi run python preprocessing/run_mapanything.py \
         --ghost_output_root /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_train \
-        --rich_root         /tmp/rich_train \
+        --img_root          /tmp/rich_train \
         --scenes            BBQ_001_guitar
 """
 
@@ -29,7 +33,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from PIL import Image
 
@@ -50,13 +53,26 @@ HF_REPO     = "facebook/map-anything"
 # ---------------------------------------------------------------------------
 
 class MapAnythingScaleEstimator:
-    """Estimates per-frame metric scale for VGGT depth maps using MapAnything.
+    """Estimates per-frame metric scale for VGGT reconstructions using MapAnything.
+
+    The scale comes from CAMERA BASELINE RATIOS with MapAnything run images-only
+    — see :meth:`_run_batch_baselines`.  A conditioned variant (feed MapAnything
+    the vggt intrinsics + depth + poses, take median(MA_depth / vggt_depth)) used
+    to live here and was removed 2026-08-14: it is BIASED on wide-FOV cameras,
+    because MA's metric scale head is conditioned on the input rays and
+    geometry-in/scale-out is a rare (~5%) training configuration (arXiv
+    2509.13414; no wide-angle training data).  On EgoHumans undistorted fisheye
+    (~101 deg FOV) it came out ~1.56x too small; on 031_badminton it gave 13.2
+    where the baseline ratio gives 21.50 against a GT of 21.54 (0.2%).  Nothing
+    downstream read its output — ``fusion/placer.py`` loads the baseline file
+    only — so the legacy ``mapanything_scale_centered.npy`` files still on disk
+    are inert.
 
     Parameters
     ----------
     device     : torch device string, e.g. "cuda:0".
     batch_size : Number of consecutive frames processed per MapAnything call.
-    force      : If True, recompute even when mapanything_scale.npy exists.
+    force      : If True, recompute even when mapanything_scale_baseline.npy exists.
     """
 
     def __init__(
@@ -64,30 +80,10 @@ class MapAnythingScaleEstimator:
         device:     str = "cuda:0",
         batch_size: int = 8,
         force:      bool = False,
-        scale_from: str = "depth",
     ):
-        """scale_from selects the estimator:
-
-        - "depth" (default, legacy): condition MapAnything on vggt intrinsics +
-          depth + poses and take median(MA_depth / vggt_depth). BIASED on
-          wide-FOV cameras: MA's metric scale head is conditioned on the input
-          rays, and geometry-in/scale-out is a rare (~5%) training
-          configuration (arXiv 2509.13414; no wide-angle training data). On
-          EgoHumans undistorted fisheye (~101 deg FOV) the scale comes out
-          ~1.56x too small; RICH (~65 deg) only ~ -3%.
-        - "baselines": run MapAnything IMAGES-ONLY (its in-distribution mode)
-          and take, per frame, the median over camera pairs of
-          (MA camera baseline / vggt camera baseline). Convention-free — no
-          focal length involved. Validated on 031_badminton: 21.50 vs GT
-          21.54 (0.2%) where "depth" gave 13.2. Output goes to a SEPARATE
-          file (mapanything_scale_baseline.npy) so legacy results are kept.
-        """
-        if scale_from not in ("depth", "baselines"):
-            raise ValueError(f"scale_from must be 'depth' or 'baselines', got {scale_from!r}")
         self.device     = torch.device(device if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
         self.force      = force
-        self.scale_from = scale_from
         self._model     = None   # lazy-loaded
 
     # ── Model loading ─────────────────────────────────────────────────────────
@@ -113,122 +109,7 @@ class MapAnythingScaleEstimator:
         t = TF.to_tensor(img)
         return TF.normalize(t, DINOV2_MEAN, DINOV2_STD).unsqueeze(0)
 
-    @staticmethod
-    def _w2c_to_c2w(ext: np.ndarray) -> np.ndarray:
-        """[R|t] world-to-cam (3,4) → (4,4) cam-to-world."""
-        R, t = ext[:3, :3], ext[:3, 3]
-        m = np.eye(4, dtype=np.float64)
-        m[:3, :3] = R.T
-        m[:3, 3]  = -R.T @ t
-        return m
-
-    @staticmethod
-    def _scale_intrinsics(K: np.ndarray,
-                          W_src: int, H_src: int,
-                          W_dst: int, H_dst: int) -> np.ndarray:
-        K = K.copy()
-        K[0, 0] *= W_dst / W_src;  K[0, 2] *= W_dst / W_src
-        K[1, 1] *= H_dst / H_src;  K[1, 2] *= H_dst / H_src
-        return K
-
     # ── Core batch inference ───────────────────────────────────────────────────
-
-    def _run_batch(
-        self,
-        batch_frames:   list[int],
-        valid_ks:       list[int],
-        cam_file_lists: dict[int, list[Path]],
-        vggt_exts:      np.ndarray,
-        vggt_intrs:     np.ndarray,
-        depth_mm:       np.ndarray,
-        H_vggt: int, W_vggt: int,
-        H_ma:   int, W_ma:   int,
-    ) -> dict[int, float]:
-        """Run MapAnything on one batch of frames.
-
-        Returns {frame_idx: scale} for each successfully processed frame.
-        """
-        B = len(batch_frames)
-        views        = []
-        depth_nps    = []   # (B, H, W) per camera, for scale extraction
-
-        for k in valid_ks:
-            files = cam_file_lists[k]
-            imgs, intrs, depths, poses = [], [], [], []
-
-            ok = True
-            for fi in batch_frames:
-                if fi >= len(files):
-                    ok = False; break
-                jp = files[fi]
-
-                imgs.append(self._load_img(jp, H_ma, W_ma))
-                intrs.append(torch.from_numpy(
-                    self._scale_intrinsics(vggt_intrs[fi, k],
-                                           W_vggt, H_vggt, W_ma, H_ma)
-                ).float())
-
-                d_m = depth_mm[fi, k].astype(np.float32) / 1000.0
-                d_t = F.interpolate(
-                    torch.from_numpy(d_m).unsqueeze(0).unsqueeze(0),
-                    size=(H_ma, W_ma), mode="nearest",
-                ).squeeze()
-                depths.append(d_t)
-
-                poses.append(torch.from_numpy(
-                    self._w2c_to_c2w(vggt_exts[fi, k])).float())
-
-            if not ok:
-                continue
-
-            depth_nps.append(torch.stack(depths).numpy())   # (B, H, W)
-            views.append({
-                "img":             torch.cat(imgs).to(self.device),     # (B,3,H,W)
-                "data_norm_type":  ["dinov2"] * B,
-                "intrinsics":      torch.stack(intrs).to(self.device),  # (B,3,3)
-                "depth_z":         torch.stack(depths).to(self.device), # (B,H,W)
-                "camera_poses":    torch.stack(poses).to(self.device),  # (B,4,4)
-                "is_metric_scale": torch.zeros(B, dtype=torch.bool,
-                                               device=self.device),
-            })
-
-        if len(views) < 2:
-            return {}
-
-        # Normalise poses per batch element so cam_0 → [I|0]
-        ref_poses = views[0]["camera_poses"].cpu().double().numpy()  # (B,4,4)
-        for v in views:
-            pi = v["camera_poses"].cpu().double().numpy()
-            norm = np.stack([np.linalg.inv(ref_poses[b]) @ pi[b]
-                             for b in range(B)])
-            v["camera_poses"] = torch.from_numpy(norm).float().to(self.device)
-
-        with torch.no_grad():
-            preds = self._model.infer(
-                views,
-                memory_efficient_inference=True,
-                minibatch_size=1,
-                use_amp=True,
-                amp_dtype="bf16",
-                apply_mask=False,
-                mask_edges=False,
-                ignore_depth_scale_inputs=True,
-                ignore_pose_scale_inputs=True,
-            )
-
-        results = {}
-        for b, fi in enumerate(batch_frames):
-            cam_scales = []
-            for pred, vggt_d in zip(preds, depth_nps):
-                pd   = pred["depth_z"][b].squeeze(-1).cpu().numpy()  # (H, W)
-                vd   = vggt_d[b]
-                mask = (pd > 0) & (vd > 0)
-                if mask.sum() > 100:
-                    cam_scales.append(float(np.median(pd[mask] / vd[mask])))
-            if cam_scales:
-                results[fi] = float(np.median(cam_scales))
-
-        return results
 
     def _run_batch_baselines(
         self,
@@ -247,6 +128,7 @@ class MapAnythingScaleEstimator:
         """
         B = len(batch_frames)
         views = []
+        kept_ks: list[int] = []   # camera index behind each view, in view order
         for k in valid_ks:
             files = cam_file_lists[k]
             imgs = []
@@ -258,6 +140,7 @@ class MapAnythingScaleEstimator:
                 imgs.append(self._load_img(files[fi], H_ma, W_ma))
             if not ok:
                 continue
+            kept_ks.append(k)
             views.append({
                 "img":            torch.cat(imgs).to(self.device),   # (B,3,H,W)
                 "data_norm_type": ["dinov2"] * B,
@@ -282,9 +165,12 @@ class MapAnythingScaleEstimator:
             # MA camera centres (metric, view-0 frame): c2w translation
             ma_c = [preds[v]["camera_poses"][b].cpu().double().numpy()[:3, 3]
                     for v in range(n_cams)]
-            # vggt camera centres (up-to-scale): -R^T t from w2c extrinsics
+            # vggt camera centres (up-to-scale): -R^T t from w2c extrinsics.
+            # Indexed by kept_ks, NOT valid_ks — a camera whose file list came up
+            # short is skipped above, and slicing valid_ks positionally would
+            # then pair every later MA view with the wrong vggt camera.
             vg_c = []
-            for k in valid_ks[:n_cams]:
+            for k in kept_ks:
                 E = vggt_exts[fi, k]
                 vg_c.append(-E[:3, :3].T @ E[:3, 3])
             ratios = []
@@ -319,12 +205,10 @@ class MapAnythingScaleEstimator:
         Returns
         -------
         float32 (T,) scale array, or None if prerequisites are missing.
-        Also saves the array to {scene_dir}/mapanything_scale_centered.npy.
+        Also saves the array to {scene_dir}/mapanything_scale_baseline.npy.
         """
         _IMG_EXTS = {".jpeg", ".jpg", ".png", ".bmp"}
-        out_name = ("mapanything_scale_baseline.npy" if self.scale_from == "baselines"
-                    else "mapanything_scale_centered.npy")
-        out_path = scene_dir / out_name
+        out_path = scene_dir / "mapanything_scale_baseline.npy"
         if out_path.exists() and not self.force:
             logger.info(f"{scene_dir.name}: already done, loading from disk")
             return np.load(out_path)
@@ -341,8 +225,10 @@ class MapAnythingScaleEstimator:
         cam_names  = [n.decode() if isinstance(n, bytes) else n
                       for n in cam_npz["camera_names"]]
         vggt_exts  = cam_npz["extrinsics"].astype(np.float64)   # (T, K, 3, 4)
-        vggt_intrs = cam_npz["intrinsics"].astype(np.float64)   # (T, K, 3, 3)
         vggt_valid = cam_npz["valid"]                            # (T, K) bool
+        # MapAnything is fed images only; the depth array survives purely as the
+        # source of T/K and of the grid that sizes MA's input below. TODO: read
+        # the header instead of decompressing the whole (T,K,H,W) uint16 array.
         depth_mm   = depth_npz["depth"]                         # (T, K, H, W) uint16
 
         T, K, H_vggt, W_vggt = depth_mm.shape
@@ -398,18 +284,10 @@ class MapAnythingScaleEstimator:
             if len(valid_ks) < 2:
                 continue
 
-            if self.scale_from == "baselines":
-                results = self._run_batch_baselines(
-                    batch_frames, valid_ks, cam_file_lists,
-                    vggt_exts, H_ma, W_ma,
-                )
-            else:
-                results = self._run_batch(
-                    batch_frames, valid_ks,
-                    cam_file_lists,
-                    vggt_exts, vggt_intrs, depth_mm,
-                    H_vggt, W_vggt, H_ma, W_ma,
-                )
+            results = self._run_batch_baselines(
+                batch_frames, valid_ks, cam_file_lists,
+                vggt_exts, H_ma, W_ma,
+            )
             for fi, s in results.items():
                 scale_arr[fi] = s
 
@@ -457,9 +335,6 @@ def main():
     p.add_argument("--batch_size",        type=int, default=8)
     p.add_argument("--device",            default="cuda")
     p.add_argument("--force",             action="store_true")
-    p.add_argument("--scale_from",        choices=["depth", "baselines"], default="baselines",
-                   help="depth = legacy conditioned depth-ratio (writes mapanything_scale_centered.npy); "
-                        "baselines = images-only camera-baseline ratio (writes mapanything_scale_baseline.npy)")
     args = p.parse_args()
 
     output_root = Path(args.ghost_output_root)
@@ -477,7 +352,6 @@ def main():
         device=args.device,
         batch_size=args.batch_size,
         force=args.force,
-        scale_from=args.scale_from,
     )
 
     t_total = time.perf_counter()

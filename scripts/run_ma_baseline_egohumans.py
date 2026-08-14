@@ -29,7 +29,7 @@ def main():
     ap.add_argument("--batch_size", type=int, default=8)
     args = ap.parse_args()
 
-    est = MapAnythingScaleEstimator(batch_size=args.batch_size, scale_from="baselines")
+    est = MapAnythingScaleEstimator(batch_size=args.batch_size)
 
     n_done = n_skip = n_fail = 0
     for act_dir in sorted(OUT.iterdir()):

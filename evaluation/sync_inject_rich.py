@@ -472,7 +472,7 @@ def main() -> None:
     else:
         ma_device = args.mapanything_device or vggt_devices[0]
         ma_estimator = MapAnythingScaleEstimator(
-            device=ma_device, batch_size=args.mapanything_batch_size, scale_from="baselines",
+            device=ma_device, batch_size=args.mapanything_batch_size,
         )
         logger.info(f"MapAnything: device={ma_device}  batch_size={args.mapanything_batch_size}")
 

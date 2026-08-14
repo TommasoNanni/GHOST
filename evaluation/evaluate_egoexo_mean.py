@@ -726,7 +726,7 @@ def eval_scene(
     Returns dict with keys: w_mpjpe (mm), pa_mpjpe (mm), n_joints, scene.
     Returns None if scene should be skipped.
     """
-    for fname in ("vggt_cameras_centered.npz", "mapanything_scale_centered.npy"):
+    for fname in ("vggt_cameras_centered.npz", "mapanything_scale_baseline.npy"):
         if not (ghost_scene_dir / fname).exists():
             logger.debug(f"{ghost_scene_dir.name}: missing {fname}, skip")
             return None

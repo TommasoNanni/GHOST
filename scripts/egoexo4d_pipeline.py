@@ -323,7 +323,7 @@ def main():
         if (
             (scene_dir / "cross_view_reid.json").exists()
             and (scene_dir / "vggt_cameras_centered.npz").exists()
-            and (ma_estimator is None or (scene_dir / "mapanything_scale_centered.npy").exists())
+            and (ma_estimator is None or (scene_dir / "mapanything_scale_baseline.npy").exists())
         ):
             print(f"Scene {scene.scene_id}: already done, skipping.")
             continue

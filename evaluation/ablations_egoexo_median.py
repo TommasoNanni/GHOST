@@ -821,7 +821,7 @@ def eval_scene(
     """
     if modalities is None:
         modalities = list(_MODALITIES)
-    for fname in ("vggt_cameras_centered.npz", "mapanything_scale_centered.npy"):
+    for fname in ("vggt_cameras_centered.npz", "mapanything_scale_baseline.npy"):
         if not (ghost_scene_dir / fname).exists():
             logger.debug(f"{ghost_scene_dir.name}: missing {fname}, skip")
             return None

@@ -51,7 +51,7 @@ for activity in ACTIVITIES:
                 done = (
                     (out_seq / "cross_view_reid.json").exists()
                     and (out_seq / "vggt_cameras_centered.npz").exists()
-                    and (out_seq / "mapanything_scale_centered.npy").exists()
+                    and (out_seq / "mapanything_scale_baseline.npy").exists()
                 )
                 if not done:
                     remaining += 1
@@ -69,7 +69,7 @@ for activity in ACTIVITIES:
             done = (
                 (out_seq / "cross_view_reid.json").exists()
                 and (out_seq / "vggt_cameras_centered.npz").exists()
-                and (out_seq / "mapanything_scale_centered.npy").exists()
+                and (out_seq / "mapanything_scale_baseline.npy").exists()
             )
             if not done:
                 remaining += 1

@@ -44,7 +44,6 @@ def main():
     args = ap.parse_args()
 
     est = MapAnythingScaleEstimator(batch_size=args.batch_size,
-                                    scale_from="baselines",
                                     force=args.force)
 
     n_done = n_skip = n_fail = 0

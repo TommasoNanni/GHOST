@@ -324,8 +324,7 @@ def main() -> None:
     logger.info(f"out            : {out_root}")
 
     vggt = VGGTPreprocessor(weights=args.vggt_weights, device=devices[0])
-    ma   = MapAnythingScaleEstimator(device=devices[0], batch_size=args.batch_size,
-                                     scale_from="baselines")
+    ma   = MapAnythingScaleEstimator(device=devices[0], batch_size=args.batch_size)
 
     tally = {"done": 0, "reused": 0, "skipped": 0, "failed": 0}
     t_all = time.perf_counter()

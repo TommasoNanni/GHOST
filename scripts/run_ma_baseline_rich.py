@@ -31,7 +31,7 @@ def main():
 
     root = GHOST / f"rich_{args.split}"
     img_root = Path(args.img_root)
-    est = MapAnythingScaleEstimator(batch_size=args.batch_size, scale_from="baselines")
+    est = MapAnythingScaleEstimator(batch_size=args.batch_size)
 
     n_done = n_skip = n_fail = 0
     for scene_dir in sorted(root.iterdir()):

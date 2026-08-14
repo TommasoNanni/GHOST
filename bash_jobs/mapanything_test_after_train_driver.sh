@@ -3,9 +3,9 @@
 # on the TRAIN split is finished (sequencing to avoid GPU/partition contention).
 # Test VGGT is already complete, so the only gate is MapAnything-train.
 #
-# Phase 1 — wait until every TRAIN scene has mapanything_scale_centered.npy.
+# Phase 1 — wait until every TRAIN scene has mapanything_scale_baseline.npy.
 # Phase 2 — resubmit the 1.5h MapAnything test job (ONE at a time) until every
-#           TEST scene has mapanything_scale_centered.npy, then exit.
+#           TEST scene has mapanything_scale_baseline.npy, then exit.
 #
 # Not a SLURM job (no 1.5h limit); mostly sleeps. Launch detached:
 #   nohup bash bash_jobs/mapanything_test_after_train_driver.sh > logs/map_test_driver.log 2>&1 < /dev/null &
@@ -22,7 +22,7 @@ POLL=120
 remaining() {   # $1 = output root → scene dirs lacking the MapAnything scale file
   local n=0 d
   for d in "$1"/*/; do
-    [[ -f "$d/mapanything_scale_centered.npy" ]] || n=$((n + 1))
+    [[ -f "$d/mapanything_scale_baseline.npy" ]] || n=$((n + 1))
   done
   echo "$n"
 }

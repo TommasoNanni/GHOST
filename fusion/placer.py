@@ -279,10 +279,12 @@ class BodyPlacer:
 
         ``mapanything_scale_baseline.npy`` (images-only camera-baseline ratio,
         unbiased on wide-FOV rigs) is the only scale source this pipeline uses.
-        The legacy conditioned depth-ratio scale ("centered") is still produced
-        by preprocessing (``mapanything_scale_centered.npy`` is also a completion
-        marker for several pipeline drivers) but is no longer a selectable scale
-        source here — removed 2026-08-04, no live caller used it.
+        The legacy conditioned depth-ratio scale ("centered") stopped being a
+        selectable source here on 2026-08-04, and on 2026-08-14 the estimator
+        that produced it was deleted from ``preprocessing/run_mapanything.py``
+        and every pipeline sentinel was repointed at the baseline file.
+        ``mapanything_scale_centered.npy`` files predating that still sit in the
+        output dirs; nothing reads them.
 
         Always returns one robust scalar per scene (median of the positive
         per-frame values, broadcast to ``(T,)``). VGGT is run per-frame, so each
@@ -301,7 +303,7 @@ class BodyPlacer:
         if scale.shape != (self.T,):
             import logging
             logging.getLogger(__name__).warning(
-                f"mapanything_scale.npy has shape {scale.shape}, expected ({self.T},) — ignoring"
+                f"{filename} has shape {scale.shape}, expected ({self.T},) — ignoring"
             )
             return None
         valid = scale[scale > 0]
@@ -537,6 +539,7 @@ class BodyPlacer:
         min_cams: int = 2,
         min_joints: int = 3,
         smooth_window: int = 15,
+        frames: set[int] | None = None,
     ) -> tuple[dict[int, dict[int, np.ndarray]], dict[int, dict[int, np.ndarray]]]:
         """Estimate root translation + global orient via multi-camera DLT + Procrustes.
 
@@ -564,6 +567,13 @@ class BodyPlacer:
                 by :func:`build_fusion_tensors`.
             min_cams: Minimum cameras needed to DLT-triangulate a joint.
             min_joints: Minimum triangulated joints needed to run Procrustes.
+            frames: Global frame indices to solve, or ``None`` (default) for all
+                of them.  One SMPL-X forward runs per (person, frame), so a whole
+                sequence is minutes of CPU; a caller that only needs a few frames
+                — a figure, a probe — can pass them here.  ``smooth_window`` is a
+                Savitzky-Golay filter of half-width ``smooth_window // 2``, so a
+                window at least that much wider than the frames of interest
+                reproduces the full-sequence result on them exactly.
 
         Returns:
             translations : ``{pid: {global_frame_idx: pelvis_world (3,)}}``
@@ -613,6 +623,8 @@ class BodyPlacer:
             orient_out: dict[int, np.ndarray] = {}
 
             for global_t in sorted(all_frames):
+                if frames is not None and global_t not in frames:
+                    continue
                 vggt_t = global_t - frame_start
                 if vggt_t < 0 or vggt_t >= self.T:
                     continue

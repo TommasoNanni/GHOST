@@ -416,7 +416,7 @@ class ReidCameraPass:
             logger.warning(f"[v7-CAM] MapAnything unavailable ({e}); metric scale = 1.0")
             return 1.0, False
 
-        est = MapAnythingScaleEstimator(device=self.device, scale_from="baselines")
+        est = MapAnythingScaleEstimator(device=self.device)
         est._load_model()
 
         picks = tuples[:: max(1, len(tuples) // self._N_SCALE_TUPLES)][: self._N_SCALE_TUPLES]

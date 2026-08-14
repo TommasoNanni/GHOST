@@ -1,6 +1,6 @@
 #!/bin/bash
 # Keeps submitting egoexo4d_pipeline SLURM jobs until every scene has all outputs.
-# A scene is "done" when mapanything_scale_centered.npy exists (last file-producing step).
+# A scene is "done" when mapanything_scale_baseline.npy exists (last file-producing step).
 #
 # Usage:
 #   nohup bash bash_jobs/nohup_egoexo4d.sh &
@@ -22,7 +22,7 @@ n_done() {
     local count=0
     for d in "$FRAMES_ROOT"/*/; do
         scene=$(basename "$d")
-        [[ -f "$OUTPUT_DIR/$scene/mapanything_scale_centered.npy" ]] && count=$((count + 1))
+        [[ -f "$OUTPUT_DIR/$scene/mapanything_scale_baseline.npy" ]] && count=$((count + 1))
     done
     echo "$count"
 }

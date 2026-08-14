@@ -65,7 +65,7 @@ scene_done() {  # $1=act $2=scene
     local d="${OUT}/$1/$2"
     [ -f "${d}/cross_view_reid.json" ] && \
     [ -f "${d}/vggt_cameras_centered.npz" ] && \
-    [ -f "${d}/mapanything_scale_centered.npy" ]
+    [ -f "${d}/mapanything_scale_baseline.npy" ]
 }
 
 JOB_PREFIX="egn"

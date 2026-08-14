@@ -19,7 +19,7 @@ scene_done() {
     local scene_dir="${OUTPUT_DIR}/${scene}"
     [ -f "${scene_dir}/cross_view_reid.json" ] && \
     [ -f "${scene_dir}/vggt_cameras_centered.npz" ] && \
-    [ -f "${scene_dir}/mapanything_scale_centered.npy" ]
+    [ -f "${scene_dir}/mapanything_scale_baseline.npy" ]
 }
 
 wait_for_job() {

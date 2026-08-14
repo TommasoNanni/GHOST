@@ -6,7 +6,7 @@
 #           job is still queued/running), so MapAnything reads correct VGGT
 #           outputs and doesn't fight VGGT for the debug partition.
 # Phase 2 — resubmit the 1.5h MapAnything job (ONE at a time) until every
-#           train scene has mapanything_scale_centered.npy, then exit.
+#           train scene has mapanything_scale_baseline.npy, then exit.
 #
 # Not a SLURM job (no 1.5h limit); mostly sleeps. Launch detached:
 #   nohup bash bash_jobs/mapanything_train_driver.sh > logs/map_train_driver.log 2>&1 < /dev/null &
@@ -32,7 +32,7 @@ vggt_ready() {   # true once all VGGT outputs exist and no VGGT job is active
 map_remaining() {   # scene dirs lacking the MapAnything scale file
   local n=0 d
   for d in "$OUT"/*/; do
-    [[ -f "$d/mapanything_scale_centered.npy" ]] || n=$((n + 1))
+    [[ -f "$d/mapanything_scale_baseline.npy" ]] || n=$((n + 1))
   done
   echo "$n"
 }

@@ -415,8 +415,6 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device,
         scale = placer.load_mapanything_scale(filename="mapanything_scale_baseline.npy")
         if scale is None:
             raise RuntimeError("mapanything_scale_baseline.npy missing/mismatched")
-        if scale is None:
-            scale = np.ones(placer.T, dtype=np.float32)
         # W† camera alignment must use the SAME scale the placer placed with
         ma_scale = float(np.median(np.asarray(scale)))
 
