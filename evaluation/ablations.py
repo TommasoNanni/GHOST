@@ -7,6 +7,13 @@ ground truth, to attribute total error to a specific stage of the pipeline:
   M3: GT-cam   + GT-scale   + pred-pose   (removes camera error too)
   M4: GT-cam   + GT-scale   + GT-pose     (full oracle — fusion-model ceiling)
 
+Body model: M2/M3 FK the prediction with the NEUTRAL SMPL-X model, matching
+production (gender is unknown at inference time); GT joints are always FK'd
+gendered. M4 substitutes RICH GT pose+betas, which are defined against the
+GENDERED template, so M4 FKs the prediction gendered as well — otherwise the
+"oracle" would carry an irreducible neutral-vs-gendered shape mismatch.
+Consequence: the M3->M4 step bundles GT pose + GT betas + gendered template.
+
 Reading the table: M2-M9(prod) gap = scale error. M3-M2 gap = camera error.
 M4-M3 gap = pose/fusion error (the irreducible floor given perfect placement).
 
@@ -638,7 +645,7 @@ def load_fusion_model(checkpoint: Path, device: torch.device) -> PoseFusionModul
 _MODALITY_LABELS = {
     2: "M2: pred-cam + GT-scale   + pred-pose",
     3: "M3: GT-cam   + GT-scale   + pred-pose",
-    4: "M4: GT-cam   + GT-scale   + GT-pose  (oracle)",
+    4: "M4: GT-cam   + GT-scale   + GT-pose  (oracle, gendered FK)",
 }
 
 
@@ -1020,15 +1027,16 @@ def evaluate_scene(
         "scale_err_pct": scale_err_pct,
     }
 
-    # NOTE: patched onto `placer_neutral`, not `placer` — placer_neutral is the
-    # instance that actually runs estimate_procrustes_dlt_mhr below (all of
-    # M2/M3/M4 use the neutral model), so the GT-camera substitution has to
-    # land on its .extrinsics/.intrinsics/.cam_valid to take effect. BodyPlacer
+    # NOTE: the GT-camera substitution must be patched onto the SAME BodyPlacer
+    # instance that runs estimate_procrustes_dlt_mhr below — M2/M3 use
+    # `placer_neutral`, M4 uses the gendered `placer` (see the loop). BodyPlacer
     # instances load their own extrinsics independently (fusion/placer.py:198-213)
-    # — patching a different instance is a silent no-op, not a shared-state update.
-    orig_extrinsics = placer_neutral.extrinsics    # save original VGGT extrinsics
-    orig_intrinsics = placer_neutral.intrinsics   # save original VGGT intrinsics
-    orig_cam_valid  = placer_neutral.cam_valid.copy()
+    # — patching a different instance is a silent no-op, not a shared-state
+    # update — so originals are saved per instance, keyed by id().
+    _orig_cam_state = {
+        id(p): (p.extrinsics, p.intrinsics, p.cam_valid.copy())
+        for p in (placer_neutral, placer)
+    }
 
     # All of M2/M3/M4 use GT scale — the scalar swap is unconditional.
     scale_pf_gt = np.full(placer.T, gt_scale_scalar, dtype=np.float32)
@@ -1041,19 +1049,29 @@ def evaluate_scene(
         use_gt_pose = modality == 4
         scale_pf = scale_pf_gt
 
+        # Body model for the PRED side. M2/M3 take their pose+betas from the
+        # pipeline, which never knows subject gender → neutral, matching
+        # production. M4 injects RICH GT pose+betas, and those params are
+        # defined against the GENDERED SMPL-X template (the GT joints at
+        # `_build_gt_joints(placer)` are FK'd gendered too). FK'ing them through
+        # the neutral model leaves a pure template mismatch that no oracle can
+        # remove, so M4 must use the gendered placer to be a real oracle.
+        fk_placer = placer if use_gt_pose else placer_neutral
+        orig_extrinsics, orig_intrinsics, orig_cam_valid = _orig_cam_state[id(fk_placer)]
+
         # Patch extrinsics for GT cameras (intrinsics stay VGGT's — GT intrinsics
         # live in a different calibration space, see _build_gt_camera_extrinsics).
         if use_gt_cams and gt_cam_exts is not None:
-            placer_neutral.extrinsics = gt_cam_exts.astype(np.float32)
+            fk_placer.extrinsics = gt_cam_exts.astype(np.float32)
             # With GT cameras metric scale is 1.0
-            scale_pf = np.ones(placer_neutral.T, dtype=np.float32)
+            scale_pf = np.ones(fk_placer.T, dtype=np.float32)
             # Cameras with no GT calibration (e.g. cam_10) have all-zero extrinsics
             # — mark them invalid so DLT doesn't produce NaN from a zero P matrix.
             filled = np.any(gt_cam_exts != 0, axis=(0, 2, 3))  # (K,) bool
-            placer_neutral.cam_valid = orig_cam_valid & filled[np.newaxis, :]
+            fk_placer.cam_valid = orig_cam_valid & filled[np.newaxis, :]
         else:
-            placer_neutral.extrinsics = orig_extrinsics
-            placer_neutral.intrinsics = orig_intrinsics
+            fk_placer.extrinsics = orig_extrinsics
+            fk_placer.intrinsics = orig_intrinsics
 
         pose_for_placer = gt_fused_pose if use_gt_pose else fused_pose
         betas_for_placer = (gt_betas_by_pid if use_gt_pose
@@ -1063,7 +1081,7 @@ def evaluate_scene(
         }
 
         try:
-            trans_dict, orient_dict = placer_neutral.estimate_procrustes_dlt_mhr(
+            trans_dict, orient_dict = fk_placer.estimate_procrustes_dlt_mhr(
                 scale=scale_pf,
                 all_pids=set(all_pids),
                 pred_betas_by_pid=betas_for_placer,
@@ -1074,9 +1092,9 @@ def evaluate_scene(
             logger.warning(f"  [{label}] Placer failed: {e}")
             continue
         finally:
-            placer_neutral.extrinsics = orig_extrinsics  # always restore
-            placer_neutral.intrinsics = orig_intrinsics
-            placer_neutral.cam_valid  = orig_cam_valid
+            fk_placer.extrinsics = orig_extrinsics  # always restore
+            fk_placer.intrinsics = orig_intrinsics
+            fk_placer.cam_valid  = orig_cam_valid
 
         # Build pred joints
         pred_joints = np.full((T, P, J_body, 3), np.nan, dtype=np.float32)
@@ -1093,7 +1111,7 @@ def evaluate_scene(
                 if not (0 <= t_rel < T) or R_mat is None:
                     continue
                 body_pose_aa = _6d_to_aa(pose_for_placer[t_rel, p_slot, :21])
-                J_can_smplx, V_can = placer_neutral._smplx_fk(
+                J_can_smplx, V_can = fk_placer._smplx_fk(
                     betas_p[np.newaxis],
                     body_pose_aa.reshape(63)[np.newaxis],
                     np.zeros((1, 3), dtype=np.float32),
@@ -1141,7 +1159,9 @@ def evaluate_scene(
                     continue
                 if np.isfinite(pred_roots_m[t_rel, slot]).all():
                     # GT pelvis = J[0] + transl (not just transl — canonical J[0] is ~33cm offset)
-                    _, V_gt_body = placer_neutral._smplx_fk(
+                    # GT params are gendered — FK with `placer`, matching
+                    # _build_gt_joints() above (was placer_neutral: inconsistent).
+                    _, V_gt_body = placer._smplx_fk(
                         params["betas"][np.newaxis],
                         params["body_pose"][np.newaxis],
                         params["global_orient"][np.newaxis],
