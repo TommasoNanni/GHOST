@@ -334,6 +334,8 @@ def main(
     dataset:            str  = "rich",
     viewer:             str  = "rerun",
     frames_dir:         Path | None = None,
+    frame_center:       int | None = None,
+    frame_halfwidth:    int  = 20,
 ) -> None:
     """
     Parameters
@@ -355,6 +357,17 @@ def main(
                      drops crop_meta, and has no GT overlay.  Cameras come from
                      the placer's VGGT cameras.
     viewer         : "rerun" (visualize_rerun) | "viser" (visualize_fusion)
+    frame_center   : place only a window of frames around this global frame index
+                     instead of the whole sequence.  The placer costs one SMPL-X
+                     forward per (person, frame), so a long scene is minutes of
+                     CPU; a figure that needs one frame does not have to pay it.
+                     Frames outside the window stay NaN and the predictions land
+                     in "<scene>_f<center>w<halfwidth>.npz" so a windowed run can
+                     never overwrite a full one.
+    frame_halfwidth: half-width of that window (default 20).  The placer smooths
+                     trajectories with a Savitzky-Golay filter of half-width 7,
+                     so anything comfortably above that reproduces the
+                     full-sequence result at frame_center exactly.
     """
     scene_dir = Path(scenes_root) / scene
     if not scene_dir.exists():
@@ -442,6 +455,15 @@ def main(
         _centered_root = Path(centered_data_root) if centered_data_root is not None else Path(CONFIG.data.rich_data_root)
         crop_meta_path = _centered_root / scene / "crop_meta.json"
 
+    place_frames: set[int] | None = None
+    if frame_center is not None:
+        place_frames = set(range(frame_center - frame_halfwidth,
+                                 frame_center + frame_halfwidth + 1))
+        logger.info(
+            f"  placing frames {min(place_frames)}–{max(place_frames)} only "
+            f"({len(place_frames)} of {T_scene}); the rest stay NaN"
+        )
+
     logger.info("Running BodyPlacer (Procrustes DLT) …")
     root_translation, orient_R, vggt_cameras = _run_placer(
         scene_dir      = work_dir,
@@ -453,6 +475,7 @@ def main(
         smplx_model_path = _smplx_arg,
         fused_pose     = pred_pose_54,   # (T, P, 54, 6) fused pose for Procrustes FK
         crop_meta_path = crop_meta_path,
+        frames         = place_frames,
     )
     # orient_R: (T, P, 3, 3) — NaN where Procrustes DLT failed
 
@@ -495,7 +518,9 @@ def main(
     # ── save predictions ──────────────────────────────────────────────────────
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"{scene}.npz"
+    stem = (scene if frame_center is None
+            else f"{scene}_f{frame_center}w{frame_halfwidth}")
+    out_file = out_dir / f"{stem}.npz"
     np.savez_compressed(str(out_file), **arrays)
     logger.info(f"Predictions saved → {out_file}  (keys: {list(arrays)})")
 

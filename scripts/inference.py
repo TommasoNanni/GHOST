@@ -304,6 +304,7 @@ def _run_placer(
     smplx_model_path: Path,
     fused_pose: np.ndarray,
     crop_meta_path: Path | None = None,
+    frames: set[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Estimate world-space root translation + orientation via Procrustes DLT.
 
@@ -315,6 +316,8 @@ def _run_placer(
         fused_pose:  (T, P, 54, 6) fused body pose from the fusion model (6D).
                      Used for the Procrustes FK step; falls back to raw SAM3D
                      per-camera body_pose if None.
+        frames:      global frame indices to place, or None (default) for the
+                     whole sequence.  Everything outside stays NaN.
 
     Returns
     -------
@@ -379,6 +382,7 @@ def _run_placer(
         pred_betas_by_pid=betas_by_pid,
         fused_pose_by_pid=fused_pose_by_pid,
         frame_start=frame_start,
+        frames=frames,
     )
 
     root_translation = np.full((T, P, 3),    np.nan, dtype=np.float32)
@@ -430,6 +434,8 @@ def _run_placer(
             if fi is None or tr is None or go is None:
                 continue
             for i, gf in enumerate(fi.astype(int)):
+                if frames is not None and int(gf) not in frames:
+                    continue
                 t_rel = int(gf) - frame_start
                 if not (0 <= t_rel < T):
                     continue
