@@ -563,9 +563,14 @@ def predict_scene(ghost_scene: Path, frames, pids, fusion_model, device, smplx_a
             scale = np.full(placer.T, scale_used, dtype=np.float32)
 
             try:
+                # smooth_window=0: no Savitzky-Golay on the root trajectory. The
+                # placer default (w=15, centred → ±7 future frames) is a RICH
+                # choice; EgoHumans metrics are single-frame, so it must match
+                # evaluate_egohumans_median.py exactly.
                 trans_dict, orient_dict = placer.estimate_procrustes_dlt_mhr(
                     scale=scale, all_pids=set(pids), pred_betas_by_pid=betas_by_pid,
-                    fused_pose_by_pid=fused_pose_by_pid, frame_start=fmin)
+                    fused_pose_by_pid=fused_pose_by_pid, frame_start=fmin,
+                    smooth_window=0)
             except Exception as e:
                 logger.warning(f"{ghost_scene.name}: [M{modality}] placer failed — {e}")
                 continue

@@ -443,9 +443,16 @@ def predict_scene(ghost_scene: Path, frames, pids, device,
         # W† camera alignment must use the SAME scale the placer placed with
         ma_scale = float(np.median(np.asarray(scale)))
 
+        # smooth_window=0: the placer defaults to a Savitzky-Golay filter (w=15,
+        # centred, so ±7 FUTURE frames) on each pid's root trajectory. That default
+        # was ablated for RICH, where nothing claims frame independence. Here the
+        # metrics are CHROMM's "single-frame setting" (see module docstring) and are
+        # printed against CHROMM's single-frame W†/GA, so temporal smoothing of the
+        # root is not allowed: it would flatter W† and GA (PA is translation-free).
         trans_dict, orient_dict = placer.estimate_procrustes_dlt_mhr(
             scale=scale, all_pids=set(pids), pred_betas_by_pid=betas_by_pid,
-            fused_pose_by_pid=fused_pose_by_pid, frame_start=fmin)
+            fused_pose_by_pid=fused_pose_by_pid, frame_start=fmin,
+            smooth_window=0)
 
         reg = smpl24_regressor()
         pred_coco = {p: {} for p in pids}
