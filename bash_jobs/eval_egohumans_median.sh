@@ -30,7 +30,11 @@ cd /users/tnanni/ghost
 ulimit -c 0
 
 ACTIVITY="${ACTIVITY:?set ACTIVITY, e.g. 06_badminton}"
-SCALE="${SCALE:-pred}"
+# SCALE is accepted (drivers still export it) but NOT passed to the Python: the
+# scale source stopped being selectable on 2026-08-04 — load_mapanything_scale
+# always reads mapanything_scale_baseline.npy. Passing --scale made argparse
+# abort the job instantly ("unrecognized arguments: --scale baseline").
+SCALE="${SCALE:-baseline}"
 DUMP_DIR="${DUMP_DIR:-eval_egohumans/dumps_median/${ACTIVITY}}"
 GHOST_ROOT="/iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_new/${ACTIVITY}"
 INNER="${GT_INNER-media/rawalk/disk1/rawalk/datasets/ego_exo/camera_ready}"
@@ -51,7 +55,7 @@ else
 fi
 
 ARGS=(--ghost_root "$GHOST_ROOT" --gt_root "$GT_ROOT"
-      --scale "$SCALE" --dump_dir "$DUMP_DIR")
+      --dump_dir "$DUMP_DIR")
 [ -n "${SCENE:-}" ] && ARGS+=(--scene "$SCENE")
 
 pixi run python evaluation/evaluate_egohumans_median.py "${ARGS[@]}"

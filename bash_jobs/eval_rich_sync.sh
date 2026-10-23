@@ -34,6 +34,10 @@ echo "Job ID: $SLURM_JOB_ID  |  Start: $(date)"
 echo ""
 
 RICH_ROOT=/capstor/scratch/cscs/tnanni/datasets/rich
+# Must match the SYNC_ROOT of the STEP 1 job whose sweep you are scoring --
+# this script rglobs every sync_meta.json under it, so two max_shift sweeps
+# sharing a root would be pooled into one table.
+SYNC_ROOT="${SYNC_ROOT:-/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync}"
 CENTERED_SQSH="${RICH_ROOT}/centered_${GT_SPLIT:-test}.sqsh"
 CENTERED_MNT="/tmp/centered_${GT_SPLIT:-test}_${SLURM_JOB_ID}"
 
@@ -56,7 +60,7 @@ if [ -n "${MAX_TRIALS:-}" ]; then
 fi
 
 pixi run python evaluation/evaluate_rich_sync.py \
-    --sync_root     /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync \
+    --sync_root     "$SYNC_ROOT" \
     --rich_root     "$RICH_ROOT" \
     --centered_root "$CENTERED_MNT" \
     --gt_split      "${GT_SPLIT:-test}" \

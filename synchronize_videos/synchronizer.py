@@ -140,12 +140,13 @@ class Synchronizer:
         """
         Estimate temporal offset via cross-correlation with median cost.
 
-        For each candidate offset k (seq_2 starts k frames after seq_1),
-        extract the overlapping frames and compute the median per-frame cost.
-        The offset with the lowest median is returned.
+        For each candidate offset k, frame i of seq_1 is paired with frame
+        i + k of seq_2; the median per-frame cost along that diagonal is
+        scored and the k with the lowest median is returned.
 
-        offset > 0 → seq_2 starts later than seq_1.
-        offset < 0 → seq_2 starts earlier than seq_1.
+        k is the diagonal index n - m, so k ≈ t_start_1 - t_start_2:
+        k > 0 → seq_2 starts *earlier* than seq_1.
+        k < 0 → seq_2 starts *later*  than seq_1.
         """
         cost = self._compute_cost_matrix(
             body_joints_1, body_joints_2, confidences_1, confidences_2
@@ -193,8 +194,9 @@ class Synchronizer:
         confidences_2: list[torch.Tensor],  # P elements, each T2 x J
     ) -> float:
         """
-        Returns the estimated temporal offset (in frames) between sequence 2
-        and sequence 1, i.e.  offset ≈ t_start_2 - t_start_1.
+        Returns the estimated diagonal offset (in frames) between sequence 2
+        and sequence 1: the k for which frame i of seq_1 matches frame i + k
+        of seq_2, i.e.  offset ≈ t_start_1 - t_start_2.
 
         Sums the per-person median costs at each candidate offset k and picks
         the k that minimises the joint cost across all persons. This avoids
@@ -288,7 +290,10 @@ class Synchronizer:
         body_joints_list: list[list[torch.Tensor]],  # K videos, each containing P person tensors of shape T_i x J x 3
         confidences_list: list[list[torch.Tensor]],  # K videos, each containing P person tensors of shape T_i x J
     ) -> torch.Tensor:
-        """Returns a K×K antisymmetric float tensor of scalar offsets."""
+        """Returns a K×K antisymmetric float tensor of scalar offsets.
+
+        offset_matrix[i, j] ≈ t_start_i - t_start_j (see estimate_couple_offset).
+        """
         K = len(body_joints_list)
         assert K == len(confidences_list), "Number of body joints and confidence sets must match"
 
@@ -330,7 +335,19 @@ class Synchronizer:
         offset_matrix: torch.Tensor,
         weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Weighted LSE solver (weights from cycle_consistency_weights)."""
+        """Weighted LSE solver (weights from cycle_consistency_weights).
+
+        Solves  min Σ_ij w_ij (t_j - t_i - offset_matrix[i, j])²  with t_0 = 0.
+        Since offset_matrix[i, j] ≈ start_i - start_j, the recovered t is the
+        NEGATED start index. After the final re-anchoring, t_k = max_j start_j
+        - start_k ≥ 0: the number of leading frames to DROP from video k so
+        that all videos begin together (evaluation/alignment_experiments_multi.py
+        slices at exactly this value).
+
+        Consumers that instead shift frame_indices onto the common timeline
+        must ADD -t_k, not t_k — see main.py, which negates before writing
+        temporal_offsets.json for data/fusion_dataset.py._apply_temporal_offsets.
+        """
         K = offset_matrix.shape[0]
         num_pairs = K * (K - 1) // 2
         A = torch.zeros(num_pairs, K - 1, device=self.device)

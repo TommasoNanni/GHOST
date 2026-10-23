@@ -43,6 +43,10 @@ echo ""
 # node-local (/tmp). sync_inject_rich.py needs the actual JPEGs (not just
 # crop_meta.json), since it re-runs VGGT + MapAnything on them.
 RICH_ROOT=/capstor/scratch/cscs/tnanni/datasets/rich
+# Destination root for the built trial dirs. Override per max_shift setting so a
+# new sweep never lands in (and resume-skips) a previous sweep's trials --
+# sync_meta.json existence is the only resume key, max_shift is not checked.
+SYNC_ROOT="${SYNC_ROOT:-/iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync}"
 CENTERED_SQSH="${RICH_ROOT}/centered_${GT_SPLIT:-test}.sqsh"
 CENTERED_MNT="/tmp/centered_${GT_SPLIT:-test}_${SLURM_JOB_ID}"
 
@@ -69,7 +73,7 @@ pixi run python evaluation/sync_inject_rich.py \
     --rich_root         "$RICH_ROOT" \
     --centered_root     "$CENTERED_MNT" \
     --gt_split          "${GT_SPLIT:-test}" \
-    --sync_output_root  /iopsstor/scratch/cscs/tnanni/ghost_outputs/rich_test_sync \
+    --sync_output_root  "$SYNC_ROOT" \
     --vggt_weights      checkpoints/vggt_omega/vggt_omega_1b_512.pt \
     --max_shift         "${MAX_SHIFT:-45}" \
     --n_trials          "${N_TRIALS:-1}" \

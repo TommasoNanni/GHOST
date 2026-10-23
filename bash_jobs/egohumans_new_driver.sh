@@ -15,8 +15,10 @@ cd /users/tnanni/ghost
 
 SQSH_ROOT="/capstor/scratch/cscs/tnanni/datasets"
 INNER="media/rawalk/disk1/rawalk/datasets/ego_exo/camera_ready"
-OUT="/iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_new"
+OUT="/iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_prod"
 SCENE_JOB="bash_jobs/egohumans_new_scene.sh"
+# Downloaded raw tree on iopsstor — preferred over the sqsh for every activity.
+RAW_DL="/iopsstor/scratch/cscs/tnanni/egohumans_raw"
 # Activities already extracted (unsquashed) in /iopsstor — enumerated from disk, no mount.
 declare -A EXTRACTED_ROOTS=(
     [06_badminton]="/iopsstor/scratch/cscs/tnanni/backup/badminton_egohumans/06_badminton"
@@ -33,6 +35,10 @@ log() { echo "$(date '+%F %T') $*" | tee -a logs/egonew_driver.log; }
 # List scene names for an activity by mounting its sqsh (plain or _a/_b) read-only.
 list_scenes() {
     local act="$1"
+    if [ -d "$RAW_DL/$INNER/$act" ]; then
+        for d in "$RAW_DL/$INNER/$act"/*/; do [ -d "$d" ] && basename "$d"; done
+        return
+    fi
     local ext="${EXTRACTED_ROOTS[$act]:-}"
     if [ -n "$ext" ] && [ -d "$ext/$INNER/$act" ]; then
         for d in "$ext/$INNER/$act"/*/; do [ -d "$d" ] && basename "$d"; done
@@ -62,8 +68,9 @@ PYEOF
 }
 
 scene_done() {  # $1=act $2=scene
+    # gt_reid.json is the production pipeline's ReID marker (cross_view_reid.json was v4's).
     local d="${OUT}/$1/$2"
-    [ -f "${d}/cross_view_reid.json" ] && \
+    [ -f "${d}/gt_reid.json" ] && \
     [ -f "${d}/vggt_cameras_centered.npz" ] && \
     [ -f "${d}/mapanything_scale_baseline.npy" ]
 }

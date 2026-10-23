@@ -1,16 +1,17 @@
 """
 Runner for the temporal-synchronization ablation study.
 
-Evaluates the four variants of evaluation.sync_ablation (full, no_confidence,
-root_relative, mean_diagonal) on the RICH and EgoHumans scene lists of the
-existing sync experiments, at max_shift ∈ {30, 60, 75}, 10 trials per scene.
+Evaluates the seven variants of evaluation.sync_ablation (full, no_confidence,
+root_relative, mean_diagonal, no_cycle, ref_cam, body_only) on the RICH and
+EgoHumans scene lists of the existing sync experiments, at
+max_shift ∈ {30, 60, 75}, 10 trials per scene.
 
 Seeding replicates the existing experiments exactly: per (dataset, max_shift)
 one np.random.default_rng(42) advances over the scenes in sorted(SCENE_PIDS)
 order with the same draw order and sizes as alignment_experiments_multi[_
 egohumans].run_scene — so the injected shifts and end cuts are bit-identical
 to the published GHOST runs at the same max_shift, and identical across all
-four variants (draws are made once per trial, every variant sees the same
+variants (draws are made once per trial, every variant sees the same
 slices).
 
 Coverage counts scenes whose every trial was protocol-rejected in the

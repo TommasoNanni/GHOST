@@ -27,7 +27,10 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 SQSH_ROOT="/capstor/scratch/cscs/tnanni/datasets"
 INNER="media/rawalk/disk1/rawalk/datasets/ego_exo/camera_ready"
 TEMP="/iopsstor/scratch/cscs/tnanni/temp_egohumans"
-OUT="/iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_new"
+OUT="/iopsstor/scratch/cscs/tnanni/ghost_outputs/egohumans_prod"
+# Downloaded raw tree on iopsstor. Preferred over the sqsh when the scene is present:
+# it carries processed_data/ (GT) and colmap/, which the production ReID needs.
+RAW_DL="/iopsstor/scratch/cscs/tnanni/egohumans_raw"
 MNT_BASE="/tmp/egonew_${ACT}_${SLURM_JOB_ID}"
 
 mkdir -p logs "$TEMP" "$OUT"
@@ -51,7 +54,9 @@ try_mount() {  # $1 = sqsh path, $2 = mountpoint
     [ -d "$2/$INNER/$ACT/$SCENE" ]
 }
 
-if [ -n "${EXTRACTED_ROOTS[$ACT]:-}" ] && [ -d "${EXTRACTED_ROOTS[$ACT]}/$INNER/$ACT/$SCENE" ]; then
+if [ -d "$RAW_DL/$INNER/$ACT/$SCENE" ]; then
+    RAW_ROOT="$RAW_DL"; echo "Using downloaded raw tree (no mount): $RAW_ROOT"
+elif [ -n "${EXTRACTED_ROOTS[$ACT]:-}" ] && [ -d "${EXTRACTED_ROOTS[$ACT]}/$INNER/$ACT/$SCENE" ]; then
     RAW_ROOT="${EXTRACTED_ROOTS[$ACT]}"; echo "Using extracted data (no mount): $RAW_ROOT"
 elif try_mount "$SQSH_ROOT/egohumans_${ACT}.sqsh" "${MNT_BASE}"; then
     RAW_ROOT="${MNT_BASE}"
@@ -70,11 +75,15 @@ pixi run python scripts/prep_undistort_egohumans.py \
     --raw-root "$RAW_ROOT" --activity "$ACT" --seq "$SCENE" \
     --out-root "$TEMP" --max-side 1440
 
-# 2) full pipeline on the re-undistorted scene (seg -> SAM3D -> ReID -> VGGT -> MapAnything)
-pixi run python scripts/egohumans_pipeline.py \
+# 2) full pipeline on the re-undistorted scene (seg -> SAM3D -> GT ReID -> VGGT -> MapAnything)
+# --gt-root is the RAW tree: the undistorted TEMP holds images only, while the GT
+# (processed_data/poses2d) and colmap intrinsics the production ReID needs live in the raw one.
+pixi run python scripts/egohumans_pipeline_production.py \
     --data-root  "$TEMP" \
+    --gt-root    "$RAW_ROOT" \
     --output-dir "$OUT" \
     --activity   "$ACT" \
-    --seq        "$SCENE"
+    --seq        "$SCENE" \
+    --max-side   1440
 
 echo "Done $ACT/$SCENE: $(date)"

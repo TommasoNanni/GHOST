@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #SBATCH --job-name=rich_dl_test
-#SBATCH --account=a0185
+#SBATCH --account=a0287
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
@@ -12,8 +12,9 @@
 #SBATCH --mail-user=tnanni@ethz.ch
 #SBATCH --partition=normal
 
-# Download missing RICH test scenes, convert BMP→JPEG, resize to 1440px,
-# then rebuild test_dataset.sqsh.
+# Download all 52 RICH test scenes, convert BMP→JPEG, resize to 840px max side
+# (the resolution used for all published RICH test numbers). Plain directories
+# on iopsstor, no squash. Resumable: resubmit if it hits the time limit.
 #
 # Submit with credentials:
 #   sbatch --export=ALL,RICH_USER=youruser,RICH_PASS=yourpass bash_jobs/download_rich_test.sh
@@ -49,25 +50,11 @@ PASSWORD=$(urle "$PASSWORD")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Raw extracted + BMP→JPEG converted scenes (original resolution)
-STAGING=/capstor/scratch/cscs/tnanni/rich_test_staging
-# Resized to 1440px — this is what goes into the squash
-STAGING_RESIZED=/capstor/scratch/cscs/tnanni/rich_test_staging_1440
-OLD_SQSH=/capstor/scratch/cscs/tnanni/datasets/rich/test_dataset.sqsh
-NEW_SQSH=/capstor/scratch/cscs/tnanni/datasets/rich/test_dataset_new.sqsh
-FINAL_SQSH="$OLD_SQSH"
+STAGING=/iopsstor/scratch/cscs/tnanni/datasets/rich/test_raw
+# Resized to 840px max side — input to center_images.py / the pipeline
+STAGING_RESIZED=/iopsstor/scratch/cscs/tnanni/datasets/rich/test_840
 
 mkdir -p "$STAGING" "$STAGING_RESIZED"
-
-# ── Scenes already in the existing squash (skip re-download) ──────────────────
-ALREADY_DONE=(
-    "Gym_010_cooking1"
-    "Gym_010_dips1"
-    "Gym_010_dips2"
-    "Gym_010_lunge1"
-    "Gym_010_lunge2"
-    "Gym_010_mountainclimber1"
-    "Gym_010_mountainclimber2"
-)
 
 # ── All 52 test scenes ────────────────────────────────────────────────────────
 SCENES=(
@@ -125,15 +112,12 @@ SCENES=(
     "ParkingLot2_017_pushup2"
 )
 
-# ── Step 1: Download + convert missing scenes ─────────────────────────────────
+# ── Step 1: Download + convert + resize ───────────────────────────────────────
 for scene_name in "${SCENES[@]}"; do
-    if printf '%s\n' "${ALREADY_DONE[@]}" | grep -qx "$scene_name"; then
-        echo "Skipping download for $scene_name (already in old squash)"
-        continue
-    fi
-
     dest_dir="$STAGING/$scene_name"
-    if [ -d "$dest_dir" ]; then
+    # Marker written only after a full extract, so a job killed mid-extract
+    # re-downloads the scene instead of keeping a partial directory.
+    if [ -f "$dest_dir/.extracted" ]; then
         echo "Skipping download for $scene_name (already staged)"
     else
         tarfile="${scene_name}.tar.gz"
@@ -141,6 +125,7 @@ for scene_name in "${SCENES[@]}"; do
         echo "══════════════════════════════════════════════"
         echo "  Scene: $scene_name"
         echo "══════════════════════════════════════════════"
+        rm -rf "$dest_dir"
 
         echo "[$(date '+%H:%M:%S')] Downloading ..."
         curl -L \
@@ -152,65 +137,42 @@ for scene_name in "${SCENES[@]}"; do
         echo "[$(date '+%H:%M:%S')] Extracting ..."
         tar -xzf "$STAGING/$tarfile" -C "$STAGING" --strip-components=5
         rm "$STAGING/$tarfile"
-
-        echo "[$(date '+%H:%M:%S')] Converting BMP → JPEG ..."
-        CONDA_OVERRIDE_CUDA=12.6 pixi run python -m utilities.convert_rich_bmp_to_jpeg \
-            --root "$dest_dir" \
-            --quality 92 \
-            --workers 16
+        touch "$dest_dir/.extracted"
     fi
 
-    # Resize to 1440px (skip if already done)
-    if [ ! -d "$STAGING_RESIZED/$scene_name" ]; then
-        echo "[$(date '+%H:%M:%S')] Resizing $scene_name to 1440px ..."
-        CONDA_OVERRIDE_CUDA=12.6 pixi run python -m scripts.resize_rich_frames \
-            --data_root "$STAGING" \
-            --output_dir "$STAGING_RESIZED" \
-            --max_side 1440 \
-            --workers 16 \
-            --scene "$scene_name"
-    else
-        echo "Skipping resize for $scene_name (already resized)"
-    fi
+    # Idempotent: only touches remaining .bmp files (BMPs are deleted on success)
+    echo "[$(date '+%H:%M:%S')] Converting BMP → JPEG ..."
+    CONDA_OVERRIDE_CUDA=12.6 pixi run python -m utilities.convert_rich_bmp_to_jpeg \
+        --root "$dest_dir" \
+        --quality 92 \
+        --workers 16
+
+    echo "[$(date '+%H:%M:%S')] Resizing $scene_name to 840px ..."
+    CONDA_OVERRIDE_CUDA=12.6 pixi run python -m scripts.resize_rich_frames \
+        --data_root "$STAGING" \
+        --output_dir "$STAGING_RESIZED" \
+        --max_side 840 \
+        --workers 16 \
+        --skip_existing \
+        --scene "$scene_name"
 done
 
-# ── Step 2: Copy the 7 existing scenes from the old squash + resize ──────────
+# ── Step 2: Frame count report (raw vs resized) ───────────────────────────────
 echo ""
-echo "Copying existing scenes from old squash ..."
-OLD_MOUNT=/tmp/rich_test_old
-mkdir -p "$OLD_MOUNT"
-squashfuse "$OLD_SQSH" "$OLD_MOUNT"
-trap "fusermount -u '$OLD_MOUNT' 2>/dev/null || true" EXIT
-
-for scene_name in "${ALREADY_DONE[@]}"; do
-    if [ ! -d "$STAGING/$scene_name" ]; then
-        echo "  Copying $scene_name from old squash → staging ..."
-        cp -r "$OLD_MOUNT/$scene_name" "$STAGING/$scene_name"
-    fi
-    if [ ! -d "$STAGING_RESIZED/$scene_name" ]; then
-        echo "  Resizing $scene_name to 1440px ..."
-        CONDA_OVERRIDE_CUDA=12.6 pixi run python -m scripts.resize_rich_frames \
-            --data_root "$STAGING" \
-            --output_dir "$STAGING_RESIZED" \
-            --max_side 1440 \
-            --workers 16 \
-            --scene "$scene_name"
-    fi
+echo "══════════════════════════════════════════════"
+echo "  Frame counts per camera (raw / resized)"
+echo "══════════════════════════════════════════════"
+for scene_name in "${SCENES[@]}"; do
+    echo "Scene: $scene_name"
+    for cam_dir in "$STAGING/$scene_name"/cam_*/; do
+        [ -d "$cam_dir" ] || continue
+        cam=$(basename "$cam_dir")
+        n_raw=$(find "$cam_dir" -type f -name "*.jpg" | wc -l)
+        n_res=$(find "$STAGING_RESIZED/$scene_name/$cam" -type f -name "*.jpg" 2>/dev/null | wc -l)
+        flag=""; [ "$n_raw" -ne "$n_res" ] && flag="  <-- MISMATCH"
+        echo "  ${cam}: ${n_raw} / ${n_res}${flag}"
+    done
 done
 
-fusermount -u "$OLD_MOUNT"
-trap - EXIT
-
-# ── Step 3: Rebuild squash from resized scenes ────────────────────────────────
 echo ""
-echo "[$(date '+%H:%M:%S')] Building new squash from $STAGING_RESIZED ..."
-mksquashfs "$STAGING_RESIZED" "$NEW_SQSH" \
-    -comp lz4 -noI -noX -b 1M -processors 16
-
-echo "[$(date '+%H:%M:%S')] Replacing old squash ..."
-mv "$NEW_SQSH" "$FINAL_SQSH"
-
-echo ""
-echo "[$(date '+%H:%M:%S')] All done. Squash rebuilt at $FINAL_SQSH"
-echo "Staging dirs can be deleted once the squash is verified:"
-echo "  rm -rf $STAGING $STAGING_RESIZED"
+echo "[$(date '+%H:%M:%S')] All done. Resized frames in $STAGING_RESIZED"

@@ -541,6 +541,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scene", default="ParkingLot2_009_impro1")
+    ap.add_argument("--ghost-root", type=Path, default=None,
+                    help="scene outputs root; defaults to the rich_test one")
+    ap.add_argument("--img-root", type=Path, default=None,
+                    help="centred-image root; defaults to the centered_test mount")
     ap.add_argument("--rank", action="store_true", help="rank frames by error and exit")
     ap.add_argument("--top", type=int, default=15)
     ap.add_argument("--frame", type=int)
@@ -561,6 +565,14 @@ def main():
     ap.add_argument("--outline-thickness", type=int, default=2)
     ap.add_argument("--gt-outline", choices=["black", "white", "person"], default="white")
     args = ap.parse_args()
+
+    # Train scenes live under a different outputs root and a different image
+    # mount than the test split; everything downstream is identical.
+    global GHOST_ROOT, IMG_ROOT
+    if args.ghost_root is not None:
+        GHOST_ROOT = args.ghost_root
+    if args.img_root is not None:
+        IMG_ROOT = args.img_root
 
     if args.pred is None:
         args.pred = _REPO_ROOT / "fusion_outputs" / f"{args.scene}.npz"

@@ -5,16 +5,23 @@ Reimplements the pairwise-offset estimation of
 synchronize_videos/synchronizer.py (Synchronizer._compute_cost_matrix +
 estimate_couple_offset) and its downstream combination
 (estimate_offset_matrix, cycle_consistency_weights, estimate_initial_times)
-as ONE shared pipeline with two injection points:
+as ONE shared pipeline with four injection points:
 
   1. per-joint distance (what is compared between two frames)
        - SO(3) geodesic distance on axis-angle rotations
-           (full, no_confidence, mean_diagonal)
+           (full, no_confidence, mean_diagonal, no_cycle, ref_cam, body_only)
        - squared Euclidean distance on root-relative FK joint positions
            (root_relative)
   2. diagonal aggregation (how one diagonal collapses to a per-person score)
-       - median over finite entries (full, no_confidence, root_relative)
+       - median over finite entries (all variants except mean_diagonal)
        - mean   over finite entries (mean_diagonal)
+  3. joint set (which joints carry weight in the cost)
+       - 21 body + 30 hand joints (all variants except body_only)
+       - 21 body joints only      (body_only)
+  4. global solve (how K(K-1)/2 pairwise offsets become K start times)
+       - weighted LSE, cycle-consistency weights (all variants except below)
+       - weighted LSE, uniform weights           (no_cycle)
+       - reference camera, row 0 read directly   (ref_cam)
 
 no_confidence is an *input transform*, not a third code path: confidences are
 binarized (1 where conf > 0, else 0), so structural zero-confidence entries —
@@ -29,17 +36,37 @@ NEUTRAL betas (identical skeleton in every camera → no scale normalization
 needed) and ZERO global orient (camera-agnostic pose space), root-relative,
 joints 1-51 — the exact joint set and confidence slice of the rotation path.
 
+body_only is a second *input transform* on the same row pass: raw confidences
+with joints 21-50 (both hands) zeroed. Because the cost is
+Sum(w*d) / (Sum(w) + 1e-8), zeroing a joint's weight is algebraically exact
+joint-subset selection, and the den > 1e-4 guard still marks frame pairs with
+no usable body joint as uninformative.
+
+no_cycle and ref_cam share the offset matrix of `full` bit-for-bit and differ
+only in the global solve, forming a three-rung ladder that separates the two
+effects:
+  ref_cam  uses K-1 measurements (row 0 only), exactly determined, no weights
+  no_cycle uses all K(K-1)/2 measurements, uniform weights
+  full     uses all K(K-1)/2 measurements, cycle-consistency weights
+ref_cam -> no_cycle isolates the gain of the global WLS redundancy;
+no_cycle -> full isolates the gain of the cycle-consistency weighting. The
+ref_cam reference is camera index 0 (loader order); every trial additionally
+records the MAE obtained for each of the K possible references under
+"ref_spread", so anchor sensitivity is measurable rather than assumed.
+
 mean_diagonal averages only the FINITE entries of a diagonal, under the same
 n_finite >= min_overlap gate as full; a diagonal with too few finite entries
 is dropped from that person's candidate set exactly as in full, so no inf
 ever propagates into a mean.
 
-Everything else is written once and shared by all four variants: the cost
+Everything else is written once and shared by all variants: the cost
 normalization (Sum(w*d) / (Sum(w) + 1e-8))**2 with the den > 1e-4 inf guard,
 the diagonal scan over k in [-2*max_shift, 2*max_shift], both min_overlap
 gates, the union-of-ks cross-person mean, the argmin, the K x K antisymmetric
 offset matrix, the cycle-consistency weights and the weighted least-squares
-solve.
+solve. Variants that agree on (distance, confidence transform, diagonal
+reducer) compute their pairwise offsets ONCE and share the result, so the
+three solve variants cost one matrix, not three.
 
 Nothing in the repo is modified: imports from the two alignment experiment
 modules are read-only reuse of data loading, scene lists and metrics; the
@@ -153,12 +180,26 @@ def _mean_finite(vals: torch.Tensor) -> torch.Tensor:
 # Variant registry
 # ──────────────────────────────────────────────────────────────────────────
 
+# 21 body joints, then 15 + 15 hand joints, in the (T, 51) joint axis.
+N_BODY_JOINTS = 21
+
+
 @dataclass(frozen=True)
 class VariantSpec:
-    distance: str        # "geodesic" | "sq_euclid" — injection point 1
-    conf: str            # "raw" | "binarized"      — input transform (no_confidence)
+    distance: str        # "geodesic" | "sq_euclid"           — injection point 1
+    conf: str            # "raw" | "binarized" | "body_only"  — input transform (2, 3)
     reduce: Callable     # injection point 2
+    solve: str = "wls_cycle"  # "wls_cycle" | "wls_plain" | "ref_cam" — point 4
     uses_positions: bool = False
+
+    @property
+    def matrix_sig(self) -> tuple:
+        """Everything that determines the pairwise offset matrix.
+
+        Variants with equal signatures produce bit-identical matrices and are
+        computed once; the solve variants differ only downstream of it.
+        """
+        return (self.distance, self.conf, self.reduce)
 
 
 VARIANT_SPECS: dict[str, VariantSpec] = {
@@ -166,6 +207,11 @@ VARIANT_SPECS: dict[str, VariantSpec] = {
     "no_confidence": VariantSpec("geodesic",  "binarized", _median_finite),
     "root_relative": VariantSpec("sq_euclid", "raw",       _median_finite, uses_positions=True),
     "mean_diagonal": VariantSpec("geodesic",  "raw",       _mean_finite),
+    # Same offset matrix as `full`; only the global solve changes.
+    "no_cycle":      VariantSpec("geodesic",  "raw",       _median_finite, solve="wls_plain"),
+    "ref_cam":       VariantSpec("geodesic",  "raw",       _median_finite, solve="ref_cam"),
+    # Body joints only (hands dropped from the cost).
+    "body_only":     VariantSpec("geodesic",  "body_only", _median_finite),
 }
 VARIANTS = tuple(VARIANT_SPECS)
 
@@ -177,6 +223,14 @@ def _weight_pair(conf1: torch.Tensor, conf2: torch.Tensor, kind: str):
         # Structural zeros (padding / gap fill / missing-person fill) must stay
         # zero: they mark "no observation", not low model confidence.
         return (conf1 > 0).float(), (conf2 > 0).float()
+    if kind == "body_only":
+        # Joint layout is 21 body + 15 left hand + 15 right hand (SMPL-X
+        # indices 1-51). Zeroing the hand weights removes those joints from
+        # both the numerator and the denominator of the cost, i.e. it is an
+        # exact joint-subset selection rather than a re-weighting.
+        mask = torch.zeros(conf1.shape[-1], device=conf1.device, dtype=conf1.dtype)
+        mask[:N_BODY_JOINTS] = 1.0
+        return conf1 * mask, conf2 * mask
     raise ValueError(f"unknown confidence transform: {kind}")
 
 
@@ -187,12 +241,15 @@ def _weight_pair(conf1: torch.Tensor, conf2: torch.Tensor, kind: str):
 class AblationSynchronizer:
     """The Synchronizer pipeline with the two injection points above.
 
-    All four variants share every line of this class; a variant only selects
-    a distance object, a confidence transform and a diagonal reducer.
-    Cost matrices are shared where the variants coincide: full and
-    mean_diagonal read the SAME matrix (they differ only at the reducer), and
-    no_confidence reuses the per-joint geodesic distances of the same row
-    pass rather than recomputing them.
+    Every variant shares every line of this class; a variant only selects a
+    distance object, a confidence transform and a diagonal reducer (the
+    global solve happens downstream, in solve_times).
+    Work is shared at two levels. Cost matrices: full, mean_diagonal,
+    no_cycle and ref_cam read the SAME matrix, while no_confidence and
+    body_only reuse the per-joint geodesic distances of the same row pass
+    rather than recomputing them. Diagonal scans: variants with an equal
+    VariantSpec.matrix_sig scan the diagonals once and share the offsets, so
+    full, no_cycle and ref_cam cost exactly one pairwise estimation.
     """
 
     def __init__(
@@ -308,7 +365,10 @@ class AblationSynchronizer:
         if need_pos and (pos1 is None or pos2 is None):
             raise ValueError("root_relative requested but no position sequences given")
 
-        per_person: dict[str, list[dict[int, float]]] = {v: [] for v in variants}
+        # Variants with an equal matrix signature are estimated once.
+        sig_of = {v: VARIANT_SPECS[v].matrix_sig for v in variants}
+        uniq_sigs = list(dict.fromkeys(sig_of.values()))  # deterministic order
+        per_person: dict[tuple, list[dict[int, float]]] = {sg: [] for sg in uniq_sigs}
         for p in range(P):
             costs: dict[tuple[str, str], torch.Tensor] = {}
             if geo_kinds:
@@ -321,20 +381,22 @@ class AblationSynchronizer:
                                           SquaredEuclideanDistance, ["raw"])
                 costs[("sq_euclid", "raw")] = pos["raw"]
 
-            for v in variants:
-                spec = VARIANT_SPECS[v]
-                scores = self._diagonal_scores(costs[(spec.distance, spec.conf)], spec.reduce)
+            for sg in uniq_sigs:
+                distance, conf_kind, reduce_fn = sg
+                scores = self._diagonal_scores(costs[(distance, conf_kind)], reduce_fn)
                 if scores:
-                    per_person[v].append(scores)
+                    per_person[sg].append(scores)
 
-        offsets: dict[str, float] = {}
-        for v in variants:
-            off = self._combine_offset(per_person[v])
+        sig_offsets: dict[tuple, float] = {}
+        for sg in uniq_sigs:
+            off = self._combine_offset(per_person[sg])
             if off is None:
-                logger.warning(f"    [{v}] no person had valid overlap — returning offset=0")
+                names = [v for v in variants if sig_of[v] == sg]
+                logger.warning(f"    [{'/'.join(names)}] no person had valid overlap "
+                               f"— returning offset=0")
                 off = 0.0
-            offsets[v] = off
-        return offsets
+            sig_offsets[sg] = off
+        return {v: sig_offsets[sig_of[v]] for v in variants}
 
     def estimate_offset_matrices(
         self,
@@ -405,6 +467,33 @@ def estimate_initial_times(
     if initial_times.min() < 0:
         initial_times = initial_times - initial_times.min()
     return initial_times
+
+
+def reference_camera_times(offset_matrix: torch.Tensor, ref: int = 0) -> torch.Tensor:
+    """Start times from ONE reference camera — no global solve.
+
+    Keeps only the K-1 measurements that touch `ref` and reads them off
+    directly: t_i = O[ref, i], t_ref = 0. That system is exactly determined,
+    so no averaging happens and edge weights are meaningless — the ablation
+    baseline that isolates what the over-determined WLS actually buys.
+    The gauge fix mirrors estimate_initial_times.
+    """
+    times = offset_matrix[ref].clone()
+    if times.min() < 0:
+        times = times - times.min()
+    return times
+
+
+def solve_times(offset_matrix: torch.Tensor, mode: str) -> torch.Tensor:
+    """Global solve, injection point 4."""
+    if mode == "wls_cycle":
+        return estimate_initial_times(offset_matrix,
+                                      cycle_consistency_weights(offset_matrix))
+    if mode == "wls_plain":
+        return estimate_initial_times(offset_matrix, None)
+    if mode == "ref_cam":
+        return reference_camera_times(offset_matrix, ref=0)
+    raise ValueError(f"unknown solve mode: {mode}")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -495,20 +584,31 @@ def run_trial_all_variants(
 
     out: dict[str, dict | None] = {}
     for v in variants:
+        spec = VARIANT_SPECS[v]
         off = mats[v]
-        weights = cycle_consistency_weights(off)
-        est = estimate_initial_times(off, weights).cpu()
+        est = solve_times(off, spec.solve).cpu()
         if torch.isnan(est).any():
             out[v] = None
             continue
         est = est - est.min()
         errors = (est - true_t).abs()
-        out[v] = {
+        entry = {
             "true_times": true_t.tolist(),
             "estimated":  est.tolist(),
             "errors":     errors.tolist(),
             "mae":        errors.mean().item(),
         }
+        if spec.solve == "ref_cam":
+            # Camera 0 is loader order, i.e. arbitrary. Record the MAE of every
+            # possible anchor so the reported row can be checked for anchor
+            # sensitivity instead of being assumed representative.
+            spread = []
+            for r in range(off.shape[0]):
+                t_r = reference_camera_times(off, ref=r).cpu()
+                t_r = t_r - t_r.min()
+                spread.append((t_r - true_t).abs().mean().item())
+            entry["ref_spread"] = spread
+        out[v] = entry
     return out
 
 

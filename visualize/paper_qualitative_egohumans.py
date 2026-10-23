@@ -1038,12 +1038,12 @@ def main():
                          "everything VGGT produced")
     ap.add_argument("--ball-radius", type=int, default=3)
     ap.add_argument("--max-points", type=int, default=250_000)
-    ap.add_argument("--xcam-radius", type=float, default=0.10,
+    ap.add_argument("--xcam-radius", type=float, default=0.0,
                     help="metres: keep a point only if another camera has geometry "
                          "within this distance; 0 disables")
     ap.add_argument("--xcam-min-cams", type=int, default=1,
                     help="how many OTHER cameras must corroborate a point")
-    ap.add_argument("--sor-neighbors", type=int, default=20,
+    ap.add_argument("--sor-neighbors", type=int, default=0,
                     help="statistical outlier removal neighbour count; 0 disables")
     ap.add_argument("--sor-std", type=float, default=2.0,
                     help="statistical outlier removal std-dev ratio")
